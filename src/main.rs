@@ -1360,6 +1360,10 @@ struct Reglages {
     /// La grosseur du texte des messages, relative au texte normal (1 = normal).
     #[serde(default = "un")]
     taille_messages: f32,
+    /// « Liste des conversations plus grosse » : noms, aperçus, heures et
+    /// titres des Head un point et demi plus gros.
+    #[serde(default)]
+    liste_grosse: bool,
     /// « Aperçus des liens » : Jasette va chercher l'aperçu d'une adresse (par
     /// le serveur Jasette, sinon elle-même). Ceux du service restent affichés.
     #[serde(default = "vrai")]
@@ -1458,6 +1462,7 @@ impl Default for Reglages {
             marques_cache: HashMap::new(),
             heures_messages: false,
             taille_messages: 1.,
+            liste_grosse: false,
             apercus_liens: true,
             photos_contacts: true,
             photos_contacts_meta: false,
@@ -5591,11 +5596,11 @@ impl Jasette {
                     .child(
                         div()
                             .w_full()
-                            .h(px(mesures.texte_h))
+                            .h(px(mesures.texte_h + self.plus_liste()))
                             .px(px(3.))
                             .text_center()
                             .truncate()
-                            .text_size(px(mesures.texte))
+                            .text_size(px(mesures.texte + self.plus_liste()))
                             .text_color(if conv.unread { th().texte_fort } else { th().texte })
                             .child(prenom),
                     ),
@@ -5713,7 +5718,7 @@ impl Jasette {
                                     .child(
                                         div()
                                             .truncate()
-                                            .text_size(px(15.))
+                                            .text_size(px(15. + self.plus_liste()))
                                             .text_color(th().texte_fort)
                                             .font_weight(if conv.unread { FontWeight::BOLD } else { FontWeight::SEMIBOLD })
                                             .child(nom),
@@ -5725,7 +5730,7 @@ impl Jasette {
                                             .flex_row()
                                             .items_center()
                                             .gap(px(4.))
-                                            .text_size(px(12.))
+                                            .text_size(px(12. + self.plus_liste()))
                                             .text_color(if conv.unread { th().accent } else { th().texte_pale })
                                             .when(epinglee && !reorganiser, |d| d.child(icone("pin", 12., th().texte_pale)))
                                             .when(!reorganiser, |d| d.child(heure(conv.time, true)))
@@ -5767,7 +5772,7 @@ impl Jasette {
                                         div()
                                             .flex_1()
                                             .truncate()
-                                            .text_size(px(13.))
+                                            .text_size(px(13. + self.plus_liste()))
                                             .child(texte_emoji(
                                                 if conv.preview.trim().is_empty() {
                                                     t("📎 Pièce jointe").to_string()
@@ -7677,6 +7682,11 @@ impl Jasette {
 
     /// Apparence : le choix de la grille du Head, une tuile par grille, avec
     /// son aperçu (un point par avatar, à l'échelle de la liste).
+    /// Les points ajoutés au texte de la liste des conversations (« plus grosse »).
+    fn plus_liste(&self) -> f32 {
+        if self.reglages.liste_grosse { 1.5 } else { 0. }
+    }
+
     /// Le gradateur de la grosseur du texte des messages, avec un aperçu en direct.
     fn choix_taille_messages(&self, cx: &mut Context<Self>) -> Div {
         let actuelle = self.reglages.taille_messages;
@@ -7768,12 +7778,52 @@ impl Jasette {
             .bg(th().fil)
             .child(div().flex().flex_row().child(bulle("On se voit au chalet vendredi ?", false)))
             .child(div().flex().flex_row().justify_end().child(bulle("Oui ! J'apporte les guimauves.", true)));
+        // La case « Liste des conversations plus grosse », juste sous le gradateur.
+        let coche = self.reglages.liste_grosse;
+        let case = div()
+            .id("liste-grosse")
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(10.))
+            .cursor_pointer()
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.reglages.liste_grosse = !this.reglages.liste_grosse;
+                this.reglages.garder();
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .size(px(20.))
+                    .flex_none()
+                    .rounded(rayon(5.))
+                    .border_2()
+                    .border_color(if coche { th().accent } else { th().texte_pale })
+                    .when(coche, |d| d.bg(th().accent))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .when(coche, |d| d.child(icone("check", 14., blanc(1.)))),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(div().text_color(th().texte_fort).child(t("Liste des conversations plus grosse")))
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(th().texte_pale)
+                            .child(t("Noms, aperçus, heures et titres des Head un peu plus gros.")),
+                    ),
+            );
         div()
             .flex()
             .flex_col()
             .gap(px(14.))
             .p(px(14.))
             .child(curseur)
+            .child(case)
             .child(apercu)
             .child(
                 div()
@@ -10739,6 +10789,8 @@ fn t(fr: &'static str) -> &'static str {
         "Archivée par le service : désarchive-la dans son app." => "Archived by the service: unarchive it in its app.",
         "Grille du Head" => "Head grid",
         "Grosseur du texte des messages" => "Message text size",
+        "Liste des conversations plus grosse" => "Larger conversation list",
+        "Noms, aperçus, heures et titres des Head un peu plus gros." => "Slightly larger names, previews, times and Head titles.",
         "Texte des messages :" => "Message text:",
         "On se voit au chalet vendredi ?" => "See you at the cabin Friday?",
         "Oui ! J'apporte les guimauves." => "Yes! I'm bringing marshmallows.",

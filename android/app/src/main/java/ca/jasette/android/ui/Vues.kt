@@ -320,7 +320,7 @@ fun Head(favoris: List<Conv>, choisie: String?, ouvrir: (String) -> Unit, retire
             val case = maxOf(maxWidth / colonnes, CASE_HEAD_MIN)
             // L'avatar suit la case (54 dp pour 80 dp), entre 30 et 54 dp.
             val avatar = (case * (54f / 80f)).coerceIn(30.dp, 54.dp)
-            val police = if (case < 64.dp) 10.sp else if (case < 76.dp) 11.sp else 12.sp
+            val police = Taille.liste(if (case < 64.dp) 10f else if (case < 76.dp) 11f else 12f)
             // Autant de rangées qu'il faut : tous les Head sont montrés.
             Column {
                 for (rangee in favoris.chunked(colonnes)) {
@@ -425,7 +425,7 @@ fun Rangee(
                         c.name.ifEmpty { c.members.joinToString(", ") },
                         color = if (absente.grise()) P.texte else P.texteFort,
                         fontWeight = if (c.unread) FontWeight.Bold else FontWeight.SemiBold,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), fontSize = 16.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), fontSize = Taille.liste(16f),
                     )
                     if (c.e2ee) Icon(Icons.Filled.Lock, t("Chiffré"), tint = P.textePale, modifier = Modifier.size(14.dp))
                     if (epinglee && !reorganiser) {
@@ -435,16 +435,16 @@ fun Rangee(
                     if (!reorganiser) {
                         Spacer(Modifier.width(6.dp))
                         if (indication != null) {
-                            Text(indication, color = P.textePale, fontSize = 12.sp, fontStyle = FontStyle.Italic)
+                            Text(indication, color = P.textePale, fontSize = Taille.liste(12f), fontStyle = FontStyle.Italic)
                         } else {
-                            Text(heureListe(c.time), color = if (c.unread) P.accent else P.textePale, fontSize = 12.sp)
+                            Text(heureListe(c.time), color = if (c.unread) P.accent else P.textePale, fontSize = Taille.liste(12f))
                         }
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         (if (c.fromMe && c.preview.isNotEmpty()) t("Vous : ") else "") + c.preview.replace('\n', ' '),
-                        color = if (c.unread) P.texteFort else P.apercu, fontSize = 14.sp,
+                        color = if (c.unread) P.texteFort else P.apercu, fontSize = Taille.liste(14f),
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                     )
                     if (c.unread) {

@@ -968,6 +968,24 @@ private fun ChoixTailleMessages() {
                 )
             }
             Text(t("Texte des messages : %d %%").format((actuelle * 100).roundToInt()), color = P.textePale, fontSize = 12.sp)
+            // Juste sous le gradateur : la liste des conversations plus grosse.
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            Row(
+                Modifier.fillMaxWidth().clip(forme(10.dp)).clickable { Taille.choisir(ctx, !Taille.listeGrosse) }
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                androidx.compose.material3.Checkbox(
+                    checked = Taille.listeGrosse, onCheckedChange = { Taille.choisir(ctx, it) },
+                    colors = androidx.compose.material3.CheckboxDefaults.colors(
+                        checkedColor = P.accent, uncheckedColor = P.textePale, checkmarkColor = P.surAccent,
+                    ),
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(t("Liste des conversations plus grosse"), color = P.texteFort, fontSize = 15.sp)
+                    Text(t("Noms, aperçus, heures et titres des Head un peu plus gros."), color = P.textePale, fontSize = 12.sp)
+                }
+            }
         }
     }
     Spacer(Modifier.height(4.dp))
