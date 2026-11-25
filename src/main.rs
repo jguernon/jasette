@@ -1027,6 +1027,15 @@ struct Jasette {
     emojis_ouverts: bool,
     /// Le choix de l'avatar « Moi » est ouvert ; la photo que Google Messages connaît.
     menu_avatar: bool,
+    /// Le champ « nouveau message » et les personnes que Messenger propose (id préfixé, nom, photo).
+    nouveau_texte: String,
+    resultats_meta: Vec<(String, String)>,
+    /// La galerie : fermée (None), tous les comptes (Some(None)) ou une conversation.
+    galerie: Option<Option<String>>,
+    galerie_onglet: u8,
+    galerie_chargee: bool,
+    /// Une photo ouverte en grand.
+    apercu: Option<PathBuf>,
     /// Le (i) de l'en-tête : l'heure exacte sous chaque message.
     details_heures: bool,
     avatar_google: Option<PathBuf>,
@@ -1104,6 +1113,12 @@ fn icone_app_grande() -> Arc<gpui::Image> {
         Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, include_bytes!("../assets/png/jasette-256.png").to_vec()))
     })
     .clone()
+}
+
+/// Un numéro de téléphone (chiffres, espaces, +, -, parenthèses) ?
+fn est_numero(s: &str) -> bool {
+    let chiffres = s.chars().filter(char::is_ascii_digit).count();
+    chiffres >= 3 && s.chars().all(|c| c.is_ascii_digit() || " +-().".contains(c))
 }
 
 fn service_de(id: &str) -> Service {
@@ -1245,8 +1260,20 @@ impl Jasette {
             }
         })
         .detach();
-        let numero = cx.new(|cx| InputState::new(window, cx).placeholder(t("Numéro de téléphone, puis Entrée")));
+        let numero = cx.new(|cx| InputState::new(window, cx).placeholder(t("Nom ou numéro de téléphone")));
         cx.subscribe_in(&numero, window, |this, state, ev: &InputEvent, window, cx| {
+            if let InputEvent::Change = ev {
+                let texte = state.read(cx).value().trim().to_string();
+                if texte != this.nouveau_texte {
+                    this.nouveau_texte = texte.clone();
+                    this.resultats_meta.clear();
+                    // Messenger cherche parmi tes amis et contacts.
+                    if texte.chars().count() >= 2 && this.etat_meta == Etat::Pret && !est_numero(&texte) {
+                        this.commande_meta(json!({"cmd": "search", "text": texte}));
+                    }
+                    cx.notify();
+                }
+            }
             if let InputEvent::PressEnter { .. } = ev {
                 let n = state.read(cx).value().trim().to_string();
                 if !n.is_empty() {
@@ -1333,6 +1360,7 @@ impl Jasette {
                         let cliquee = this.a_ouvrir.lock().ok().and_then(|mut r| r.take());
                         if let Some(id) = cliquee {
                             this.section = None;
+                        this.galerie = None;
                             this.choisir(id);
                             activer = true;
                             change = true;
@@ -1389,7 +1417,13 @@ impl Jasette {
             envoi_seq: 0,
             emojis_ouverts: false,
             menu_avatar: false,
+            nouveau_texte: String::new(),
+            resultats_meta: Vec::new(),
             details_heures: false,
+            galerie: None,
+            galerie_onglet: 0,
+            galerie_chargee: false,
+            apercu: None,
             avatar_google: None,
             emoji_groupe: "Smileys",
             emoji_recherche,
@@ -1465,7 +1499,21 @@ impl Jasette {
                     self.erreur = Some(format!("Messenger : {texte}"));
                 }
             }
-            "hello" | "e2ee" | "typing" | "search" => {}
+            "search" => {
+                if v.get("query").and_then(Value::as_str) == Some(self.nouveau_texte.as_str()) {
+                    self.resultats_meta = v["items"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|x| {
+                                    Some((x.get("id")?.as_str()?.to_string(), x.get("name")?.as_str()?.to_string()))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                }
+            }
+            "hello" | "e2ee" | "typing" => {}
             "error" => {
                 if let Some(texte) = v.get("text").and_then(Value::as_str) {
                     self.erreur = Some(format!("Messenger : {texte}"));
@@ -1988,6 +2036,215 @@ impl Jasette {
         Some((l.media_id, pos))
     }
 
+    /// Ouvre la galerie : tous les comptes (`None`) ou une conversation.
+    fn ouvrir_galerie(&mut self, conv: Option<String>) {
+        self.section = None;
+        if conv.is_none() && !self.galerie_chargee {
+            // Google n'a pas de « liste des médias » : on charge les messages
+            // récents de chaque conversation, et la galerie se remplit.
+            self.galerie_chargee = true;
+            let ids: Vec<String> =
+                self.convs.iter().map(|c| c.id.clone()).filter(|id| !self.messages.contains_key(id)).collect();
+            for id in ids {
+                self.commande(json!({"cmd": "messages", "conv": id, "count": 60}));
+            }
+        }
+        self.galerie = Some(conv);
+    }
+
+    /// La galerie des médias : photos et vidéos, vocaux, fichiers.
+    fn galerie_vue(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let filtre = self.galerie.clone().flatten();
+        let mut pieces: Vec<(Msg, Piece)> = self
+            .messages
+            .iter()
+            .filter(|(conv, _)| filtre.as_ref().is_none_or(|f| f == *conv))
+            .flat_map(|(_, l)| l.iter())
+            .flat_map(|m| m.attachments.iter().map(move |p| (m.clone(), p.clone())))
+            .collect();
+        pieces.sort_by(|a, b| b.0.time.cmp(&a.0.time));
+        let est_visuel = |p: &Piece| p.est_image() || p.mime.starts_with("video/");
+        let onglet = self.galerie_onglet;
+        let choisies: Vec<(Msg, Piece)> = pieces
+            .into_iter()
+            .filter(|(_, p)| match onglet {
+                0 => est_visuel(p),
+                1 => p.est_audio(),
+                _ => !est_visuel(p) && !p.est_audio(),
+            })
+            .collect();
+        let nom_conv = |id: &str| -> String {
+            self.conv(id).map(|c| c.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| t("Sans nom").into())
+        };
+        let titre = match &filtre {
+            Some(id) => format!("{} · {}", t("Médias"), nom_conv(id)),
+            None => t("Médias").to_string(),
+        };
+
+        let mut onglets = div().flex().flex_row().gap(px(6.));
+        for (i, nom) in [t("Photos et vidéos"), t("Vocaux"), t("Fichiers")].into_iter().enumerate() {
+            let actif = onglet as usize == i;
+            onglets = onglets.child(
+                div()
+                    .id(("onglet-galerie", i))
+                    .px(px(14.))
+                    .py(px(6.))
+                    .rounded(rayon(999.))
+                    .cursor_pointer()
+                    .text_size(px(13.))
+                    .when(actif, |d| d.bg(th().accent).text_color(blanc(1.)))
+                    .when(!actif, |d| d.bg(th().survol).text_color(th().texte).hover(|s| s.opacity(0.8)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.galerie_onglet = i as u8;
+                        cx.notify();
+                    }))
+                    .child(nom),
+            );
+        }
+
+        let mut contenu = div().flex().flex_col().gap(px(8.)).p(px(20.));
+        if choisies.is_empty() {
+            contenu = contenu.child(div().p(px(20.)).text_color(th().texte_pale).child(if self.galerie_chargee || filtre.is_some() {
+                t("Rien ici pour l'instant.")
+            } else {
+                t("Chargement…")
+            }));
+        } else if onglet == 0 {
+            let mut grille = div().flex().flex_row().flex_wrap().gap(px(8.));
+            for (i, (m, p)) in choisies.iter().enumerate() {
+                let chemin = self.medias.get(&p.media_id).cloned();
+                let video = p.mime.starts_with("video/");
+                let piece = p.clone();
+                let ouvrir = chemin.clone();
+                grille = grille.child(
+                    div()
+                        .id(("vignette", i))
+                        .relative()
+                        .size(px(150.))
+                        .rounded(rayon(10.))
+                        .overflow_hidden()
+                        .bg(th().surface)
+                        .cursor_pointer()
+                        .hover(|s| s.opacity(0.85))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            match (&ouvrir, video) {
+                                (Some(c), false) => this.apercu = Some(c.clone()),
+                                (Some(c), true) => ouvrir_fichier(c),
+                                (None, _) => {
+                                    this.ouvrir_apres.insert(piece.media_id.clone());
+                                    this.telecharger(&piece);
+                                }
+                            }
+                            cx.notify();
+                        }))
+                        .child(match (&chemin, video) {
+                            (Some(c), false) => img(c.clone()).size_full().rounded(rayon(10.)).object_fit(ObjectFit::Cover).into_any_element(),
+                            _ => div()
+                                .size_full()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(icone(if video { "play" } else { "image" }, 28., th().texte_pale))
+                                .into_any_element(),
+                        })
+                        .child(div().absolute().right(px(6.)).bottom(px(6.)).child(logo(service_de(&m.conv), 18.))),
+                );
+            }
+            contenu = contenu.child(grille);
+        } else {
+            for (m, p) in &choisies {
+                let mut ligne = div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(12.))
+                    .p(px(10.))
+                    .rounded(rayon(14.))
+                    .bg(th().surface)
+                    .child(logo(service_de(&m.conv), 22.))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .w(px(200.))
+                            .flex_none()
+                            .child(div().truncate().text_color(th().texte_fort).child(nom_conv(&m.conv)))
+                            .child(
+                                div()
+                                    .text_size(px(12.))
+                                    .text_color(th().texte_pale)
+                                    .child(format!("{} · {}", jour(m.time), heure(m.time, false))),
+                            ),
+                    );
+                if onglet == 1 {
+                    ligne = ligne.child(self.lecteur_vocal(m, p, cx));
+                } else {
+                    let nom = if p.name.is_empty() { p.mime.clone() } else { p.name.clone() };
+                    let piece = p.clone();
+                    ligne = ligne
+                        .child(icone("file", 18., th().texte))
+                        .child(div().flex_1().min_w(px(0.)).truncate().text_color(th().texte_fort).child(nom))
+                        .child(div().text_size(px(12.)).text_color(th().texte_pale).child(taille(p.size)))
+                        .child(
+                            div()
+                                .id(SharedString::from(format!("ouvrir-{}", p.media_id)))
+                                .cursor_pointer()
+                                .p(px(4.))
+                                .rounded(rayon(8.))
+                                .hover(|s| s.bg(th().survol))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if let Some(c) = this.medias.get(&piece.media_id) {
+                                        ouvrir_fichier(c);
+                                    } else {
+                                        this.ouvrir_apres.insert(piece.media_id.clone());
+                                        this.telecharger(&piece);
+                                    }
+                                    cx.notify();
+                                }))
+                                .child(icone("external-link", 16., th().accent)),
+                        );
+                }
+                contenu = contenu.child(ligne);
+            }
+        }
+
+        panneau(th().fil, th().rayon_fil)
+            .flex_1()
+            .h_full()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(14.))
+                    .px(px(20.))
+                    .pt(px(18.))
+                    .pb(px(12.))
+                    .child(icone("images", 22., th().texte_fort))
+                    .child(div().flex_1().truncate().text_size(px(18.)).font_weight(FontWeight::BOLD).text_color(th().texte_fort).child(titre))
+                    .child(onglets)
+                    .when(filtre.is_some(), |d| {
+                        d.child(
+                            div()
+                                .id("fermer-galerie")
+                                .cursor_pointer()
+                                .p(px(6.))
+                                .rounded(rayon(999.))
+                                .hover(|s| s.bg(th().survol))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.galerie = None;
+                                    cx.notify();
+                                }))
+                                .child(icone("x", 18., th().texte)),
+                        )
+                    }),
+            )
+            .child(div().id("galerie").flex_1().min_h(px(0.)).overflow_y_scroll().child(contenu))
+    }
+
     /// Lecture / pause d'un vocal, dans la bulle.
     fn basculer_lecture(&mut self, p: &Piece) {
         let Some(chemin) = self.medias.get(&p.media_id).cloned() else {
@@ -2338,6 +2595,7 @@ impl Jasette {
                 Self::bouton_rail("r-tout", !en_reglages && self.vue == Vue::Tout)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.section = None;
+                        this.galerie = None;
                         this.vue = Vue::Tout;
                         cx.notify();
                     }))
@@ -2348,6 +2606,7 @@ impl Jasette {
                 Self::bouton_rail("r-archives", !en_reglages && self.vue == Vue::Archives)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.section = None;
+                        this.galerie = None;
                         this.vue = Vue::Archives;
                         if !this.archives_chargees {
                             this.archives_chargees = true;
@@ -2358,11 +2617,20 @@ impl Jasette {
                     .child(icone("archive", 22., ton(th().texte_fort, th().icone))),
             )
             .child(
+                Self::bouton_rail("r-medias", !en_reglages && self.galerie == Some(None))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.ouvrir_galerie(None);
+                        cx.notify();
+                    }))
+                    .child(icone("images", 22., ton(th().texte_fort, th().icone))),
+            )
+            .child(
                 Self::bouton_rail("r-nouveau", false)
                     .border_1()
                     .border_color(ton(ca(TEXTE_PALE, 0.6), c(0x48484a)))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.section = None;
+                        this.galerie = None;
                         this.nouveau_ouvert = true;
                         this.numero.update(cx, |s, cx| s.focus(window, cx));
                         cx.notify();
@@ -2374,6 +2642,7 @@ impl Jasette {
                 Self::bouton_rail("r-gm", !en_reglages && self.vue == Vue::Service(Service::GoogleMessages))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.section = None;
+                        this.galerie = None;
                         this.vue = Vue::Service(Service::GoogleMessages);
                         cx.notify();
                     }))
@@ -2390,6 +2659,7 @@ impl Jasette {
                 Self::bouton_rail("r-messenger", !en_reglages && self.vue == Vue::Service(Service::Messenger))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.section = None;
+                        this.galerie = None;
                         this.vue = Vue::Service(Service::Messenger);
                         cx.notify();
                     }))
@@ -2528,8 +2798,13 @@ impl Jasette {
             )
         };
         if self.nouveau_ouvert {
-            col = col.child(champ(&self.numero, "phone"));
+            col = col.child(champ(&self.numero, "pen-line"));
             haut += 46.;
+            let (suggestions, n) = self.suggestions(cx);
+            if n > 0 {
+                col = col.child(suggestions);
+                haut += 10. + n as f32 * 50.;
+            }
         }
         if self.recherche_ouverte {
             col = col.child(champ(&self.recherche, "search"));
@@ -2629,6 +2904,100 @@ impl Jasette {
                     })
                     .when(th().ega, |d| d.bg(givre(1.))),
             )
+    }
+
+    /// Les choix sous « nouveau message » : conversations existantes (tous les
+    /// comptes), personnes trouvées sur Messenger, ou SMS au numéro tapé.
+    fn suggestions(&self, cx: &mut Context<Self>) -> (Div, usize) {
+        let q = plier(&self.nouveau_texte);
+        let mut boite = div().flex().flex_col().px(px(8.)).pb(px(10.));
+        let mut n = 0;
+        if q.is_empty() {
+            return (boite, 0);
+        }
+        let ligne = |id: SharedString, nom: String, detail: String, service: Service, photo: Option<&PathBuf>| {
+            div()
+                .id(id)
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(10.))
+                .px(px(8.))
+                .h(px(50.))
+                .rounded(rayon(12.))
+                .cursor_pointer()
+                .hover(|s| s.bg(th().survol))
+                .child(
+                    div()
+                        .relative()
+                        .child(avatar(&nom, "", false, photo, 36.))
+                        .child(div().absolute().right(px(-3.)).bottom(px(-3.)).child(logo(service, 15.))),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .min_w(px(0.))
+                        .child(div().truncate().text_color(th().texte_fort).child(nom))
+                        .child(div().truncate().text_size(px(12.)).text_color(th().texte_pale).child(detail)),
+                )
+        };
+        // Les conversations qui existent déjà.
+        let existantes: Vec<&Conv> = self
+            .convs
+            .iter()
+            .chain(self.archives.iter())
+            .filter(|c| !c.group && (plier(&c.name).contains(&q) || c.members.iter().any(|m| plier(m).contains(&q))))
+            .take(4)
+            .collect();
+        for c in existantes {
+            let id = c.id.clone();
+            let s = service_de(&c.id);
+            boite = boite.child(
+                ligne(SharedString::from(format!("sugg-{}", c.id)), c.name.clone(), s.nom().into(), s, self.avatars.get(&c.id))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.nouveau_ouvert = false;
+                        this.numero.update(cx, |s, cx| s.set_value("", window, cx));
+                        this.vue = Vue::Tout;
+                        this.galerie = None;
+                        this.choisir(id.clone());
+                        cx.notify();
+                    })),
+            );
+            n += 1;
+        }
+        // Les personnes trouvées par Messenger, sans conversation ici.
+        for (id, nom) in self.resultats_meta.iter().take(5) {
+            if self.conv(id).is_some() {
+                continue;
+            }
+            let fbid = id.trim_start_matches(PREFIXE_META).to_string();
+            boite = boite.child(
+                ligne(SharedString::from(format!("sugg-{id}")), nom.clone(), t("Nouvelle conversation Messenger").into(), Service::Messenger, None)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.commande_meta(json!({"cmd": "new", "number": fbid}));
+                        this.nouveau_ouvert = false;
+                        this.numero.update(cx, |s, cx| s.set_value("", window, cx));
+                        cx.notify();
+                    })),
+            );
+            n += 1;
+        }
+        // Un numéro : un SMS par Google Messages.
+        if est_numero(&self.nouveau_texte) && self.etat.associe() {
+            let numero = self.nouveau_texte.clone();
+            boite = boite.child(
+                ligne("sugg-sms".into(), numero.clone(), t("Nouveau message par Google Messages").into(), Service::GoogleMessages, None)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.commande(json!({"cmd": "new", "number": numero}));
+                        this.nouveau_ouvert = false;
+                        this.numero.update(cx, |s, cx| s.set_value("", window, cx));
+                        cx.notify();
+                    })),
+            );
+            n += 1;
+        }
+        (boite, n)
     }
 
     fn liste(&self, haut: f32, cx: &mut Context<Self>) -> impl IntoElement {
@@ -3475,6 +3844,21 @@ impl Jasette {
             }))
             .child(icone("info", 17., if details { th().accent } else { th().texte_pale }));
         let service = self.choisie.as_deref().map(service_de).unwrap_or(Service::GoogleMessages);
+        let conv_medias = self.choisie.clone();
+        let bouton_medias = div()
+            .id("medias-conv")
+            .size(px(28.))
+            .rounded(rayon(999.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .hover(|s| s.bg(th().survol))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.ouvrir_galerie(conv_medias.clone());
+                cx.notify();
+            }))
+            .child(icone("images", 17., th().texte_pale));
         let badge_service = |d: Div| d.child(div().absolute().right(px(-3.)).bottom(px(-2.)).child(logo(service, 16.)));
 
         // L'en-tête flotte sur le fil : un voile dégradé fait disparaître les messages qui passent dessous.
@@ -3584,6 +3968,7 @@ impl Jasette {
                                 .child(div().truncate().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(nom))
                                 .child(div().truncate().text_size(px(12.)).text_color(th().texte_pale).child(detail)),
                         )
+                        .child(bouton_medias)
                         .child(bouton_info)
                         .child(
                             div()
@@ -4428,6 +4813,22 @@ impl Jasette {
 
         let centre: AnyElement = if self.section.is_some() {
             self.reglages_vue(cx).into_any_element()
+        } else if self.galerie == Some(None) {
+            self.galerie_vue(cx).into_any_element()
+        } else if self.galerie.is_some() {
+            // Les médias d'une conversation : la liste reste à gauche.
+            let liste = self.colonne_liste(cx).into_any_element();
+            let galerie = self.galerie_vue(cx).into_any_element();
+            div()
+                .flex()
+                .flex_row()
+                .flex_1()
+                .h_full()
+                .gap(px(th().ecart))
+                .when(th().sombre, |d| d.bg(th().liste))
+                .child(liste)
+                .child(galerie)
+                .into_any_element()
         } else {
             let liste = self.colonne_liste(cx).into_any_element();
             let fil = self.panneau_fil(cx).into_any_element();
@@ -4455,6 +4856,28 @@ impl Jasette {
                 .child(self.rail(cx))
                 .child(centre),
         )
+        .when_some(self.apercu.clone(), |d, chemin| {
+            d.child(
+                div()
+                    .id("apercu")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .bg(hsla(0., 0., 0., 0.88))
+                    .p(px(40.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.apercu = None;
+                        cx.notify();
+                    }))
+                    .child(img(chemin).size_full().object_fit(ObjectFit::Contain)),
+            )
+        })
         .when_some(self.erreur.clone().filter(|_| self.section.is_none()), |d, e| {
             d.child(
                 div()
@@ -4917,6 +5340,13 @@ fn t(fr: &'static str) -> &'static str {
         "Connectez-vous dans la fenêtre Facebook…" => "Sign in in the Facebook window…",
         "Pour voir l'historique chiffré, entrez le NIP de Messenger (celui choisi dans l'app)." => "To see your encrypted history, enter your Messenger PIN (the one set in the app).",
         "Créé par" => "Created by",
+        "Nom ou numéro de téléphone" => "Name or phone number",
+        "Nouvelle conversation Messenger" => "New Messenger chat",
+        "Nouveau message par Google Messages" => "New message via Google Messages",
+        "Photos et vidéos" => "Photos & videos",
+        "Vocaux" => "Voice",
+        "Fichiers" => "Files",
+        "Rien ici pour l'instant." => "Nothing here yet.",
         "Seize couleurs et police IBM, comme un PC de 1984." => "Sixteen colors and the IBM font, like a 1984 PC.",
         "Interface" => "Interface",
         _ => fr,
