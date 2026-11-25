@@ -3,6 +3,8 @@ package ca.jasette.android.ui
 import android.content.Intent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -105,6 +107,10 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit) {
             Depot.erreur?.let { Text(it, color = P.danger, fontSize = 14.sp) }
 
             Spacer(Modifier.height(12.dp))
+            Text("Icône de l'app", color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            ChoixIcone()
+
+            Spacer(Modifier.height(12.dp))
             TextButton(onClick = {
                 ctx.startService(Intent(ctx, PontService::class.java).setAction(PontService.ACTION_ARRETER))
                 (ctx as? android.app.Activity)?.finishAffinity()
@@ -175,4 +181,65 @@ private fun Nip() {
             TextButton(onClick = { Depot.envoyerNip("") }) { Text("Pas maintenant", color = P.textePale) }
         }
     }
+}
+
+/** Les deux lanceurs du manifeste : un seul est actif à la fois. */
+private const val LANCEUR_SOMBRE = "ca.jasette.android.LanceurSombre"
+private const val LANCEUR_BLANC = "ca.jasette.android.LanceurBlanc"
+
+private fun iconeBlanche(ctx: android.content.Context): Boolean =
+    ctx.packageManager.getComponentEnabledSetting(android.content.ComponentName(ctx, LANCEUR_BLANC)) ==
+        android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+
+/** Change l'icône du lanceur : active un alias, désactive l'autre (sans fermer l'app). */
+private fun choisirIcone(ctx: android.content.Context, blanche: Boolean) {
+    val pm = ctx.packageManager
+    val activer = android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+    val desactiver = android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+    val garder = android.content.pm.PackageManager.DONT_KILL_APP
+    // Activer d'abord la nouvelle : il y a toujours au moins un lanceur.
+    pm.setComponentEnabledSetting(
+        android.content.ComponentName(ctx, if (blanche) LANCEUR_BLANC else LANCEUR_SOMBRE), activer, garder,
+    )
+    pm.setComponentEnabledSetting(
+        android.content.ComponentName(ctx, if (blanche) LANCEUR_SOMBRE else LANCEUR_BLANC), desactiver, garder,
+    )
+}
+
+@Composable
+private fun ChoixIcone() {
+    val ctx = LocalContext.current
+    var blanche by remember { mutableStateOf(iconeBlanche(ctx)) }
+    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(vertical = 8.dp)) {
+        for ((valeur, nom, res) in listOf(
+            Triple(false, "Sombre", ca.jasette.android.R.mipmap.ic_launcher),
+            Triple(true, "Blanche", ca.jasette.android.R.mipmap.ic_launcher_blanc),
+        )) {
+            val choisie = blanche == valeur
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(if (choisie) P.accent.copy(alpha = 0.18f) else androidx.compose.ui.graphics.Color.Transparent)
+                    .clickable { choisirIcone(ctx, valeur); blanche = valeur }
+                    .padding(12.dp),
+            ) {
+                // Le rendu adaptatif ne passe pas par painterResource : l'image vient du lanceur.
+                val dessin = remember(res) { androidx.core.content.ContextCompat.getDrawable(ctx, res) }
+                androidx.compose.foundation.Canvas(Modifier.size(64.dp)) {
+                    dessin?.let {
+                        it.setBounds(0, 0, size.width.toInt(), size.height.toInt())
+                        drawContext.canvas.nativeCanvas.let { c -> it.draw(c) }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(nom, color = if (choisie) P.texteFort else P.texte, fontSize = 13.sp)
+            }
+        }
+    }
+    Text(
+        "Le lanceur peut prendre quelques secondes à montrer la nouvelle icône.",
+        color = P.textePale,
+        fontSize = 12.sp,
+    )
 }
