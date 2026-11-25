@@ -67,9 +67,6 @@ private val iconeRepondre: ImageVector by lazy {
         .build()
 }
 
-/** Une conversation déjà archivée, par son service ou par Jasette (le geste désarchive). */
-private fun archivee(c: Conv) = Depot.estArchivee(c)
-
 /** Ce qu'une action rend possible pour cette conversation (sinon : grisée, message dans la barre). */
 private fun possible(a: ActionGeste, c: Conv) = when (a) {
     ActionGeste.ARCHIVER -> c.peutArchiver
@@ -93,6 +90,8 @@ fun RangeeGlissable(
     ouvrir: () -> Unit,
     retiree: (String) -> Unit,
     annoncer: (String, (() -> Unit)?) -> Unit,
+    /** Vrai dans la vue Archives : le geste désarchive toujours ; ailleurs, il archive toujours. */
+    dansArchives: Boolean = false,
     contenu: @Composable () -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -133,7 +132,7 @@ fun RangeeGlissable(
                 if (!c.peutArchiver) {
                     annoncer(c.refusArchiverSupprimer ?: "", null)
                 } else {
-                    val deja = archivee(c)
+                    val deja = dansArchives
                     Depot.archiver(c.id, !deja)
                     retiree(c.id)
                     annoncer(if (deja) t("Conversation désarchivée") else t("Conversation archivée")) {
@@ -179,7 +178,7 @@ fun RangeeGlissable(
             if (a != null && a != ActionGeste.RIEN && decalage > 0f) {
                 val debut = sens == SwipeToDismissBoxValue.StartToEnd
                 val ok = possible(a, c)
-                val (couleur, icone, teinte) = apparence(a, archivee(c), ok)
+                val (couleur, icone, teinte) = apparence(a, dansArchives, ok)
                 val largeur = with(densite) { decalage.toDp() }
                 Box(Modifier.fillMaxSize(), contentAlignment = if (debut) Alignment.CenterStart else Alignment.CenterEnd) {
                     // Seule la partie découverte est peinte (le verre laisse voir au travers).

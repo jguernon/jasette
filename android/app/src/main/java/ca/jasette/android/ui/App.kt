@@ -420,6 +420,7 @@ private fun Liste(
                         ouvrir = { ouvrir(c.id) },
                         retiree = retiree,
                         annoncer = ::annoncer,
+                        dansArchives = vue == Vue.Archives,
                     ) {
                         Rangee(
                             c,

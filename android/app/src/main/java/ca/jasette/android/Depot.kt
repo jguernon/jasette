@@ -1041,14 +1041,20 @@ object Depot {
             return
         }
         commande(JSONObject().put("cmd", "archive").put("conv", id).put("archived", archiver))
+        // Une conversation peut se trouver dans les deux listes (une liste du
+        // service arrivée avant que l'archivage y soit pris en compte) : on la
+        // retire des deux avant de la mettre d'un seul côté, sinon un geste
+        // suivant la croyait encore « archivée » dans la boîte (et l'inverse).
+        val c = (if (archiver) convs.firstOrNull { it.id == id } else archives.firstOrNull { it.id == id })
+            ?: convs.firstOrNull { it.id == id } ?: archives.firstOrNull { it.id == id } ?: return
+        val autres = convs.filter { it.id != id }
+        val autresArch = archives.filter { it.id != id }
         if (archiver) {
-            val c = convs.firstOrNull { it.id == id } ?: return
-            remplacerConvs(convs.filter { it.id != id })
-            remplacerArchives(archives + c.copy(archived = true))
+            remplacerConvs(autres)
+            remplacerArchives(autresArch + c.copy(archived = true))
         } else {
-            val c = archives.firstOrNull { it.id == id } ?: return
-            remplacerArchives(archives.filter { it.id != id })
-            remplacerConvs(convs + c.copy(archived = false))
+            remplacerArchives(autresArch)
+            remplacerConvs(autres + c.copy(archived = false))
         }
     }
 
