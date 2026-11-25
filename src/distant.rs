@@ -452,6 +452,9 @@ struct Connexion {
     arret: AtomicBool,
     deja_connecte: AtomicBool,
     vus: Mutex<HashMap<String, (PathBuf, Instant)>>,
+    /// Les trames `marques` reçues (et les coupures), dans l'ordre, en
+    /// attendant que l'interface les prenne.
+    marques: Mutex<Vec<NouvelleMarques>>,
 }
 
 static CONNEXIONS: Mutex<Vec<Weak<Connexion>>> = Mutex::new(Vec::new());
@@ -480,6 +483,7 @@ impl Connexion {
             arret: AtomicBool::new(false),
             deja_connecte: AtomicBool::new(false),
             vus: Mutex::new(HashMap::new()),
+            marques: Mutex::new(Vec::new()),
         });
         liste.push(Arc::downgrade(&cx));
         let (tx, rx) = channel();
@@ -554,6 +558,17 @@ impl Connexion {
             canal.fermer();
             verrou(&self.lien).1.push(ligne);
         }
+    }
+
+    /// Envoie une ligne tout de suite, sans la garder pendant une coupure
+    /// (les marques : le rejeu suivant dira où en est le serveur).
+    fn envoyer_direct(&self, ligne: &str) -> bool {
+        let Some(canal) = self.canal() else { return false };
+        if canal.ecrire_ligne(ligne).is_err() {
+            canal.fermer();
+            return false;
+        }
+        true
     }
 
     fn envoyer(self: &Arc<Self>, svc: &str, commande: &Value) {
@@ -643,6 +658,7 @@ impl Connexion {
                     canal.fermer();
                     // Les requêtes de fichiers en cours échouent tout de suite.
                     verrou(&self.attentes).clear();
+                    verrou(&self.marques).push(NouvelleMarques::Coupure);
                     if self.arret.load(Ordering::SeqCst) {
                         break;
                     }
@@ -691,6 +707,11 @@ impl Connexion {
             }
         } else if let Some(p) = v.get("ping") {
             let _ = canal.ecrire_ligne(&json!({"pong": p}).to_string());
+        } else if let Some(m) = v.get("marques") {
+            match NouvelleMarques::lire(m) {
+                Some(n) => verrou(&self.marques).push(n),
+                None => eprintln!("jasette : marques illisibles du serveur"),
+            }
         } else if let Some(r) = ["fichier", "depose"]
             .into_iter()
             .find(|k| v.get(*k).is_some())
@@ -877,11 +898,212 @@ impl PontDistant {
     pub fn recevoir(&self) -> Vec<Value> {
         verrou(&self.nouvelles).try_iter().collect()
     }
+
+    /// Les marques reçues du serveur (et les coupures) depuis la dernière
+    /// fois. La file est celle de la connexion, partagée par les services :
+    /// le premier qui la lit prend tout.
+    pub fn recevoir_marques(&self) -> Vec<NouvelleMarques> {
+        std::mem::take(&mut *verrou(&self.cx.marques))
+    }
+
+    /// Envoie une trame `marques` (faite par [`SuiviMarques`]) ; faux si la
+    /// connexion est coupée.
+    pub fn envoyer_marques(&self, trame: &Value) -> bool {
+        self.cx.envoyer_direct(&trame.to_string())
+    }
 }
 
 impl Drop for PontDistant {
     fn drop(&mut self) {
         self.cx.desabonner(&self.svc);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Les marques (Head, favoris, épinglées), gardées par le serveur
+// ---------------------------------------------------------------------------
+
+/// Les trois listes ordonnées d'ids de conversations (PROTOCOLE.md, §5.5).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Marques {
+    pub head: Vec<String>,
+    /// La vue de l'étoile (`etoiles` dans les réglages du bureau).
+    pub favoris: Vec<String>,
+    pub epingles: Vec<String>,
+}
+
+impl Marques {
+    pub fn vide(&self) -> bool {
+        self.head.is_empty() && self.favoris.is_empty() && self.epingles.is_empty()
+    }
+
+    /// Chaque liste de `dabord`, dans son ordre, puis les ids de `ensuite` qui n'y sont pas.
+    pub fn union(dabord: &Marques, ensuite: &Marques) -> Marques {
+        let unir = |a: &Vec<String>, b: &Vec<String>| {
+            let mut r: Vec<String> = Vec::with_capacity(a.len() + b.len());
+            for id in a.iter().chain(b.iter()) {
+                if !id.is_empty() && !r.contains(id) {
+                    r.push(id.clone());
+                }
+            }
+            r
+        };
+        Marques {
+            head: unir(&dabord.head, &ensuite.head),
+            favoris: unir(&dabord.favoris, &ensuite.favoris),
+            epingles: unir(&dabord.epingles, &ensuite.epingles),
+        }
+    }
+
+    /// Les ids de `self` absents de `autre`, liste par liste.
+    fn moins(&self, autre: &Marques) -> Marques {
+        let garder = |a: &Vec<String>, b: &Vec<String>| a.iter().filter(|id| !b.contains(id)).cloned().collect();
+        Marques {
+            head: garder(&self.head, &autre.head),
+            favoris: garder(&self.favoris, &autre.favoris),
+            epingles: garder(&self.epingles, &autre.epingles),
+        }
+    }
+}
+
+/// Ce que l'interface a reçu du serveur à propos des marques.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NouvelleMarques {
+    /// Une trame `{"marques":{…}}` : rejeu, diffusion ou réponse à notre envoi.
+    Recues { marques: Marques, version: u64, id: Option<u64>, refus: Option<String> },
+    /// La connexion est tombée : rien n'est plus en vol.
+    Coupure,
+}
+
+impl NouvelleMarques {
+    fn lire(v: &Value) -> Option<Self> {
+        let liste = |k: &str| -> Option<Vec<String>> {
+            match v.get(k) {
+                None | Some(Value::Null) => Some(Vec::new()),
+                Some(Value::Array(a)) => Some(a.iter().filter_map(Value::as_str).map(str::to_string).collect()),
+                Some(_) => None,
+            }
+        };
+        Some(Self::Recues {
+            marques: Marques { head: liste("head")?, favoris: liste("favoris")?, epingles: liste("epingles")? },
+            version: v.get("version")?.as_u64()?,
+            id: v.get("id").and_then(Value::as_u64),
+            refus: v.get("refus").and_then(Value::as_str).map(str::to_string),
+        })
+    }
+}
+
+/// La copie locale des marques, gardée dans les réglages : les listes, la
+/// dernière version reçue du serveur (0 : jamais synchronisé avec lui) et
+/// « changées ici, pas encore confirmées par le serveur ».
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CopieMarques {
+    pub listes: Marques,
+    pub version: u64,
+    pub a_envoyer: bool,
+}
+
+/// La synchronisation des marques avec le serveur (PROTOCOLE.md, §5.5) :
+/// une seule trame en vol à la fois ; les changements faits entre-temps
+/// partent à la réponse. Ne garde rien sur disque : la [`CopieMarques`] le fait.
+#[derive(Debug, Default)]
+pub struct SuiviMarques {
+    /// Le serveur a donné son état sur cette connexion (rejeu reçu).
+    synchro: bool,
+    /// Notre trame en attente de réponse : son id et ce qu'elle portait.
+    en_vol: Option<(u64, Marques)>,
+    prochain: u64,
+}
+
+impl SuiviMarques {
+    /// Tout recommence (changement de serveur, de mode) : on attend le rejeu.
+    pub fn reinitialiser(&mut self) {
+        self.synchro = false;
+        self.en_vol = None;
+    }
+
+    /// L'envoi d'une trame a échoué : la connexion tombe, le rejeu suivant tranchera.
+    pub fn envoi_rate(&mut self) {
+        self.reinitialiser();
+    }
+
+    /// Les marques viennent de changer ici. Rend la trame à envoyer, s'il le faut maintenant.
+    pub fn changement(&mut self, c: &mut CopieMarques) -> Option<Value> {
+        c.a_envoyer = true;
+        self.pousser(c)
+    }
+
+    fn pousser(&mut self, c: &CopieMarques) -> Option<Value> {
+        if !self.synchro || self.en_vol.is_some() || !c.a_envoyer {
+            return None;
+        }
+        self.prochain += 1;
+        let id = self.prochain;
+        self.en_vol = Some((id, c.listes.clone()));
+        Some(json!({"marques": {
+            "head": c.listes.head,
+            "favoris": c.listes.favoris,
+            "epingles": c.listes.epingles,
+            "version": c.version,
+            "id": id,
+        }}))
+    }
+
+    /// Une nouvelle du serveur : met la copie locale à jour, et rend la trame
+    /// à renvoyer s'il le faut (union, changements faits pendant l'envoi…).
+    pub fn recu(&mut self, n: NouvelleMarques, c: &mut CopieMarques) -> Option<Value> {
+        let (s, v, id, refus) = match n {
+            NouvelleMarques::Coupure => {
+                self.reinitialiser();
+                return None;
+            }
+            NouvelleMarques::Recues { marques, version, id, refus } => (marques, version, id, refus),
+        };
+        self.synchro = true;
+        let notre = matches!((&self.en_vol, id), (Some((e, _)), Some(i)) if *e == i);
+        if notre {
+            let (_, envoyees) = self.en_vol.take().unwrap_or_default();
+            c.version = v;
+            c.listes = if refus.is_some() {
+                // Trame refusée (version périmée qui aurait vidé une liste) :
+                // l'ordre du serveur, puis ce qu'on a de plus.
+                eprintln!("jasette : marques refusées par le serveur ; union avec les siennes");
+                Marques::union(&s, &c.listes)
+            } else {
+                // Acceptée : ce qu'on a encore changé depuis, plus ce que le
+                // serveur a ajouté de son côté (union faite par lui).
+                Marques::union(&c.listes, &s.moins(&envoyees))
+            };
+            c.a_envoyer = c.listes != s;
+            return self.pousser(c);
+        }
+        if self.en_vol.is_some() {
+            // La diffusion d'un autre appareil a croisé notre trame : la
+            // réponse à celle-ci donnera l'état final.
+            return None;
+        }
+        if v == 0 {
+            // Le serveur n'a encore rien : il prend nos marques.
+            c.version = 0;
+            c.a_envoyer = !c.listes.vide();
+            return self.pousser(c);
+        }
+        if !c.a_envoyer && c.version > 0 && c.version <= v {
+            // Rien de changé ici : le serveur est la source.
+            c.listes = s;
+            c.version = v;
+            return None;
+        }
+        if c.a_envoyer && c.version == v {
+            // Changé ici pendant une coupure, et personne d'autre n'a rien changé.
+            return self.pousser(c);
+        }
+        // Première synchronisation avec ce serveur, ou changé des deux côtés :
+        // union, l'ordre du serveur d'abord. Personne ne perd rien.
+        c.listes = Marques::union(&s, &c.listes);
+        c.version = v;
+        c.a_envoyer = c.listes != s;
+        self.pousser(c)
     }
 }
 
@@ -1062,5 +1284,302 @@ mod essais {
         }
         let i = etats.iter().position(|e| e == "reconnecting").expect("pas de reconnecting");
         assert!(etats[i..].iter().any(|e| e == "unpaired"), "pas d'état après la reconnexion : {etats:?}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Les marques
+    // -----------------------------------------------------------------------
+
+    fn m(head: &[&str], favoris: &[&str], epingles: &[&str]) -> Marques {
+        let v = |l: &[&str]| l.iter().map(|x| x.to_string()).collect();
+        Marques { head: v(head), favoris: v(favoris), epingles: v(epingles) }
+    }
+
+    fn recues(marques: Marques, version: u64, id: Option<u64>) -> NouvelleMarques {
+        NouvelleMarques::Recues { marques, version, id, refus: None }
+    }
+
+    fn id_de(t: &Value) -> u64 {
+        t["marques"]["id"].as_u64().unwrap()
+    }
+
+    #[test]
+    fn marques_serveur_vide_recoit_les_locales() {
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { listes: m(&[], &["a", "b"], &[]), version: 0, a_envoyer: false };
+        let t = s.recu(recues(Marques::default(), 0, None), &mut c).expect("envoi");
+        assert_eq!(t["marques"]["version"], 0);
+        assert_eq!(t["marques"]["favoris"], json!(["a", "b"]));
+        // Réponse : acceptée, version 1.
+        assert!(s.recu(recues(m(&[], &["a", "b"], &[]), 1, Some(id_de(&t))), &mut c).is_none());
+        assert_eq!(c, CopieMarques { listes: m(&[], &["a", "b"], &[]), version: 1, a_envoyer: false });
+    }
+
+    #[test]
+    fn marques_premiere_connexion_union_ordre_du_serveur() {
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { listes: m(&["h"], &["b", "x"], &[]), version: 0, a_envoyer: false };
+        let t = s.recu(recues(m(&[], &["a", "b"], &["p"]), 4, None), &mut c).expect("union envoyée");
+        assert_eq!(c.listes, m(&["h"], &["a", "b", "x"], &["p"]));
+        assert_eq!(t["marques"]["version"], 4);
+        // Rien de local en plus : on adopte sans rien envoyer.
+        let mut s2 = SuiviMarques::default();
+        let mut c2 = CopieMarques::default();
+        assert!(s2.recu(recues(m(&[], &["a"], &[]), 4, None), &mut c2).is_none());
+        assert_eq!(c2, CopieMarques { listes: m(&[], &["a"], &[]), version: 4, a_envoyer: false });
+    }
+
+    #[test]
+    fn marques_le_serveur_est_la_source() {
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { listes: m(&[], &["a", "b"], &[]), version: 3, a_envoyer: false };
+        // Un autre appareil a retiré « b » : on suit, même vers moins.
+        assert!(s.recu(recues(m(&[], &["a"], &[]), 4, None), &mut c).is_none());
+        assert_eq!(c.listes, m(&[], &["a"], &[]));
+        assert_eq!(c.version, 4);
+    }
+
+    #[test]
+    fn marques_une_trame_en_vol_a_la_fois() {
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { listes: m(&[], &["a", "b", "c"], &[]), version: 5, a_envoyer: false };
+        assert!(s.recu(recues(c.listes.clone(), 5, None), &mut c).is_none());
+        c.listes.favoris.retain(|x| x != "b");
+        let t1 = s.changement(&mut c).expect("premier envoi");
+        c.listes.favoris.retain(|x| x != "c");
+        assert!(s.changement(&mut c).is_none(), "attend la réponse");
+        // Réponse au premier : le second part, avec la nouvelle version.
+        let t2 = s.recu(recues(m(&[], &["a", "c"], &[]), 6, Some(id_de(&t1))), &mut c).expect("second envoi");
+        assert_eq!(t2["marques"]["version"], 6);
+        assert_eq!(t2["marques"]["favoris"], json!(["a"]));
+        assert!(s.recu(recues(m(&[], &["a"], &[]), 7, Some(id_de(&t2))), &mut c).is_none());
+        assert_eq!(c, CopieMarques { listes: m(&[], &["a"], &[]), version: 7, a_envoyer: false });
+    }
+
+    #[test]
+    fn marques_hors_ligne() {
+        // Changé pendant une coupure, personne d'autre : la copie locale part telle quelle.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { listes: m(&[], &["a", "b"], &[]), version: 5, a_envoyer: false };
+        c.listes.favoris.clear();
+        assert!(s.changement(&mut c).is_none(), "pas branché");
+        let t = s.recu(recues(m(&[], &["a", "b"], &[]), 5, None), &mut c).expect("envoi");
+        assert_eq!(t["marques"]["favoris"], json!([]));
+        assert_eq!(t["marques"]["version"], 5);
+        // Changé ici et ailleurs : union.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { listes: m(&[], &["a", "x"], &[]), version: 5, a_envoyer: true };
+        let t = s.recu(recues(m(&[], &["a", "y"], &[]), 6, None), &mut c).expect("union");
+        assert_eq!(t["marques"]["favoris"], json!(["a", "y", "x"]));
+        // Refus du serveur : union avec les siennes.
+        let id = id_de(&t);
+        let r = NouvelleMarques::Recues { marques: m(&[], &["z"], &[]), version: 9, id: Some(id), refus: Some("non".into()) };
+        let t = s.recu(r, &mut c).expect("renvoi");
+        assert_eq!(t["marques"]["favoris"], json!(["z", "a", "y", "x"]));
+        assert_eq!(t["marques"]["version"], 9);
+        // Une coupure : plus rien en vol, on attend le rejeu.
+        s.recu(NouvelleMarques::Coupure, &mut c);
+        assert!(s.changement(&mut c).is_none());
+    }
+
+    /// Un appareil branché au serveur de test, avec sa copie des marques.
+    struct Appareil {
+        nom: &'static str,
+        pont: PontDistant,
+        suivi: SuiviMarques,
+        copie: CopieMarques,
+    }
+
+    impl Appareil {
+        fn brancher(nom: &'static str, config: &ConfigServeur, copie: CopieMarques) -> Self {
+            Self { nom, pont: PontDistant::brancher(config, "google"), suivi: SuiviMarques::default(), copie }
+        }
+
+        /// Traite ce qui est arrivé, pendant `ms` millisecondes.
+        fn pomper(&mut self, ms: u64) {
+            let fin = Instant::now() + Duration::from_millis(ms);
+            while Instant::now() < fin {
+                let _ = self.pont.recevoir();
+                for n in self.pont.recevoir_marques() {
+                    println!("{} reçoit {n:?}", self.nom);
+                    if let Some(t) = self.suivi.recu(n, &mut self.copie) {
+                        println!("{} envoie {t}", self.nom);
+                        assert!(self.pont.envoyer_marques(&t));
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+
+        fn changer(&mut self, f: impl FnOnce(&mut Marques)) {
+            f(&mut self.copie.listes);
+            if let Some(t) = self.suivi.changement(&mut self.copie) {
+                println!("{} envoie {t}", self.nom);
+                assert!(self.pont.envoyer_marques(&t));
+            }
+        }
+    }
+
+    /// Jumelle un appareil au serveur de test : `--jumeler` lancé ici, avec
+    /// le même JASETTE_DATA que le serveur.
+    fn jumeler_essai(adresse: &str, nom: &str) -> ConfigServeur {
+        let bin = std::env::var("JASETTE_ESSAI_SERVEUR").expect("JASETTE_ESSAI_SERVEUR");
+        let sortie = std::process::Command::new(bin).arg("--jumeler").output().expect("--jumeler");
+        let texte = String::from_utf8_lossy(&sortie.stdout);
+        let code: String = texte
+            .lines()
+            .find(|l| l.starts_with("Code de jumelage"))
+            .map(|l| l.chars().filter(char::is_ascii_digit).collect())
+            .expect("code");
+        let v = verifier_serveur(adresse, &code).expect("vérification");
+        jumeler(adresse, &code, nom, &v.empreinte).expect("jumelage")
+    }
+
+    fn marques_du_serveur() -> Value {
+        let d = std::env::var("JASETTE_DATA").expect("JASETTE_DATA");
+        serde_json::from_str(&fs::read_to_string(Path::new(&d).join("serveur/marques.json")).unwrap()).unwrap()
+    }
+
+    /// Jumelle un « bureau » au serveur de test et écrit son reglages.json
+    /// (mode client, avec des favoris) dans JASETTE_ESSAI_BUREAU, pour lancer
+    /// la vraie interface dessus.
+    #[test]
+    #[ignore]
+    fn essai_config_bureau() {
+        let adresse = std::env::var("JASETTE_ESSAI_ADRESSE").expect("JASETTE_ESSAI_ADRESSE");
+        let dossier = PathBuf::from(std::env::var("JASETTE_ESSAI_BUREAU").expect("JASETTE_ESSAI_BUREAU"));
+        let cfg = jumeler_essai(&adresse, "bureau-ui");
+        fs::create_dir_all(&dossier).unwrap();
+        let r = json!({
+            "mode_serveur": "client", "serveur": cfg, "notifications": false,
+            "etoiles": ["f1", "m:f2", "i:f3"], "favoris": ["h1"], "epingles": [],
+        });
+        fs::write(dossier.join("reglages.json"), serde_json::to_string_pretty(&r).unwrap()).unwrap();
+    }
+
+    /// Contre un serveur de test (voir l'essai dans .cache/essai-marques) :
+    /// JASETTE_DATA=… JASETTE_ESSAI_ADRESSE=127.0.0.1:PORT JASETTE_ESSAI_SERVEUR=…/jasette-serveur \
+    /// cargo test essai_marques -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn essai_marques() {
+        let adresse = std::env::var("JASETTE_ESSAI_ADRESSE").expect("JASETTE_ESSAI_ADRESSE");
+        let cfg_a = jumeler_essai(&adresse, "bureau");
+        let cfg_b = jumeler_essai(&adresse, "fold");
+        let cfg_c = jumeler_essai(&adresse, "neuf");
+
+        // 1. Le bureau a déjà des favoris ; le serveur n'a rien : ils montent.
+        let favoris_bureau = ["a1", "a2", "a3", "m:a4", "i:a5"];
+        let mut a = Appareil::brancher(
+            "bureau",
+            &cfg_a,
+            CopieMarques { listes: m(&[], &favoris_bureau, &[]), version: 0, a_envoyer: false },
+        );
+        a.pomper(1500);
+        assert_eq!(a.copie.version, 1, "{:?}", a.copie);
+        assert_eq!(marques_du_serveur()["favoris"], json!(favoris_bureau));
+        assert_eq!(marques_du_serveur()["version"], 1);
+
+        // 2. Le Fold a les siens : union, l'ordre du serveur d'abord ; diffusée au bureau.
+        let mut b = Appareil::brancher(
+            "fold",
+            &cfg_b,
+            CopieMarques { listes: m(&["b1"], &["a2", "b2"], &["e1"]), version: 0, a_envoyer: false },
+        );
+        b.pomper(1500);
+        a.pomper(500);
+        let attendu = m(&["b1"], &["a1", "a2", "a3", "m:a4", "i:a5", "b2"], &["e1"]);
+        assert_eq!(b.copie.listes, attendu);
+        assert_eq!(a.copie.listes, attendu, "diffusion");
+        assert_eq!(a.copie.version, 2);
+        assert_eq!(b.copie.version, 2);
+
+        // 3. Un appareil neuf (rien) : il prend tout, sans rien envoyer.
+        let mut c = Appareil::brancher("neuf", &cfg_c, CopieMarques::default());
+        c.pomper(1500);
+        assert_eq!(c.copie.listes, attendu);
+        assert_eq!(marques_du_serveur()["version"], 2);
+
+        // 4. Un retrait et un réordonnancement, partout.
+        a.changer(|l| l.favoris.retain(|x| x != "a3"));
+        a.pomper(500);
+        a.changer(|l| l.favoris.swap(0, 1));
+        a.pomper(500);
+        b.pomper(500);
+        c.pomper(500);
+        let attendu = m(&["b1"], &["a2", "a1", "m:a4", "i:a5", "b2"], &["e1"]);
+        for x in [&a, &b, &c] {
+            assert_eq!(x.copie.listes, attendu, "{}", x.nom);
+            assert_eq!(x.copie.version, 4, "{}", x.nom);
+        }
+
+        // 5. Garde-fou : des listes vides d'une version périmée sont refusées.
+        let brute = json!({"marques": {"head": [], "favoris": [], "epingles": [], "version": 1, "id": 999}});
+        assert!(c.pont.envoyer_marques(&brute));
+        std::thread::sleep(Duration::from_millis(500));
+        let reponses = c.pont.recevoir_marques();
+        println!("refus : {reponses:?}");
+        assert!(reponses.iter().any(|n| matches!(n,
+            NouvelleMarques::Recues { id: Some(999), refus: Some(_), version: 4, marques } if *marques == attendu)));
+        assert_eq!(marques_du_serveur()["version"], 4);
+        assert_eq!(marques_du_serveur()["favoris"], json!(["a2", "a1", "m:a4", "i:a5", "b2"]));
+        // Une version périmée non vide : union, rien ne se perd.
+        let brute = json!({"marques": {"head": ["b1"], "favoris": ["z"], "epingles": ["e1"], "version": 1, "id": 1000}});
+        assert!(c.pont.envoyer_marques(&brute));
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(marques_du_serveur()["favoris"], json!(["z", "a2", "a1", "m:a4", "i:a5", "b2"]));
+        assert_eq!(marques_du_serveur()["version"], 5);
+        a.pomper(300);
+        b.pomper(300);
+        c.pomper(300);
+        a.changer(|l| l.favoris.retain(|x| x != "z"));
+        a.pomper(500);
+        b.pomper(300);
+        c.pomper(300);
+
+        // 6. Vider une liste exprès, à jour : accepté et diffusé.
+        a.changer(|l| l.head.clear());
+        a.pomper(500);
+        b.pomper(500);
+        c.pomper(500);
+        assert_eq!(marques_du_serveur()["head"], json!([]));
+        assert!(b.copie.listes.head.is_empty() && c.copie.listes.head.is_empty());
+        let v = a.copie.version;
+        assert_eq!(b.copie.version, v);
+
+        // 7. Rejeu : le Fold se débranche, change hors ligne ; le bureau aussi.
+        let copie_b = b.copie.clone();
+        drop(b);
+        std::thread::sleep(Duration::from_millis(300));
+        a.changer(|l| l.favoris.push("y".into()));
+        a.pomper(500);
+        let mut copie_b = copie_b;
+        copie_b.listes.favoris.push("x".into());
+        copie_b.a_envoyer = true;
+        let mut b = Appareil::brancher("fold", &cfg_b, copie_b);
+        b.pomper(1500);
+        a.pomper(500);
+        c.pomper(500);
+        for x in [&a, &b, &c] {
+            assert!(x.copie.listes.favoris.contains(&"x".to_string()), "{} : x", x.nom);
+            assert!(x.copie.listes.favoris.contains(&"y".to_string()), "{} : y", x.nom);
+            assert_eq!(x.copie.listes, a.copie.listes, "{}", x.nom);
+        }
+        // Un appareil à jour qui se rebranche reçoit le rejeu et ne change rien.
+        let copie_c = c.copie.clone();
+        drop(c);
+        std::thread::sleep(Duration::from_millis(300));
+        let mut c = Appareil::brancher("neuf", &cfg_c, copie_c.clone());
+        c.pomper(1500);
+        assert_eq!(c.copie, copie_c, "rejeu");
+        println!("final : {}", marques_du_serveur());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let d = std::env::var("JASETTE_DATA").unwrap();
+            let mode = fs::metadata(Path::new(&d).join("serveur/marques.json")).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
     }
 }

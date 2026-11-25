@@ -186,8 +186,9 @@ qu'on écrirait sur l'entrée standard du pont (voir l'en-tête de
 **tous** les clients branchés, y compris les réponses aux commandes d'un
 autre client.
 
-**Rejeu.** Juste après `{"auth":"ok"}`, le serveur envoie, pour chaque
-service, le dernier état connu, dans cet ordre et s'ils existent : `hello`,
+**Rejeu.** Juste après `{"auth":"ok"}`, le serveur envoie d'abord les
+marques (`{"marques":{…}}`, §5.5), puis, pour chaque service, le dernier
+état connu, dans cet ordre et s'ils existent : `hello`,
 `state`, `account`, `avatar_moi`, `qr` (seulement en cours d'association),
 `history_pin` (seulement s'il attend un NIP : `{"needed":true}`). Un client
 qui ajoute un service en cours de route peut redemander ce rejeu :
@@ -211,7 +212,73 @@ envoie ensuite `hello` puis son état. Le client ne voit jamais `pont_ferme`.
 - Un client trop lent (8192 événements en attente) est coupé ; il se
   reconnecte et reçoit le rejeu.
 
-### 5.4 Reconnexion (côté client)
+### 5.5 Marques (Head, favoris, épinglées)
+
+Les marques de l'utilisateur sont gardées par le serveur et partagées entre
+tous ses appareils. Ce sont trois listes **ordonnées** d'ids de
+conversations, tels que l'interface les voit (« m: » pour Messenger,
+« i: » pour Instagram, sans préfixe pour Google) :
+
+- `head` : la grille en tête de la boîte de réception ;
+- `favoris` : la vue de l'étoile (`etoiles` dans les réglages du bureau) ;
+- `epingles` : les conversations épinglées en haut de la liste.
+
+C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
+
+**Serveur → client** (rejeu, juste après `{"auth":"ok"}`, puis à chaque
+changement, à **tous** les clients) :
+
+```json
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"version":7}}
+```
+
+`version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
+encore rien reçu (listes vides).
+
+**Client → serveur** :
+
+```json
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"version":7,"id":12}}
+```
+
+- `version` : la dernière version reçue du serveur (0 si aucune).
+- `id` (facultatif, entier) : renvoyé tel quel dans la réponse **à ce client
+  seulement**, pour qu'il reconnaisse la réponse à sa propre trame.
+- Une liste absente ne change pas. Ids vides ou en double retirés ; au plus
+  5000 ids par liste, 512 octets par id.
+
+Règles du serveur :
+
+1. `version` = la sienne : les listes sont prises telles quelles (une liste
+   vide l'est exprès : c'est ainsi qu'un client à jour vide une liste).
+2. `version` ≠ la sienne (client en retard) :
+   - **garde-fou** : si une liste reçue est vide alors que celle du serveur
+     ne l'est pas, la trame est **refusée** ; le client reçoit les marques
+     du serveur, avec `"refus":"<texte>"` (et son `id`) ;
+   - sinon, union : les listes du client dans leur ordre, puis les ids du
+     serveur qu'elles n'ont pas.
+3. Si rien ne change, seul l'expéditeur reçoit l'état courant (avec son
+   `id`). Sinon le serveur écrit `marques.json`, passe à `version+1` et
+   diffuse les nouvelles marques à tous (l'expéditeur les reçoit avec son `id`).
+
+Côté client (`src/distant.rs`, `SuiviMarques` ; `Marques.kt` sur Android) :
+les marques reçues remplacent la copie locale, qui garde aussi la dernière
+`version` reçue et un drapeau « changé ici, pas encore confirmé ». Une seule
+trame en vol à la fois ; les changements faits entre-temps partent à la
+réponse. À la réception :
+
+- version 0 (serveur vide) : le client envoie ses marques locales, s'il en a ;
+- jamais synchronisé avec ce serveur (première connexion, ou autre serveur),
+  ou changé ici alors que la version a bougé : **union** — l'ordre du
+  serveur, puis les ids locaux qui manquent — renvoyée au serveur si elle
+  diffère ;
+- changé ici et version inchangée : la copie locale est renvoyée ;
+- sinon : les marques du serveur remplacent la copie locale.
+
+Rien n'est mis en file pendant une coupure : à la reconnexion, le rejeu
+donne l'état du serveur et la règle ci-dessus s'applique.
+
+### 5.6 Reconnexion (côté client)
 
 Une seule connexion par serveur, partagée par tous les services. Si elle
 tombe : montrer `state: reconnecting` pour chaque service branché, puis
@@ -294,7 +361,9 @@ Le serveur ne sert que des fichiers réguliers :
 `~/.local/share/jasette` (le même dossier que les ponts).
 `<données>/serveur/` (0700) contient `cert.pem`, `cle.pem`,
 `appareils.json` (noms, SHA-256 des jetons, dates), `jumelage.json` (code en
-cours) et `depots/`, tous en 0600. Les journaux (sortie d'erreur) ne
+cours), `marques.json` (§5.5 ; écrit par fichier temporaire puis renommage,
+la version précédente dans `marques.json.bak` ; un fichier illisible est mis
+de côté, jamais écrasé) et `depots/`, tous en 0600. Les journaux (sortie d'erreur) ne
 contiennent jamais de jeton, de code ni de cookie.
 
 ## 8. Résumé des trames
@@ -311,6 +380,8 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"svc":…,"ev":{…}}` | événement d'un pont |
 | C→S | `{"rejouer":"<svc>"}` | redemander l'état d'un service |
 | ↔ | `{"ping":n}` / `{"pong":n}` | signes de vie |
+| S→C | `{"marques":{"head","favoris","epingles","version"[,"id","refus"]}}` | rejeu, changement |
+| C→S | `{"marques":{"head","favoris","epingles","version"[,"id"]}}` | changement local |
 | C→S | `{"get":{"id","chemin","sha256"}}` | télécharger |
 | S→C | `{"fichier":{"id",…}}` | morceaux ou erreur |
 | C→S | `{"put":{"id","nom","donnees","fin"}}` | téléverser |

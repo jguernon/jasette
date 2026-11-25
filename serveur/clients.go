@@ -44,6 +44,7 @@ type Serveur struct {
 	mu      sync.Mutex
 	clients map[*Client]struct{}
 	ponts   map[string]*Pont
+	marques Marques // sous mu ; voir marques.go
 
 	empreinte string
 	racines   []racine
@@ -89,11 +90,12 @@ func (s *Serveur) diffuserVerrouille(trame []byte) {
 	}
 }
 
-// inscrire ajoute un client et lui rejoue l'état de chaque pont, sans
-// trou ni doublon avec la diffusion.
+// inscrire ajoute un client et lui rejoue les marques, puis l'état de
+// chaque pont, sans trou ni doublon avec la diffusion.
 func (s *Serveur) inscrire(c *Client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	c.evs <- trameMarques(s.marques, nil, "")
 	for _, svc := range s.servicesTries() {
 		for _, t := range s.ponts[svc].rejeu() {
 			c.evs <- t
@@ -360,6 +362,7 @@ type trame struct {
 	Ping    json.RawMessage `json:"ping"`
 	Pong    json.RawMessage `json:"pong"`
 	Rejouer string          `json:"rejouer"`
+	Marques json.RawMessage `json:"marques"`
 	Get     *struct {
 		ID     int64  `json:"id"`
 		Chemin string `json:"chemin"`
@@ -385,6 +388,8 @@ func (c *Client) trame(ligne []byte) {
 		c.envoyerA(map[string]json.RawMessage{"pong": t.Ping})
 	case t.Pong != nil:
 		// signe de vie : le délai de lecture est déjà repoussé
+	case t.Marques != nil:
+		c.srv.recevoirMarques(c, t.Marques)
 	case t.Rejouer != "":
 		c.srv.rejouer(c, t.Rejouer)
 	case t.Get != nil:

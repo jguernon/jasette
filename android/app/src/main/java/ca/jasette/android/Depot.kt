@@ -113,7 +113,17 @@ object Depot {
         generation++
         val cfg = ConfigServeur.lire(appli)
         serveur = cfg
-        if (cfg != null) connexion = ConnexionServeur(cfg, ConnexionServeur.dossierCache(appli, cfg.adresse))
+        if (cfg != null) {
+            // Les marques : le serveur est la source (Marques.recu, sur le fil principal).
+            val g = generation
+            val cx = ConnexionServeur(cfg, ConnexionServeur.dossierCache(appli, cfg.adresse)) { m ->
+                principal.post { if (g == generation) Marques.recu(m) }
+            }
+            connexion = cx
+            Marques.brancher(cfg.empreinte) { cx.envoyerMarques(it) }
+        } else {
+            Marques.brancher(null, null)
+        }
         Service.entries.forEach { lancer(it) }
     }
 
@@ -126,6 +136,7 @@ object Depot {
         ponts.clear()
         connexion?.fermer()
         connexion = null
+        Marques.brancher(null, null)
     }
 
     /** Passe en mode client ([config]) ou revient « Sur cet appareil » (null). */

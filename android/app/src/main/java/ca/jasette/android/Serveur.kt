@@ -332,8 +332,16 @@ private fun ouvrir(adresse: String, attendue: String?): Accueil {
 /**
  * La connexion à un serveur jumelé, partagée par les [PontDistant]. Elle se
  * branche et se rebranche toute seule dans son propre fil.
+ *
+ * [surMarques] reçoit, dans l'ordre et sur le fil des événements, chaque
+ * trame `marques` (§5.5 : le contenu de {"marques":{…}}), ou null quand la
+ * connexion tombe.
  */
-class ConnexionServeur(private val config: ConfigServeur, private val cache: File) {
+class ConnexionServeur(
+    private val config: ConfigServeur,
+    private val cache: File,
+    private val surMarques: (JSONObject?) -> Unit = {},
+) {
     private val abonnes = ConcurrentHashMap<String, (JSONObject) -> Unit>()
     private val verrou = Any()
     /** La connexion en cours (null pendant une coupure) et les commandes gardées en attendant. */
@@ -417,6 +425,23 @@ class ConnexionServeur(private val config: ConfigServeur, private val cache: Fil
                 synchronized(verrou) { enAttente.add(ligne) }
             }
         }
+    }
+
+    /**
+     * Envoie une trame `marques` tout de suite, sans la garder pendant une
+     * coupure (le rejeu suivant dira où en est le serveur). Faux si coupée.
+     */
+    fun envoyerMarques(trame: JSONObject): Boolean {
+        val l = lienCourant() ?: return false
+        val ligne = trame.toString()
+        executer(ecrivain) {
+            try {
+                l.ecrire(ligne)
+            } catch (_: Exception) {
+                l.fermer()
+            }
+        }
+        return true
     }
 
     /** Une commande pour le pont [svc] du serveur. */
@@ -529,6 +554,7 @@ class ConnexionServeur(private val config: ConfigServeur, private val cache: Fil
             val perdue = JSONObject().put("erreur", t("connexion perdue")).put("fin", true)
             attentes.values.forEach { it.offer(perdue) }
             attentes.clear()
+            executer(traitement) { surMarques(null) }
             if (ferme) break
             Log.w(ETIQUETTE, "serveur ${config.adresse} : connexion perdue")
             versTous(JSONObject().put("ev", "state").put("state", "reconnecting"))
@@ -559,6 +585,10 @@ class ConnexionServeur(private val config: ConfigServeur, private val cache: Fil
                     reecrire(ev)
                     vers(svc, ev)
                 }
+            }
+            v.has("marques") -> {
+                val m = v.optJSONObject("marques") ?: return
+                executer(traitement) { surMarques(m) }
             }
             v.has("ping") -> {
                 val p = v.get("ping")

@@ -22,6 +22,7 @@ pub mod distant;
 
 #[allow(unused_imports)] // utilisés par l'interface (réglages « serveur Jasette »)
 pub use distant::{ConfigServeur, PORT_PAR_DEFAUT, Verification, code_verification, jumeler, verifier_serveur};
+pub use distant::{CopieMarques, Marques, NouvelleMarques, SuiviMarques};
 
 pub struct Pont {
     genre: Genre,
@@ -137,6 +138,25 @@ impl Pont {
         match &self.genre {
             Genre::Local { nouvelles, .. } => nouvelles.lock().map(|rx| rx.try_iter().collect()).unwrap_or_default(),
             Genre::Distant(d) => d.recevoir(),
+        }
+    }
+}
+
+impl Pont {
+    /// Les marques reçues du serveur Jasette (rien pour un pont local).
+    pub fn recevoir_marques(&self) -> Vec<NouvelleMarques> {
+        match &self.genre {
+            Genre::Local { .. } => Vec::new(),
+            Genre::Distant(d) => d.recevoir_marques(),
+        }
+    }
+
+    /// Envoie une trame `marques` au serveur ; faux pour un pont local ou
+    /// une connexion coupée.
+    pub fn envoyer_marques(&self, trame: &Value) -> bool {
+        match &self.genre {
+            Genre::Local { .. } => false,
+            Genre::Distant(d) => d.envoyer_marques(trame),
         }
     }
 }

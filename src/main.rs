@@ -1103,6 +1103,32 @@ struct Reglages {
     /// Afficher l'heure de chaque message (le (i) du fil reste un interrupteur ponctuel).
     #[serde(default)]
     heures_messages: bool,
+    /// Serveur Jasette : la dernière version des marques (Head, favoris,
+    /// épinglées) reçue du serveur ; 0 = jamais synchronisé avec lui.
+    #[serde(default)]
+    marques_version: u64,
+    /// Marques changées ici, pas encore confirmées par le serveur.
+    #[serde(default)]
+    marques_a_envoyer: bool,
+    /// L'empreinte du serveur dont vient `marques_version`.
+    #[serde(default)]
+    marques_serveur: String,
+    /// Les champs inconnus (écrits par une version plus récente de Jasette) :
+    /// relus et réécrits tels quels, jamais perdus.
+    #[serde(flatten)]
+    autres: serde_json::Map<String, Value>,
+    /// Les marques telles que lues ou écrites la dernière fois par cette
+    /// instance (pas gardé) : la base de la fusion à trois de `garder()`.
+    #[serde(skip)]
+    marques_base: Option<BlocMarques>,
+}
+
+/// Ce qui, dans les réglages, touche aux marques : les trois listes et
+/// leur état de synchronisation avec le serveur Jasette.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct BlocMarques {
+    copie: pont::CopieMarques,
+    serveur: String,
 }
 
 fn vrai() -> bool {
@@ -1128,6 +1154,11 @@ impl Default for Reglages {
             etoiles: Vec::new(),
             epingles: Vec::new(),
             heures_messages: false,
+            marques_version: 0,
+            marques_a_envoyer: false,
+            marques_serveur: String::new(),
+            autres: serde_json::Map::new(),
+            marques_base: None,
         }
     }
 }
@@ -1152,28 +1183,177 @@ fn dossier_medias() -> PathBuf {
 }
 
 impl Reglages {
+    /// Lit reglages.json. S'il est abîmé : champ par champ (ce qui se lit
+    /// est gardé), le reste pris dans reglages.json.bak, et le fichier abîmé
+    /// copié dans reglages.json.illisible. Jamais de retour silencieux aux
+    /// valeurs par défaut quand quelque chose se lit encore.
     fn charger() -> Self {
-        std::fs::read_to_string(dossier_donnees().join("reglages.json"))
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
-    }
-    fn garder(&self) {
         let dir = dossier_donnees();
-        let _ = std::fs::create_dir_all(&dir);
-        if let Ok(s) = serde_json::to_string_pretty(self) {
-            let tmp = dir.join("reglages.json.tmp");
-            if std::fs::write(&tmp, s).is_ok() {
-                // Le jeton du serveur Jasette y est : lisible par moi seul.
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+        let chemin = dir.join("reglages.json");
+        let bak = dir.join("reglages.json.bak");
+        let mut r = match std::fs::read_to_string(&chemin) {
+            Ok(texte) => match serde_json::from_str::<Reglages>(&texte) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("jasette : reglages.json illisible ({e}) : lecture champ par champ, puis la copie .bak");
+                    let _ = std::fs::write(dir.join("reglages.json.illisible"), &texte);
+                    Self::reparer(&texte, &bak)
                 }
-                let _ = std::fs::rename(tmp, dir.join("reglages.json"));
+            },
+            // Pas de reglages.json, mais une copie : on la reprend.
+            Err(_) => Self::lire_fichier(&bak).unwrap_or_default(),
+        };
+        r.marques_base = Some(r.bloc());
+        r
+    }
+
+    /// Un reglages.json abîmé : ses champs lisibles, le reste pris dans la copie .bak.
+    fn reparer(texte: &str, bak: &std::path::Path) -> Self {
+        let base = Self::lire_fichier(bak).unwrap_or_default();
+        match serde_json::from_str::<Value>(texte) {
+            Ok(v) => Self::champ_par_champ(base, &v),
+            Err(_) => base,
+        }
+    }
+
+    /// Un fichier de réglages entier, ou champ par champ s'il est abîmé ;
+    /// None s'il manque ou n'est pas du JSON.
+    fn lire_fichier(chemin: &std::path::Path) -> Option<Self> {
+        let texte = std::fs::read_to_string(chemin).ok()?;
+        if let Ok(r) = serde_json::from_str::<Reglages>(&texte) {
+            return Some(r);
+        }
+        let v = serde_json::from_str::<Value>(&texte).ok()?;
+        Some(Self::champ_par_champ(Reglages::default(), &v))
+    }
+
+    /// Prend dans `v` chaque champ qui se lit, un à un ; les autres restent ceux de `base`.
+    fn champ_par_champ(base: Reglages, v: &Value) -> Reglages {
+        let Some(objet) = v.as_object() else { return base };
+        let Ok(mut courant) = serde_json::to_value(&base) else { return base };
+        for (cle, valeur) in objet {
+            let mut essai = courant.clone();
+            essai[cle.as_str()] = valeur.clone();
+            if serde_json::from_value::<Reglages>(essai.clone()).is_ok() {
+                courant = essai;
+            } else {
+                eprintln!("jasette : réglage « {cle} » illisible : ignoré");
+            }
+        }
+        serde_json::from_value(courant).unwrap_or(base)
+    }
+
+    fn bloc(&self) -> BlocMarques {
+        BlocMarques {
+            copie: pont::CopieMarques {
+                listes: pont::Marques {
+                    head: self.head.clone(),
+                    favoris: self.etoiles.clone(),
+                    epingles: self.epingles.clone(),
+                },
+                version: self.marques_version,
+                a_envoyer: self.marques_a_envoyer,
+            },
+            serveur: self.marques_serveur.clone(),
+        }
+    }
+
+    fn poser_bloc(&mut self, b: BlocMarques) {
+        self.head = b.copie.listes.head;
+        self.etoiles = b.copie.listes.favoris;
+        self.epingles = b.copie.listes.epingles;
+        self.marques_version = b.copie.version;
+        self.marques_a_envoyer = b.copie.a_envoyer;
+        self.marques_serveur = b.serveur;
+    }
+
+    /// Fusion à trois des marques avec celles du disque (`disque`), qu'une
+    /// autre instance de Jasette a pu écrire depuis notre lecture : si nous
+    /// n'avons rien changé, les siennes gagnent (une instance fraîchement
+    /// démarrée, ou restée sur une vieille copie, n'écrase plus rien) ; si
+    /// elle n'a rien changé, les nôtres ; si les deux ont changé, l'union.
+    fn fusionner_marques(&mut self, disque: BlocMarques) {
+        let nous = self.bloc();
+        if disque == nous {
+            return;
+        }
+        match self.marques_base.clone() {
+            Some(base) if nous == base => self.poser_bloc(disque),
+            Some(base) if disque == base => {}
+            _ => {
+                let mut b = nous.clone();
+                b.copie.listes = pont::Marques::union(&nous.copie.listes, &disque.copie.listes);
+                b.copie.version = nous.copie.version.min(disque.copie.version);
+                b.copie.a_envoyer = true;
+                eprintln!("jasette : marques changées par une autre instance : union des deux");
+                self.poser_bloc(b);
             }
         }
     }
+
+    /// Écrit reglages.json (0600, par renommage d'un fichier temporaire
+    /// synchronisé), après avoir copié l'ancien, s'il est lisible, dans
+    /// reglages.json.bak. Les marques passent d'abord par la fusion à trois.
+    fn garder(&mut self) {
+        let dir = dossier_donnees();
+        let _ = std::fs::create_dir_all(&dir);
+        let chemin = dir.join("reglages.json");
+        let ancien = std::fs::read_to_string(&chemin).ok();
+        if let Some(texte) = &ancien
+            && let Ok(v) = serde_json::from_str::<Value>(texte)
+        {
+            // Lu comme charger() le lirait, pour comparer à la même base.
+            let disque = serde_json::from_value::<Reglages>(v)
+                .unwrap_or_else(|_| Self::reparer(texte, &dir.join("reglages.json.bak")));
+            self.fusionner_marques(disque.bloc());
+            // Une copie de la version précédente, seulement si elle se lit.
+            let _ = ecrire_atomique(&dir.join("reglages.json.bak"), texte.as_bytes());
+        }
+        match serde_json::to_string_pretty(self) {
+            Ok(s) => match ecrire_atomique(&chemin, s.as_bytes()) {
+                Ok(()) => self.marques_base = Some(self.bloc()),
+                Err(e) => eprintln!("jasette : reglages.json non écrit : {e}"),
+            },
+            Err(e) => eprintln!("jasette : réglages : {e}"),
+        }
+    }
+}
+
+/// Écrit un fichier en entier : fichier temporaire propre à ce processus,
+/// lisible par moi seul (le jeton du serveur Jasette est dans les réglages),
+/// synchronisé sur le disque, puis renommé (jamais à moitié écrit).
+fn ecrire_atomique(chemin: &std::path::Path, donnees: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let nom = chemin.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let tmp = chemin.with_file_name(format!(".{nom}.{}.tmp", std::process::id()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let ecrit = (|| {
+        let mut f = options.open(&tmp)?;
+        f.write_all(donnees)?;
+        f.sync_all()
+    })();
+    if let Err(e) = ecrit {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
+    std::fs::rename(&tmp, chemin)?;
+    if let Some(d) = chemin.parent()
+        && let Ok(d) = std::fs::File::open(d)
+    {
+        let _ = d.sync_all();
+    }
+    Ok(())
 }
 
 /// Un résultat rempli par un fil à part, lu par la boucle de l'interface.
@@ -1324,6 +1504,8 @@ struct Jasette {
     mosaiques: HashMap<String, Vec<(String, String, Option<PathBuf>)>>,
     // Réglages
     reglages: Reglages,
+    /// La synchronisation des marques avec le serveur Jasette (mode client ou serveur).
+    suivi_marques: pont::SuiviMarques,
     section: Option<Section>,
     ajout_compte: bool,
     /// La fenêtre est-elle au premier plan (sinon : notifications) ?
@@ -1914,6 +2096,17 @@ impl Jasette {
                                 change = true;
                             }
                         }
+                        // Les marques du serveur Jasette (une file par connexion, partagée par les services).
+                        let mut marques = this.pont.as_ref().map(|p| p.recevoir_marques()).unwrap_or_default();
+                        for svc in SERVICES_META {
+                            if let Some(p) = this.meta(svc).pont.as_ref() {
+                                marques.extend(p.recevoir_marques());
+                            }
+                        }
+                        for n in marques {
+                            this.marques_recues(n);
+                            change = true;
+                        }
                         let retour = this.connexion.lock().ok().and_then(|mut r| r.take());
                         if let Some(r) = retour {
                             this.connexion_ouverte = false;
@@ -2010,6 +2203,7 @@ impl Jasette {
             avatars: HashMap::new(),
             mosaiques: HashMap::new(),
             reglages,
+            suivi_marques: pont::SuiviMarques::default(),
             serveur_occupe: false,
             accueil_google: false,
             accueil_autonome: false,
@@ -2358,7 +2552,10 @@ impl Jasette {
                 }
             }
             "account" => {
-                if let Some(email) = v.get("email").and_then(Value::as_str) {
+                // Rejoué à chaque (re)connexion : n'écrire les réglages que s'il change.
+                if let Some(email) = v.get("email").and_then(Value::as_str)
+                    && self.reglages.email.as_deref() != Some(email)
+                {
                     self.reglages.email = Some(email.to_string());
                     self.reglages.garder();
                 }
@@ -3863,6 +4060,48 @@ impl Jasette {
             )
     }
 
+    /// Les marques ont changé ici (Head, favoris, épingles, ordre) : on les
+    /// garde, et on les envoie au serveur Jasette s'il y en a un.
+    fn marques_changees(&mut self) {
+        let mut b = self.reglages.bloc();
+        let trame = self.suivi_marques.changement(&mut b.copie);
+        self.reglages.poser_bloc(b);
+        self.reglages.garder();
+        if let Some(t) = trame {
+            self.envoyer_marques(t);
+        }
+    }
+
+    /// Une nouvelle du serveur à propos des marques : la copie locale suit.
+    fn marques_recues(&mut self, n: pont::NouvelleMarques) {
+        let avant = self.reglages.bloc();
+        let mut b = avant.clone();
+        // Un autre serveur que celui des marques locales : jamais synchronisé avec lui.
+        if let Some(cfg) = serveur_actif(&self.reglages)
+            && b.serveur != cfg.empreinte
+        {
+            b.serveur = cfg.empreinte.clone();
+            b.copie.version = 0;
+        }
+        let trame = self.suivi_marques.recu(n, &mut b.copie);
+        if b != avant {
+            self.reglages.poser_bloc(b);
+            self.reglages.garder();
+        }
+        if let Some(t) = trame {
+            self.envoyer_marques(t);
+        }
+    }
+
+    /// Les trois services partagent la connexion au serveur : le premier pont distant suffit.
+    fn envoyer_marques(&mut self, trame: Value) {
+        let envoye = self.pont.as_ref().is_some_and(|p| p.envoyer_marques(&trame))
+            || SERVICES_META.iter().any(|s| self.meta(*s).pont.as_ref().is_some_and(|p| p.envoyer_marques(&trame)));
+        if !envoye {
+            self.suivi_marques.envoi_rate();
+        }
+    }
+
     /// Monte (-1) ou descend (+1) un favori d'un cran, et garde l'ordre.
     fn deplacer_favori(&mut self, id: &str, sens: i32) {
         let f = &mut self.reglages.etoiles;
@@ -3870,7 +4109,7 @@ impl Jasette {
             let j = i as i32 + sens;
             if j >= 0 && (j as usize) < f.len() {
                 f.swap(i, j as usize);
-                self.reglages.garder();
+                self.marques_changees();
             }
         }
     }
@@ -5751,7 +5990,7 @@ impl Jasette {
                     } else {
                         f.push(id_f.clone());
                     }
-                    this.reglages.garder();
+                    this.marques_changees();
                     this.menu_conv = false;
                     cx.notify();
                 })),
@@ -5771,7 +6010,7 @@ impl Jasette {
                     } else {
                         f.push(id_t.clone());
                     }
-                    this.reglages.garder();
+                    this.marques_changees();
                     this.menu_conv = false;
                     cx.notify();
                 })),
@@ -5791,7 +6030,7 @@ impl Jasette {
                     } else {
                         e.push(id_e.clone());
                     }
-                    this.reglages.garder();
+                    this.marques_changees();
                     this.menu_conv = false;
                     cx.notify();
                 })),
@@ -6521,6 +6760,7 @@ impl Jasette {
     /// Refait tous les ponts selon le mode choisi (ici, ou par le serveur).
     /// Les anciens s'arrêtent d'abord : deux ponts sur une même session se la voleraient.
     fn rebrancher(&mut self) {
+        self.suivi_marques.reinitialiser();
         self.pont = None;
         self.messenger.pont = None;
         self.instagram.pont = None;
@@ -8134,4 +8374,84 @@ fn main() {
         .expect("fenêtre");
         cx.activate(true);
     });
+}
+
+#[cfg(test)]
+mod essais_reglages {
+    use super::*;
+
+    /// charger/garder dans un dossier de .cache (JASETTE_DATA), jamais dans les vraies données.
+    #[test]
+    fn reglages_robustes() {
+        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".cache/essai-reglages");
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        // SAFETY : seul essai de ce binaire qui lit JASETTE_DATA.
+        unsafe { std::env::set_var("JASETTE_DATA", &d) };
+        let f = d.join("reglages.json");
+
+        // Un fichier d'avant (sans les champs de synchronisation), avec un champ inconnu.
+        std::fs::write(&f, r#"{"theme":"ega","etoiles":["a","m:b"],"favoris":["h"],"futur":{"x":1}}"#).unwrap();
+        let mut r = Reglages::charger();
+        assert_eq!(r.etoiles, ["a", "m:b"]);
+        assert_eq!(r.head, ["h"]);
+        assert_eq!(r.marques_version, 0);
+        r.garder();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
+        assert_eq!(v["futur"]["x"], 1, "champ inconnu gardé");
+        assert!(d.join("reglages.json.bak").is_file());
+
+        // Un champ abîmé : les autres se lisent encore.
+        std::fs::write(&f, r#"{"theme":"verre","etoiles":["a","m:b"],"notifications":"oui","epingles":["p"]}"#).unwrap();
+        let r = Reglages::charger();
+        assert_eq!(r.theme, "verre");
+        assert_eq!(r.etoiles, ["a", "m:b"]);
+        assert_eq!(r.epingles, ["p"]);
+        assert!(r.notifications, "défaut pour le champ illisible");
+        assert!(d.join("reglages.json.illisible").is_file());
+
+        // Pas du JSON du tout : la copie .bak.
+        let mut r = Reglages::charger();
+        r.etoiles = vec!["z".into()];
+        r.garder(); // .bak = le fichier abîmé (du JSON valide), puis le bon
+        r.garder(); // .bak = le bon
+        std::fs::write(&f, "{ tronqué").unwrap();
+        let r = Reglages::charger();
+        assert_eq!(r.etoiles, ["z"], "repli sur .bak");
+
+        // Deux instances : une fraîchement démarrée (listes vides) n'écrase
+        // pas celles qu'une autre a écrites depuis.
+        std::fs::write(&f, r#"{"etoiles":[]}"#).unwrap();
+        let mut neuve = Reglages::charger();
+        let mut autre = Reglages::charger();
+        autre.etoiles = vec!["a".into(), "b".into()];
+        autre.garder();
+        neuve.theme = "ega".into(); // un réglage sans rapport
+        neuve.garder();
+        let r = Reglages::charger();
+        assert_eq!(r.etoiles, ["a", "b"], "listes gardées");
+        assert_eq!(r.theme, "ega");
+        assert_eq!(neuve.etoiles, ["a", "b"], "l'instance suit");
+        // Mais vider exprès une liste, depuis une copie à jour, est permis.
+        let mut r = Reglages::charger();
+        r.etoiles.clear();
+        r.garder();
+        assert!(Reglages::charger().etoiles.is_empty());
+        // Les deux ont changé : union.
+        std::fs::write(&f, r#"{"etoiles":["a"]}"#).unwrap();
+        let mut x = Reglages::charger();
+        let mut y = Reglages::charger();
+        x.etoiles.push("x".into());
+        x.garder();
+        y.etoiles.push("y".into());
+        y.garder();
+        assert_eq!(Reglages::charger().etoiles, ["a", "y", "x"]);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }

@@ -89,6 +89,7 @@ func lancerServeur(adresse, services, binDir string) error {
 		empreinte: fp,
 		depots:    depotsDir(),
 		limiteur:  nouveauLimiteur(10, 10*time.Minute),
+		marques:   chargerMarques(),
 	}
 	srv.interdit, _ = filepath.EvalSymlinks(serveurDir())
 	for _, r := range []racine{{chemin: mediaDir()}, {chemin: dataDir(), mediasSeulement: true}} {
