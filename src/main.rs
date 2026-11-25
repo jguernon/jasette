@@ -5589,6 +5589,7 @@ impl Jasette {
                 .child(
                     div()
                         .flex_1()
+                        .min_w(px(0.))
                         .flex()
                         .flex_col()
                         .gap(px(2.))
@@ -5980,6 +5981,7 @@ impl Jasette {
                     .child(
                         div()
                             .flex_1()
+                            .min_w(px(0.))
                             .flex()
                             .flex_col()
                             .gap(px(2.))
