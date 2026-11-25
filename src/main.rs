@@ -4150,10 +4150,19 @@ impl Jasette {
                 .on_click(move |_, _, _| ouvrir_adresse(&adresse))
                 .child(icone(ic, 17., th().texte_pale))
         };
-        let boutons_appel = div().flex().flex_row().gap(px(2.)).when_some(appel, |d, adresse| {
-            d.child(bouton_appel("appel", "phone", adresse.clone()))
-                .when(service != Service::GoogleMessages, |d| d.child(bouton_appel("video", "video", adresse)))
-        });
+        // La vidéo : Google Messages passe par Google Meet ; Messenger et
+        // Instagram, par leur conversation sur le site (bouton caméra là-bas).
+        let video = if service == Service::GoogleMessages {
+            self.choisie.as_ref().map(|_| "https://meet.google.com/new".to_string())
+        } else {
+            appel.clone()
+        };
+        let boutons_appel = div()
+            .flex()
+            .flex_row()
+            .gap(px(2.))
+            .when_some(video, |d, adresse| d.child(bouton_appel("video", "video", adresse)))
+            .when_some(appel, |d, adresse| d.child(bouton_appel("appel", "phone", adresse)));
         let menu_ouvert = self.menu_conv;
         let bouton_options = div()
             .id("options-conv")
