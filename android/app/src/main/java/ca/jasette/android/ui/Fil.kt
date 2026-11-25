@@ -499,10 +499,12 @@ private fun IconeCoche(c: Coche, surBulle: Boolean) {
 @Composable
 private fun BarreReactions(m: Msg, fermer: () -> Unit, choisir: (String) -> Unit, plus: () -> Unit, copier: (() -> Unit)?) {
     val mienne = m.reactions.firstOrNull { it.fromMe }?.emoji
-    val hauteur = with(LocalDensity.current) { 58.dp.roundToPx() }
+    val ecart = with(LocalDensity.current) { 6.dp.roundToPx() }
+    // Placée d'après les bornes réelles de la bulle : juste au-dessus d'elle
+    // (en dessous s'il n'y a pas la place), alignée du côté de l'expéditeur.
+    val position = remember(m.fromMe, ecart) { PositionAuDessus(m.fromMe, ecart) }
     Popup(
-        alignment = if (m.fromMe) Alignment.TopEnd else Alignment.TopStart,
-        offset = IntOffset(0, -hauteur),
+        popupPositionProvider = position,
         onDismissRequest = fermer,
         properties = PopupProperties(focusable = true),
     ) {
@@ -950,5 +952,24 @@ private fun Galerie(liste: List<Msg>, fermer: () -> Unit, agrandir: (String) -> 
                 }
             }
         }
+    }
+}
+
+/** Pose un popup au-dessus de son ancre (la bulle), sans sortir de la fenêtre. */
+private class PositionAuDessus(private val aDroite: Boolean, private val ecart: Int) :
+    androidx.compose.ui.window.PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: androidx.compose.ui.unit.IntRect,
+        windowSize: androidx.compose.ui.unit.IntSize,
+        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+        popupContentSize: androidx.compose.ui.unit.IntSize,
+    ): IntOffset {
+        val x = if (aDroite) anchorBounds.right - popupContentSize.width else anchorBounds.left
+        var y = anchorBounds.top - popupContentSize.height - ecart
+        if (y < 0) y = anchorBounds.bottom + ecart
+        return IntOffset(
+            x.coerceIn(0, maxOf(0, windowSize.width - popupContentSize.width)),
+            y.coerceIn(0, maxOf(0, windowSize.height - popupContentSize.height)),
+        )
     }
 }
