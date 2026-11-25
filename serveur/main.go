@@ -3,12 +3,13 @@
 // Une machine toujours allumée détient les sessions (Google Messages n'en
 // permet qu'une à la fois) et les autres appareils de l'utilisateur s'y
 // branchent. Le serveur lance un pont par service (jasette-pont,
-// jasette-meta, jasette-ig), comme le fait l'interface en mode local, et
-// partage leurs lignes JSON avec les clients jumelés, sur TLS.
+// jasette-meta, jasette-ig, et s'ils sont là jasette-wa, jasette-signal,
+// jasette-x), comme le fait l'interface en mode local, et partage leurs
+// lignes JSON avec les clients jumelés, sur TLS.
 //
 // Usage :
 //
-//	jasette-serveur [--port 47800] [--ecoute ADRESSE] [--services google,messenger,instagram] [--bin DOSSIER]
+//	jasette-serveur [--port 47800] [--ecoute ADRESSE] [--services google,messenger,instagram,whatsapp,signal,x] [--bin DOSSIER]
 //	jasette-serveur --jumeler         affiche un code de jumelage (10 minutes)
 //	jasette-serveur --appareils       liste les appareils jumelés
 //	jasette-serveur --revoquer NOM    retire un appareil (débranché aussitôt)
@@ -21,6 +22,7 @@ package main
 
 import (
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -41,7 +43,8 @@ func logf(format string, args ...any) { journal.Printf(format, args...) }
 func main() {
 	port := flag.Int("port", portDefaut(), "port TCP d'écoute (TLS)")
 	ecoute := flag.String("ecoute", "", "adresse d'écoute (défaut : toutes)")
-	services := flag.String("services", "google,messenger,instagram", "services à servir, séparés par des virgules")
+	services := flag.String("services", strings.Join(ordreServices, ","),
+		"services à servir, séparés par des virgules (whatsapp, signal, x : omis sans leur binaire)")
 	binDir := flag.String("bin", "", "dossier des ponts (défaut : à côté de jasette-serveur)")
 	jumeler := flag.Bool("jumeler", false, "afficher un code de jumelage valable 10 minutes")
 	appareils := flag.Bool("appareils", false, "lister les appareils jumelés")
@@ -109,6 +112,10 @@ func lancerServeur(adresse, services, binDir string) error {
 			continue
 		}
 		p, err := nouveauPont(srv, svc, binDir)
+		if errors.Is(err, errAbsent) {
+			logf("[%s] binaire absent : service omis", svc)
+			continue
+		}
 		if err != nil {
 			logf("%v : service ignoré", err)
 			continue

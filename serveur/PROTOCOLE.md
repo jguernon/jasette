@@ -150,8 +150,13 @@ Réponses :
 {"erreur":"jeton","texte":"appareil inconnu ou révoqué : jumelez-le de nouveau"}
 ```
 
-`services` : ceux que ce serveur fait tourner (`--services`). Après `ok`,
-la connexion passe au régime du §5, sans limite de durée.
+`services` : ceux que ce serveur fait tourner (`--services`), dans l'ordre
+`google`, `messenger`, `instagram`, `whatsapp`, `signal`, `x`. Les trois
+derniers sont **facultatifs** : le serveur ne les lance que si leur binaire
+est présent (`jasette-wa`, `jasette-signal`, `jasette-x`, voir §5.4) ; sinon
+ils sont simplement absents de la liste. Le client n'affiche que les
+services de cette liste. Après `ok`, la connexion passe au régime du §5,
+sans limite de durée.
 
 Révocation : `jasette-serveur --appareils` liste les appareils,
 `--revoquer <nom>` en retire un ; s'il est branché, il est débranché dans les
@@ -165,9 +170,10 @@ Révocation : `jasette-serveur --appareils` liste les appareils,
 {"svc":"google","cmd":{"cmd":"messages","conv":"123","count":30}}
 ```
 
-`svc` : `google`, `messenger` ou `instagram`. `cmd` : exactement la commande
-qu'on écrirait sur l'entrée standard du pont (voir l'en-tête de
-`pont/main.go` et `pont-meta/main.go`). Particularités :
+`svc` : `google`, `messenger`, `instagram`, `whatsapp`, `signal` ou `x`.
+`cmd` : exactement la commande qu'on écrirait sur l'entrée standard du pont
+(voir l'en-tête de `pont/main.go`, `pont-meta/main.go`, `pont-wa/main.go`,
+`pont-signal/main.go` et `pont-x/main.go`). Particularités :
 
 - `{"cmd":"quit"}` est **ignoré** : le pont appartient au serveur.
 - `send_media` : `path` doit être un chemin **renvoyé par un dépôt** (§6.2) ;
@@ -190,7 +196,11 @@ autre client.
 marques (`{"marques":{…}}`, §5.5), puis, pour chaque service, le dernier
 état connu, dans cet ordre et s'ils existent : `hello`,
 `state`, `account`, `avatar_moi`, `qr` (seulement en cours d'association),
-`history_pin` (seulement s'il attend un NIP : `{"needed":true}`). Un client
+`pair_code` (WhatsApp, seulement en cours d'association par code),
+`history_pin` (seulement s'il attend un NIP : `{"needed":true}`). Le `qr` et
+le `pair_code` gardés sont oubliés dès `paired`, `state` `ready` ou
+`unpaired`, ou si le pont s'arrête ; un `pair_code` remplace le `qr` (le pont
+WhatsApp cesse alors de montrer des QR). Un client
 qui ajoute un service en cours de route peut redemander ce rejeu :
 
 ```json
@@ -211,6 +221,72 @@ envoie ensuite `hello` puis son état. Le client ne voit jamais `pont_ferme`.
   client doit faire de même (aucune ligne depuis 90 s → connexion perdue).
 - Un client trop lent (8192 événements en attente) est coupé ; il se
   reconnecte et reçoit le rejeu.
+
+### 5.4 Connexion des services WhatsApp, Signal et X
+
+Ces trois ponts parlent le même protocole que les autres (mêmes commandes
+`conversations`, `messages`, `send`, `send_media`, `react`, `read`,
+`download`, `new`, `search`, `search_messages`, `unpair`…, mêmes
+événements `hello`, `state`, `account`, `avatar`, `avatar_moi`,
+`conversations`, `message`, `sent`, `media`, `typing`, `error`…). Seule
+l'association diffère. États : `connecting`, `pairing`, `ready`,
+`reconnecting`, `unpaired`.
+
+| Service | Binaire | Données (0700) | Association |
+|---|---|---|---|
+| `whatsapp` | `jasette-wa` (ou `JASETTE_WA`) | `<données>/whatsapp/` | QR ou code à 8 caractères |
+| `signal` | `jasette-signal` (ou `JASETTE_SIGNAL`) | `<données>/signal/` | QR (appareil lié) |
+| `x` | `jasette-x` (ou `JASETTE_X`) | `<données>/x/` | cookies de x.com + code X Chat |
+
+Les binaires sont cherchés comme les autres : variable d'environnement,
+`--bin`, à côté de `jasette-serveur`, puis le `PATH`. Le serveur crée le
+dossier de données en 0700 avant de lancer le pont.
+
+**WhatsApp** (appareil lié, comme WhatsApp Web) :
+
+```json
+{"svc":"whatsapp","cmd":{"cmd":"pair"}}
+{"svc":"whatsapp","cmd":{"cmd":"pair_phone","number":"+15145551234"}}
+```
+
+- `pair` → `state: pairing`, puis des `{"ev":"qr","code":"…","data":"…"}`
+  renouvelés (même texte dans `code` et `data`), à afficher en QR et à
+  scanner dans WhatsApp (Appareils connectés).
+- `pair_phone` (numéro avec l'indicatif du pays) → `{"ev":"pair_code","code":"ABCD-EFGH"}`,
+  à taper sur le téléphone (Associer avec un numéro). Les QR cessent.
+- Réussite : `paired`, puis `account`, `state: ready`. Échec ou délai
+  (10 min) : `error` (`where`: `pair` ou `pair_phone`) et `state: unpaired`.
+- `login` est refusé (erreur) ; `archive` (`conv`, `archived`) est propre à
+  WhatsApp.
+
+**Signal** (appareil lié, comme Signal Desktop) :
+
+```json
+{"svc":"signal","cmd":{"cmd":"pair"}}
+```
+
+- → `state: pairing`, puis `{"ev":"qr","code":"sgnl://linkdevice?…","data":"…"}`,
+  renouvelé à l'expiration ; à scanner dans Signal (Paramètres > Appareils
+  liés). Un nouveau `pair` recommence avec un nouveau code.
+- Réussite : `paired`, puis `account`, `state: ready`. Échec : `error`
+  (`where`: `pair`) et `state: unpaired`. Pas d'ancien historique : seuls
+  les messages reçus après la liaison. `typing` (`conv`, `on`) est accepté.
+
+**X** (messages privés XChat, chiffrés) :
+
+```json
+{"svc":"x","cmd":{"cmd":"login","cookies":{"auth_token":"…","ct0":"…","twid":"u%3D…"},"pin":"1234"}}
+```
+
+- `cookies` : ceux de x.com après connexion dans la fenêtre de connexion
+  (`auth_token` et `ct0` obligatoires, `twid` conseillé). `pin` : le code
+  d'accès X Chat à 4 chiffres (il peut aussi venir dans les cookies sous le
+  nom `jasette_pin`). **Un seul essai par `login`** : X verrouille X Chat
+  après quelques codes faux.
+- → `state: pairing`, puis `paired`, `account`, `state: ready` ; échec :
+  `error` (`where`: `login`) et `state: unpaired`. `pair` est refusé.
+- Les cookies et le code ne passent que dans la commande ; le serveur ne
+  les écrit jamais dans ses journaux.
 
 ### 5.5 Marques (Head, favoris, épinglées)
 
@@ -291,7 +367,9 @@ peuvent être gardées et envoyées après l'`auth` suivante.
 
 Les événements contiennent des chemins de fichiers **du serveur** :
 `avatar.path`, `avatar_moi.path`, `avatars_groupe.members[].path`,
-`media.path`… Le client les télécharge dans un cache local et réécrit les
+`media.path`… (les ponts WhatsApp, Signal et X n'utilisent que `path` :
+`avatar`, `avatar_moi`, `media` ; leurs fichiers sont sous
+`<médias>/avatars/` et `<médias>/pieces/`). Le client les télécharge dans un cache local et réécrit les
 chemins avant de passer l'événement à l'interface. Règle de `distant.rs` :
 toute valeur chaîne qui **commence par `/`** sous une clé `path`, `avatar`,
 `photo`, `image`, `thumb` ou `fichier`, à toute profondeur. Si le
@@ -359,6 +437,9 @@ Le serveur ne sert que des fichiers réguliers :
 
 `<données>` = `JASETTE_DATA`, sinon `$XDG_DATA_HOME/jasette`, sinon
 `~/.local/share/jasette` (le même dossier que les ponts).
+Chaque pont a son dossier, en 0700 : `<données>/whatsapp/`,
+`<données>/signal/`, `<données>/x/` (bases SQLite et session : jamais
+servis par `get`, §6.1).
 `<données>/serveur/` (0700) contient `cert.pem`, `cle.pem`,
 `appareils.json` (noms, SHA-256 des jetons, dates), `jumelage.json` (code en
 cours), `marques.json` (§5.5 ; écrit par fichier temporaire puis renommage,

@@ -2,14 +2,19 @@
 //
 // Chaque ligne de sa sortie standard est un événement JSON, emballé en
 // {"svc":...,"ev":...} et envoyé à tous les clients branchés. On garde le
-// dernier état connu (hello, state, account, avatar_moi, qr, history_pin)
-// pour le rejouer aux clients qui arrivent.
+// dernier état connu (hello, state, account, avatar_moi, qr, pair_code,
+// history_pin) pour le rejouer aux clients qui arrivent.
+//
+// Les services google, messenger et instagram sont les services de base :
+// sans leur pont, le serveur le signale. Les services whatsapp, signal et x
+// sont facultatifs : sans leur binaire, ils sont simplement omis.
 package main
 
 import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -32,7 +37,23 @@ type Pont struct {
 }
 
 // Ordre du rejeu : d'abord qui l'on est, ensuite où l'on en est.
-var sortesRejouees = []string{"hello", "state", "account", "avatar_moi", "qr", "history_pin"}
+// « pair_code » : le code d'association à huit caractères de WhatsApp.
+var sortesRejouees = []string{"hello", "state", "account", "avatar_moi", "qr", "pair_code", "history_pin"}
+
+// Tous les services connus, dans l'ordre où on les présente aux clients.
+var ordreServices = []string{"google", "messenger", "instagram", "whatsapp", "signal", "x"}
+
+// Les services facultatifs : binaire, variable d'environnement qui peut le
+// désigner, et dossier de données (sous <données>) que le pont utilise.
+var pontsFacultatifs = map[string]struct{ bin, variable, dossier string }{
+	"whatsapp": {"jasette-wa", "JASETTE_WA", "whatsapp"},
+	"signal":   {"jasette-signal", "JASETTE_SIGNAL", "signal"},
+	"x":        {"jasette-x", "JASETTE_X", "x"},
+}
+
+// errAbsent : le binaire d'un service facultatif n'est pas là ; ce n'est pas
+// une erreur, le service est omis.
+var errAbsent = errors.New("binaire absent")
 
 // trouverPont cherche le programme d'un service : variable d'environnement,
 // dossier --bin, à côté de jasette-serveur, puis le PATH.
@@ -75,6 +96,19 @@ func nouveauPont(srv *Serveur, svc, binDir string) (*Pont, error) {
 			p.bin = trouverPont("jasette-meta", "JASETTE_META", binDir)
 		}
 		p.env = append(p.env, "JASETTE_META_SERVICE=instagram")
+	case "whatsapp", "signal", "x":
+		f := pontsFacultatifs[svc]
+		p.bin = trouverPont(f.bin, f.variable, binDir)
+		if p.bin == "" {
+			return nil, errAbsent
+		}
+		// Le pont crée lui-même <données>/<dossier> en 0700 ; on le prépare
+		// aussi ici, pour que les droits soient bons dès le départ.
+		d := filepath.Join(dataDir(), f.dossier)
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			return nil, fmt.Errorf("dossier de données de %s : %w", svc, err)
+		}
+		_ = os.Chmod(d, 0o700)
 	default:
 		return nil, errors.New("service inconnu : " + svc)
 	}
@@ -178,13 +212,21 @@ func (p *Pont) recu(ligne []byte) {
 	switch tete.Ev {
 	case "hello", "account", "avatar_moi", "qr":
 		p.dernier[tete.Ev] = trame
+	case "pair_code":
+		// WhatsApp : avec un code d'association, le pont cesse de montrer
+		// des QR ; l'ancien QR ne doit plus être rejoué.
+		p.dernier["pair_code"] = trame
+		delete(p.dernier, "qr")
 	case "state":
 		p.dernier["state"] = trame
-		if tete.State == "ready" {
+		if tete.State == "ready" || tete.State == "unpaired" {
+			// Associé, ou association abandonnée : plus de code à montrer.
 			delete(p.dernier, "qr")
+			delete(p.dernier, "pair_code")
 		}
 	case "paired":
 		delete(p.dernier, "qr")
+		delete(p.dernier, "pair_code")
 	case "history_pin":
 		if tete.Needed {
 			p.dernier["history_pin"] = trame
@@ -202,6 +244,7 @@ func (p *Pont) signalerArret() {
 	p.srv.mu.Lock()
 	defer p.srv.mu.Unlock()
 	delete(p.dernier, "qr")
+	delete(p.dernier, "pair_code")
 	delete(p.dernier, "history_pin")
 	p.dernier["state"] = trame
 	p.srv.diffuserVerrouille(trame)

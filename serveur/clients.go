@@ -125,7 +125,7 @@ func (s *Serveur) desinscrire(c *Client) {
 
 func (s *Serveur) servicesTries() []string {
 	var r []string
-	for _, svc := range []string{"google", "messenger", "instagram"} {
+	for _, svc := range ordreServices {
 		if s.ponts[svc] != nil {
 			r = append(r, svc)
 		}
