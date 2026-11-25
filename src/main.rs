@@ -2660,19 +2660,6 @@ impl Jasette {
                     }))
                     .child(icone("images", 22., ton(th().texte_fort, th().icone))),
             )
-            .child(
-                Self::bouton_rail("r-nouveau", false)
-                    .border_1()
-                    .border_color(ton(ca(TEXTE_PALE, 0.6), c(0x48484a)))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.section = None;
-                        this.galerie = None;
-                        this.nouveau_ouvert = true;
-                        this.numero.update(cx, |s, cx| s.focus(window, cx));
-                        cx.notify();
-                    }))
-                    .child(icone("message-circle-plus", 20., ton(th().texte_fort, th().icone))),
-            )
             .child(div().w(px(32.)).h(px(1.)).my(px(4.)).bg(ton(blanc(0.8), c(0x38383a))))
             .when(self.etat != Etat::NonAssocie, |d| d.child(
                 Self::bouton_rail("r-gm", !en_reglages && self.vue == Vue::Service(Service::GoogleMessages))
