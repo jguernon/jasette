@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.FloatingActionButton
@@ -213,10 +214,12 @@ class MargesPartielles(
  * pointe d'accent. Lu au dessin (thème compris).
  */
 private val STYLE_PASTILLE = GlassStyle.regular.then {
-    shape(CircleShape)
-    tint(P.accent.copy(alpha = if (P.clair) 0.10f else 0.18f))
-    specularIntensity(if (P.clair) 0.62f else 0.46f)
-    edgeShadow(Color.Black.copy(alpha = if (P.clair) 0.12f else 0.30f))
+    // La forme et la couleur d'avant (carré arrondi plein d'accent), avec juste
+    // un peu de verre : l'accent reste presque opaque.
+    shape(RoundedCornerShape(16.dp))
+    tint(P.accentPlein.copy(alpha = 0.84f))
+    specularIntensity(0.28f)
+    edgeShadow(Color.Black.copy(alpha = 0.18f))
 }
 
 /**
@@ -244,39 +247,38 @@ fun BoutonNouveau(onClick: () -> Unit) {
         label = "echelle",
     )
     val verre = etat != null && Build.VERSION.SDK_INT >= 31
-    val clair = P.clair
-    // Le + : l'accent sur le verre clair, blanc sur le sombre (le meilleur contraste).
-    val couleurIcone = if (clair) P.accent else Color.White
+    val couleurIcone = P.surAccent
+    val formeBouton = RoundedCornerShape(16.dp)
     Box(
         Modifier
             .graphicsLayer {
                 scaleX = echelle.value
                 scaleY = echelle.value
             }
-            .size(60.dp)
+            .size(56.dp)
             .shadow(
-                10.dp, CircleShape,
+                8.dp, formeBouton,
                 ambientColor = Color.Black.copy(alpha = 0.3f), spotColor = Color.Black.copy(alpha = 0.4f),
             )
             .then(
                 if (verre) {
                     Modifier.hazeGlass(HazeInput.Sources(etat, SELECTION_LISTE), STYLE_PASTILLE)
                 } else {
-                    Modifier.background(lerp(P.menu, P.accent, 0.12f).copy(alpha = 0.88f), CircleShape)
+                    Modifier.background(P.accentPlein, formeBouton)
                 },
             )
-            .clip(CircleShape)
+            .clip(formeBouton)
             .drawWithCache {
                 val trait = 1.dp.toPx()
                 // Le liseré : clair en haut, presque éteint au milieu, un peu de retour en bas.
                 val lisere = Brush.verticalGradient(
-                    0f to Color.White.copy(alpha = if (clair) 0.85f else 0.55f),
-                    0.5f to Color.White.copy(alpha = 0.10f),
-                    1f to Color.White.copy(alpha = if (clair) 0.35f else 0.18f),
+                    0f to Color.White.copy(alpha = 0.35f),
+                    0.5f to Color.White.copy(alpha = 0.05f),
+                    1f to Color.White.copy(alpha = 0.12f),
                 )
                 // Le reflet : un croissant brillant sur le bord supérieur.
                 val reflet = Brush.verticalGradient(
-                    listOf(Color.White.copy(alpha = if (clair) 0.55f else 0.32f), Color.Transparent),
+                    listOf(Color.White.copy(alpha = 0.18f), Color.Transparent),
                     startY = 0f, endY = size.height * 0.45f,
                 )
                 val largeurReflet = size.width * 0.72f
@@ -286,7 +288,12 @@ fun BoutonNouveau(onClick: () -> Unit) {
                         topLeft = Offset((size.width - largeurReflet) / 2f, size.height * 0.05f),
                         size = Size(largeurReflet, size.height * 0.42f),
                     )
-                    drawCircle(lisere, radius = size.minDimension / 2f - trait / 2f, style = Stroke(trait))
+                    val r = 16.dp.toPx() - trait / 2f
+                    drawRoundRect(
+                        lisere, topLeft = Offset(trait / 2f, trait / 2f),
+                        size = Size(size.width - trait, size.height - trait),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r), style = Stroke(trait),
+                    )
                     drawContent()
                 }
             }
