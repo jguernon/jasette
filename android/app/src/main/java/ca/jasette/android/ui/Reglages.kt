@@ -142,16 +142,6 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
             Text(t("Icône de l'app"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             ChoixIcone()
 
-            Spacer(Modifier.height(12.dp))
-            TextButton(onClick = {
-                ctx.startService(Intent(ctx, PontService::class.java).setAction(PontService.ACTION_ARRETER))
-                (ctx as? android.app.Activity)?.finishAffinity()
-            }) {
-                Text(
-                    if (cfg != null) t("Quitter Jasette (se débranche du serveur)") else t("Quitter Jasette (arrête les ponts)"),
-                    color = P.textePale,
-                )
-            }
         }
     }
 }
