@@ -226,7 +226,9 @@ fun Fil(
     Scaffold(
         // En deux volets, le fond du volet est déjà posé (pas de double voile au verre).
         containerColor = if (volet) Color.Transparent else P.fil,
-        topBar = { Column {
+        // L'en-tête flotte par-dessus les messages, avec le flou de ce qui passe derrière
+        // (opaque en EGA) ; les messages défilent dessous (contentPadding du haut).
+        topBar = { Column(Modifier.barreFloutee(SELECTION_FIL, opaque = P.barre)) {
             TopAppBar(
                 navigationIcon = {
                     if (!volet) IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Filled.ArrowBack, t("Retour")) }
@@ -264,7 +266,7 @@ fun Fil(
                         }
                     }
                 },
-                colors = barreCouleurs(),
+                colors = barreCouleurs(if (P.ega) P.barre else Color.Transparent),
             )
             if (recherche) {
                 val k = resultats.indexOf(courant)
@@ -287,21 +289,45 @@ fun Fil(
                 )
             }
         } },
-        bottomBar = { Saisie(id, actif = Depot.pret(Service.de(id)) && conv?.readOnly != true) },
+        // La saisie flotte aussi, floutée ; en EGA, l'aplat du fil (les messages passent dessous).
+        bottomBar = {
+            Box(Modifier.barreFloutee(SELECTION_FIL, opaque = P.fil)) {
+                Saisie(id, actif = Depot.pret(Service.de(id)) && conv?.readOnly != true)
+            }
+        },
     ) { marges ->
         // Le plus récent en bas : la liste est inversée.
         val inverse = liste.asReversed()
         LaunchedEffect(liste.lastOrNull()?.id) { if (liste.isNotEmpty()) etat.animateScrollToItem(0) }
-        Box(Modifier.fillMaxSize().padding(marges).onGloballyPositioned { conteneur = it }) {
+        // Les messages prennent tout l'écran et défilent sous l'en-tête et la saisie : leurs
+        // hauteurs deviennent un contentPadding, lu à la mesure (le clavier qui s'ouvre ne
+        // recompose pas le fil).
+        val margesFil = remember(marges) {
+            MargesPartielles(marges, haut = true, bas = true, plusHaut = 8.dp, plusBas = 8.dp, plusCotes = 10.dp)
+        }
+        // Les fondus sous l'en-tête et au-dessus de la saisie : seulement s'il y a des messages
+        // de ce côté (liste inversée : « en avant », ce sont les plus anciens, en haut).
+        val fonduHaut = rememberApparition { etat.canScrollForward }
+        val fonduBas = rememberApparition { etat.canScrollBackward }
+        val densite = LocalDensity.current
+        Box(Modifier.fillMaxSize()) {
         if (conv == null && liste.isEmpty() && absente.horsLigne()) {
             // Pas chargée, aucun message reçu : le service n'est pas là.
-            FilHorsLigne(Service.de(id), absente, reglages)
+            Box(Modifier.fillMaxSize().padding(marges)) { FilHorsLigne(Service.de(id), absente, reglages) }
         } else
         LazyColumn(
-            Modifier.fillMaxSize(),
+            Modifier.fillMaxSize()
+                // Le masque avant la source : le flou des barres voit les bulles intactes, l'écran
+                // les voit s'estomper au bord de l'en-tête et de la saisie. Une seule source pour le fil.
+                .fonduBords(
+                    28.dp, hautVisible = fonduHaut, basVisible = fonduBas,
+                    hautDebut = { with(densite) { marges.calculateTopPadding().toPx() } },
+                    basDebut = { with(densite) { marges.calculateBottomPadding().toPx() } },
+                )
+                .sourceFlou(LocalFlou.current, FLOU_FIL),
             state = etat,
             reverseLayout = true,
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+            contentPadding = margesFil,
         ) {
             items(inverse.size, key = { inverse[it].id }) { i ->
                 val m = inverse[i]
@@ -328,6 +354,8 @@ fun Fil(
                 }
             }
         }
+        // La barre de réactions se place dans la zone visible, entre l'en-tête et la saisie.
+        Box(Modifier.fillMaxSize().padding(marges).onGloballyPositioned { conteneur = it }) {
         reaction?.let { (m, bulle) ->
             val base = conteneur
             if (base == null || !bulle.isAttached || !base.isAttached) {
@@ -379,6 +407,7 @@ fun Fil(
                     },
                 )
             }
+        }
         }
         }
     }
@@ -962,7 +991,8 @@ private fun BarreRecherche(
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
     Row(
-        Modifier.fillMaxWidth().background(P.barre).padding(start = 12.dp, end = 4.dp, bottom = 6.dp),
+        // Sans fond : elle est dans l'en-tête flottant, flouté (opaque en EGA).
+        Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(

@@ -1,0 +1,299 @@
+package ca.jasette.android.ui
+
+import android.os.Build
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ripple
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import ca.jasette.android.t
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.HazeSourceSelection
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.blur.HazeBlurStyle
+import dev.chrisbanes.haze.blur.HazeColorEffect
+import dev.chrisbanes.haze.blur.hazeBlur
+import dev.chrisbanes.haze.glass.GlassStyle
+import dev.chrisbanes.haze.glass.hazeGlass
+import dev.chrisbanes.haze.hazeSource
+import kotlinx.coroutines.flow.collectLatest
+
+// ---- Le flou et le verre (Haze) : barres flottantes, fondus des bords, bouton + en verre liquide ----
+//
+// Un seul HazeState pour toute l'app ([LocalFlou]). Les sources sont repérées par leur clé :
+//  - FOND : le fond de la fenêtre (aplat et halos du verre), sous tout le reste ;
+//  - LISTE : les rangées de la liste des conversations ;
+//  - FIL : les messages de la conversation ouverte.
+// Chaque effet ne prend que les sources de sa zone (le fond plus la sienne) : en deux volets,
+// la barre de la liste n'échantillonne jamais le fil, et inversement.
+// Les sources ne dessinent que leur contenu (fond transparent) ; les voiles des écrans (P.ecran,
+// P.fil) restent dessinés à part, et la teinte des barres les remplace dans le flou.
+// En EGA : ni flou, ni fondu, ni verre (barres opaques, coupures nettes, bouton carré).
+
+/** L'état du flou de l'app, fourni par [App]. */
+val LocalFlou = staticCompositionLocalOf<HazeState?> { null }
+
+const val FLOU_FOND = "fond"
+const val FLOU_LISTE = "liste"
+const val FLOU_FIL = "fil"
+
+/** Ce que voient les effets de la liste : le fond et les rangées (gardés comme objets : comparés par identité). */
+val SELECTION_LISTE: HazeSourceSelection = HazeSourceSelection.Behind.where { it.key == FLOU_FOND || it.key == FLOU_LISTE }
+/** Ce que voient les effets du fil : le fond et les messages. */
+val SELECTION_FIL: HazeSourceSelection = HazeSourceSelection.Behind.where { it.key == FLOU_FOND || it.key == FLOU_FIL }
+
+/** Une source du flou (fond, liste ou fil) ; sans état fourni, rien. */
+fun Modifier.sourceFlou(etat: HazeState?, cle: String, z: Float = 1f): Modifier =
+    if (etat == null) this else hazeSource(etat, zIndex = z, key = cle)
+
+/**
+ * Le voile d'une barre flottante : la couleur des menus du thème, à peine teintée
+ * d'accent. [opacite] : celle posée sur le flou ; le repli sans flou est plus opaque.
+ */
+private fun voileBarre(opacite: Float): Color =
+    lerp(P.menu, P.accent, if (P.clair) 0.07f else 0.05f).copy(alpha = opacite)
+
+/**
+ * Le style des barres : flou de 24 dp, peu de grain, le voile du thème par-dessus.
+ * Sous Android 12 (API 31), Haze ne floute pas : un fond semi-opaque à la place
+ * (fallbackColorEffect). Lu au dessin : changer de thème ne recompose rien.
+ */
+private val STYLE_BARRE = HazeBlurStyle {
+    blurRadius(24.dp)
+    noiseFactor(0.05f)
+    colorEffects(listOf(HazeColorEffect.tint(voileBarre(if (P.clair) 0.55f else 0.68f))))
+    fallbackColorEffect(HazeColorEffect.tint(voileBarre(0.94f)))
+}
+
+/**
+ * Une barre flottante floutée (barre du bas, en-tête et saisie du fil) : le flou des
+ * sources de [selection] derrière elle. En EGA ou sans état : [opaque] (l'aplat du thème).
+ */
+@Composable
+fun Modifier.barreFloutee(selection: HazeSourceSelection, opaque: Color): Modifier {
+    val etat = LocalFlou.current
+    if (P.ega || etat == null) return if (opaque.alpha > 0f) background(opaque) else this
+    return hazeBlur(HazeInput.Sources(etat, selection), STYLE_BARRE)
+}
+
+/**
+ * Une valeur de 0 à 1 qui suit [condition] avec une courte animation, sans jamais
+ * recomposer l'appelant : [condition] est lue dans un snapshotFlow, et la valeur
+ * ne doit être lue qu'au dessin.
+ */
+@Composable
+fun rememberApparition(condition: () -> Boolean): State<Float> {
+    val actuelle by rememberUpdatedState(condition)
+    val a = remember { Animatable(if (condition()) 1f else 0f) }
+    LaunchedEffect(Unit) {
+        snapshotFlow { actuelle() }.collectLatest { a.animateTo(if (it) 1f else 0f, tween(180)) }
+    }
+    return a.asState()
+}
+
+/**
+ * Le fondu des bords d'une liste qui défile : un masque de transparence (DstIn) sur
+ * le contenu, rendu hors écran, donc juste aussi sur le fond Verre en dégradé.
+ *
+ * En haut : transparent jusqu'à [hautDebut] (px, sous un en-tête flottant), puis le
+ * contenu revient sur [hauteur]. En bas, pareil depuis [basDebut] (px depuis le bas).
+ * [hautVisible] et [basVisible] (0 à 1) dosent chaque fondu ; à 0 partout, le calque
+ * hors écran est rendu au système. Tout est lu au dessin : aucune recomposition.
+ * En EGA : rien (coupure nette).
+ */
+fun Modifier.fonduBords(
+    hauteur: Dp,
+    hautVisible: State<Float>?,
+    basVisible: State<Float>? = null,
+    hautDebut: () -> Float = { 0f },
+    basDebut: () -> Float = { 0f },
+): Modifier {
+    if (P.ega) return this
+    return graphicsLayer {
+        val actif = (hautVisible?.value ?: 0f) > 0f || (basVisible?.value ?: 0f) > 0f
+        compositingStrategy = if (actif) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+    }.drawWithCache {
+        val f = hauteur.toPx()
+        onDrawWithContent {
+            drawContent()
+            val h = hautVisible?.value ?: 0f
+            if (h > 0f) {
+                val y0 = hautDebut()
+                drawRect(
+                    Brush.verticalGradient(
+                        listOf(Color.Black.copy(alpha = 1f - h), Color.Black),
+                        startY = y0, endY = y0 + f,
+                    ),
+                    topLeft = Offset.Zero, size = Size(size.width, y0 + f), blendMode = BlendMode.DstIn,
+                )
+            }
+            val b = basVisible?.value ?: 0f
+            if (b > 0f) {
+                val y1 = size.height - basDebut()
+                drawRect(
+                    Brush.verticalGradient(
+                        listOf(Color.Black, Color.Black.copy(alpha = 1f - b)),
+                        startY = y1 - f, endY = y1,
+                    ),
+                    topLeft = Offset(0f, y1 - f), size = Size(size.width, size.height - (y1 - f)),
+                    blendMode = BlendMode.DstIn,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Une partie des marges d'un Scaffold, lue seulement à la mesure : la barre qui
+ * change de hauteur (clavier, recherche) ne recompose pas l'écran.
+ */
+class MargesPartielles(
+    private val m: PaddingValues,
+    private val haut: Boolean,
+    private val bas: Boolean,
+    private val plusHaut: Dp = 0.dp,
+    private val plusBas: Dp = 0.dp,
+    private val plusCotes: Dp = 0.dp,
+    /** Les marges des côtés du Scaffold (encoches) : une seule fois, au modificateur ou au contenu. */
+    private val cotes: Boolean = true,
+) : PaddingValues {
+    override fun calculateTopPadding() = (if (haut) m.calculateTopPadding() else 0.dp) + plusHaut
+    override fun calculateBottomPadding() = (if (bas) m.calculateBottomPadding() else 0.dp) + plusBas
+    override fun calculateLeftPadding(layoutDirection: LayoutDirection) =
+        (if (cotes) m.calculateLeftPadding(layoutDirection) else 0.dp) + plusCotes
+    override fun calculateRightPadding(layoutDirection: LayoutDirection) =
+        (if (cotes) m.calculateRightPadding(layoutDirection) else 0.dp) + plusCotes
+}
+
+/**
+ * Le verre liquide du bouton + : flou et réfraction de ce qui est derrière
+ * (RuntimeShader, API 33+), reflet spéculaire et ombre de bord de haze-glass, une
+ * pointe d'accent. Lu au dessin (thème compris).
+ */
+private val STYLE_PASTILLE = GlassStyle.regular.then {
+    shape(CircleShape)
+    tint(P.accent.copy(alpha = if (P.clair) 0.10f else 0.18f))
+    specularIntensity(if (P.clair) 0.62f else 0.46f)
+    edgeShadow(Color.Black.copy(alpha = if (P.clair) 0.12f else 0.30f))
+}
+
+/**
+ * Le bouton flottant « Nouveau message » : une pastille de verre liquide.
+ *  - API 33+ : haze-glass complet (flou, réfraction, reflet) ;
+ *  - API 31-32 : haze-glass choisit lui-même son rendu simplifié (verre flouté, sans réfraction) ;
+ *  - sous l'API 31 : un verre givré dessiné (voile opaque à 88 %), sans flou.
+ * Par-dessus, dans tous les cas : le reflet du bord supérieur et un liseré clair.
+ * Une petite échelle à l'appui (lue au dessin). En EGA : le bouton carré d'origine.
+ */
+@Composable
+fun BoutonNouveau(onClick: () -> Unit) {
+    if (P.ega) {
+        FloatingActionButton(onClick = onClick, containerColor = P.accentPlein, contentColor = P.surAccent, shape = RectangleShape) {
+            Icon(Icons.Filled.Add, t("Nouveau message"))
+        }
+        return
+    }
+    val etat = LocalFlou.current
+    val interactions = remember { MutableInteractionSource() }
+    val presse by interactions.collectIsPressedAsState()
+    val echelle = animateFloatAsState(
+        if (presse) 0.9f else 1f,
+        spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "echelle",
+    )
+    val verre = etat != null && Build.VERSION.SDK_INT >= 31
+    val clair = P.clair
+    // Le + : l'accent sur le verre clair, blanc sur le sombre (le meilleur contraste).
+    val couleurIcone = if (clair) P.accent else Color.White
+    Box(
+        Modifier
+            .graphicsLayer {
+                scaleX = echelle.value
+                scaleY = echelle.value
+            }
+            .size(60.dp)
+            .shadow(
+                10.dp, CircleShape,
+                ambientColor = Color.Black.copy(alpha = 0.3f), spotColor = Color.Black.copy(alpha = 0.4f),
+            )
+            .then(
+                if (verre) {
+                    Modifier.hazeGlass(HazeInput.Sources(etat, SELECTION_LISTE), STYLE_PASTILLE)
+                } else {
+                    Modifier.background(lerp(P.menu, P.accent, 0.12f).copy(alpha = 0.88f), CircleShape)
+                },
+            )
+            .clip(CircleShape)
+            .drawWithCache {
+                val trait = 1.dp.toPx()
+                // Le liseré : clair en haut, presque éteint au milieu, un peu de retour en bas.
+                val lisere = Brush.verticalGradient(
+                    0f to Color.White.copy(alpha = if (clair) 0.85f else 0.55f),
+                    0.5f to Color.White.copy(alpha = 0.10f),
+                    1f to Color.White.copy(alpha = if (clair) 0.35f else 0.18f),
+                )
+                // Le reflet : un croissant brillant sur le bord supérieur.
+                val reflet = Brush.verticalGradient(
+                    listOf(Color.White.copy(alpha = if (clair) 0.55f else 0.32f), Color.Transparent),
+                    startY = 0f, endY = size.height * 0.45f,
+                )
+                val largeurReflet = size.width * 0.72f
+                onDrawWithContent {
+                    drawOval(
+                        reflet,
+                        topLeft = Offset((size.width - largeurReflet) / 2f, size.height * 0.05f),
+                        size = Size(largeurReflet, size.height * 0.42f),
+                    )
+                    drawCircle(lisere, radius = size.minDimension / 2f - trait / 2f, style = Stroke(trait))
+                    drawContent()
+                }
+            }
+            .clickable(interactionSource = interactions, indication = ripple(color = couleurIcone), onClick = onClick)
+            .semantics { role = Role.Button },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Filled.Add, t("Nouveau message"), tint = couleurIcone, modifier = Modifier.size(28.dp))
+    }
+}

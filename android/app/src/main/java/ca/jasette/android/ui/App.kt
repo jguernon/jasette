@@ -19,9 +19,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.ui.graphics.SolidColor
@@ -148,7 +146,13 @@ fun App(activite: Activity) {
         )
     }
 
-    Row(Modifier.fillMaxSize().fondFenetre()) {
+    // L'état du flou (Haze) partagé par toute l'app ; le fond de la fenêtre en est la
+    // première source (aplat et halos du verre, sous les barres floutées).
+    val flou = dev.chrisbanes.haze.rememberHazeState()
+    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().sourceFlou(flou, FLOU_FOND, z = 0f).fondFenetre())
+    androidx.compose.runtime.CompositionLocalProvider(LocalFlou provides flou) {
+    Row(Modifier.fillMaxSize()) {
         if (large && ecran !is Ecran.Connexion) {
             Rail(
                 vue = vue,
@@ -200,6 +204,8 @@ fun App(activite: Activity) {
                 }
             }
         }
+    }
+    }
     }
 }
 
@@ -284,6 +290,7 @@ private fun Liste(
                 colors = barreCouleurs(),
             )
         },
+        // La barre du bas flotte par-dessus la liste, floutée (voir BarreBas).
         bottomBar = { if (!large) BarreBas(vue, choisirVue) },
         snackbarHost = {
             androidx.compose.material3.SnackbarHost(barreMessages) { d ->
@@ -294,14 +301,8 @@ private fun Liste(
             }
         },
         floatingActionButton = {
-            if (!reorganiser) {
-                FloatingActionButton(
-                    onClick = { nouveau = true }, containerColor = P.accentPlein, contentColor = P.surAccent,
-                    shape = forme(16.dp),
-                ) {
-                    Icon(Icons.Filled.Add, t("Nouveau message"))
-                }
-            }
+            // Le + en verre liquide (carré EGA en EGA), voir Flou.kt.
+            if (!reorganiser) BoutonNouveau { nouveau = true }
         },
     ) { marges ->
         // Les archives des services et celles de Jasette, ensemble ; ailleurs, sans elles.
@@ -336,7 +337,21 @@ private fun Liste(
         val head = if (vue == Vue.Tout && f.isEmpty()) Marques.head.map { convMarquee(it) } else emptyList()
         val reorg = reorganiser && vue == Vue.Favoris
         LaunchedEffect(f) { Depot.chercherContacts(if (f.length >= 2) filtre.trim() else "") }
-        LazyColumn(Modifier.fillMaxSize().padding(marges)) {
+        // La liste défile sous la barre du bas (floutée) : la marge du bas devient un
+        // contentPadding, le dernier élément reste accessible. Les marges sont lues à la mesure.
+        val margesHaut = remember(marges) { MargesPartielles(marges, haut = true, bas = false) }
+        val margesBas = remember(marges) { MargesPartielles(marges, haut = false, bas = true, cotes = false) }
+        // Le fondu du haut, seulement une fois la liste défilée (lu au dessin, sans recomposer).
+        val etatListe = androidx.compose.foundation.lazy.rememberLazyListState()
+        val defilee = rememberApparition { etatListe.firstVisibleItemIndex > 0 || etatListe.firstVisibleItemScrollOffset > 0 }
+        LazyColumn(
+            Modifier.fillMaxSize().padding(margesHaut)
+                // Le masque d'abord, la source ensuite : le flou de la barre voit les rangées intactes.
+                .fonduBords(28.dp, hautVisible = defilee)
+                .sourceFlou(LocalFlou.current, FLOU_LISTE),
+            state = etatListe,
+            contentPadding = margesBas,
+        ) {
             item { ChampFiltre(filtre) { filtre = it } }
             item { Bannieres(reglages) }
             if (vue == Vue.Tout && accueilVisible()) item { Accueil(serveur, connecter) }
@@ -632,8 +647,8 @@ private fun Suggestion(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun barreCouleurs() = TopAppBarDefaults.topAppBarColors(
-    containerColor = P.barre, scrolledContainerColor = P.barre,
+fun barreCouleurs(fond: androidx.compose.ui.graphics.Color = P.barre) = TopAppBarDefaults.topAppBarColors(
+    containerColor = fond, scrolledContainerColor = fond,
     titleContentColor = P.titre, navigationIconContentColor = P.icone, actionIconContentColor = P.icone,
 )
 

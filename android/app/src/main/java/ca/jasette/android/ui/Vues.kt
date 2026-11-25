@@ -212,7 +212,13 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
         selectedIconColor = P.texteFort, unselectedIconColor = P.icone,
         selectedTextColor = P.texteFort, unselectedTextColor = P.textePale, indicatorColor = indicateur(),
     )
-    NavigationBar(containerColor = P.liste) {
+    // Elle flotte par-dessus la liste, qui défile dessous : un flou de ce qui passe derrière,
+    // teinté du thème (fond semi-opaque sous l'API 31). En EGA : l'aplat noir, opaque.
+    NavigationBar(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        tonalElevation = 0.dp,
+        modifier = Modifier.barreFloutee(SELECTION_LISTE, opaque = P.liste),
+    ) {
         val fixes = listOf(
             Triple(Vue.Tout, Icones.inbox, t("Inbox")),
             Triple(Vue.Favoris, Icons.Filled.Star, t("Favoris")),
