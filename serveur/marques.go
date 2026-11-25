@@ -1,5 +1,6 @@
-// Les marques : le Head, les favoris et les épinglées, partagés entre tous
-// les appareils de l'utilisateur (voir PROTOCOLE.md, §5.5).
+// Les marques : le Head, les favoris, les épinglées et les archives de
+// Jasette, partagés entre tous les appareils de l'utilisateur (voir
+// PROTOCOLE.md, §5.5).
 //
 // Le serveur en garde la copie de référence dans <données>/serveur/marques.json
 // (0600, écrit par renommage, avec une copie marques.json.bak de la version
@@ -22,26 +23,51 @@ const (
 	tailleIdMax     = 512  // octets au plus par id
 )
 
-// Marques : trois listes ordonnées d'ids de conversations (préfixés « m: »
-// pour Messenger, « i: » pour Instagram, sans préfixe pour Google).
+// Marques : quatre listes ordonnées d'ids de conversations (préfixés « m: »
+// pour Messenger, « i: » pour Instagram, « w: », « s: », « x: » pour
+// WhatsApp, Signal et X, sans préfixe pour Google).
 // Version 0 : le serveur n'a encore rien reçu.
+//
+// Archives : l'archivage propre à Jasette, pour les services qui ne savent
+// pas archiver (Messenger, Instagram, Signal, X). Un nouveau message reçu
+// dans une de ces conversations l'en retire (desarchiverSiRecu).
 type Marques struct {
 	Head     []string `json:"head"`
 	Favoris  []string `json:"favoris"`
 	Epingles []string `json:"epingles"`
+	Archives []string `json:"archives"`
 	Version  int64    `json:"version"`
+	// Propre au serveur, jamais envoyé aux clients : depuis quand (ms, horloge
+	// du serveur) chaque id est dans Archives. Seul un message reçu après
+	// cette heure ramène la conversation dans l'Inbox (une réaction ou une
+	// mise à jour d'un vieux message, non).
+	ArchivesDepuis map[string]int64 `json:"archives_depuis,omitempty"`
 }
 
 func marquesPath() string { return filepath.Join(serveurDir(), "marques.json") }
 
-// listes rend les trois listes, dans l'ordre (pour les boucles).
-func (m *Marques) listes() []*[]string { return []*[]string{&m.Head, &m.Favoris, &m.Epingles} }
+// listes rend les quatre listes, dans l'ordre (pour les boucles).
+func (m *Marques) listes() []*[]string {
+	return []*[]string{&m.Head, &m.Favoris, &m.Epingles, &m.Archives}
+}
 
-// normaliser : jamais de liste nulle (elle s'écrirait `null`), ids propres.
+// normaliser : jamais de liste nulle (elle s'écrirait `null`), ids propres,
+// une heure d'archivage pour chaque archive (maintenant, si elle manque) et
+// aucune pour un id qui n'y est plus.
 func (m *Marques) normaliser() {
 	for _, l := range m.listes() {
 		*l = nettoyerIds(*l)
 	}
+	depuis := make(map[string]int64, len(m.Archives))
+	maintenant := time.Now().UnixMilli()
+	for _, id := range m.Archives {
+		if t, ok := m.ArchivesDepuis[id]; ok && t > 0 {
+			depuis[id] = t
+		} else {
+			depuis[id] = maintenant
+		}
+	}
+	m.ArchivesDepuis = depuis
 }
 
 func (m *Marques) memesListes(n *Marques) bool {
@@ -191,7 +217,8 @@ func ecrireAtomique(chemin string, data []byte) error {
 // le seul client qui l'a envoyée.
 func trameMarques(m Marques, id json.RawMessage, refus string) []byte {
 	corps := map[string]any{
-		"head": m.Head, "favoris": m.Favoris, "epingles": m.Epingles, "version": m.Version,
+		"head": m.Head, "favoris": m.Favoris, "epingles": m.Epingles, "archives": m.Archives,
+		"version": m.Version,
 	}
 	if len(id) > 0 {
 		corps["id"] = id
@@ -218,6 +245,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		Head     *[]string       `json:"head"`
 		Favoris  *[]string       `json:"favoris"`
 		Epingles *[]string       `json:"epingles"`
+		Archives *[]string       `json:"archives"`
 		Version  int64           `json:"version"`
 		ID       json.RawMessage `json:"id"`
 	}
@@ -230,9 +258,13 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cur := s.marques
-	nouv := Marques{Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles}
-	// Une liste absente de la trame ne change pas.
-	for i, l := range []*[]string{d.Head, d.Favoris, d.Epingles} {
+	nouv := Marques{
+		Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Archives: cur.Archives,
+		ArchivesDepuis: cur.ArchivesDepuis,
+	}
+	// Une liste absente de la trame ne change pas (un ancien client, qui ne
+	// connaît pas `archives`, ne les vide donc jamais).
+	for i, l := range []*[]string{d.Head, d.Favoris, d.Epingles, d.Archives} {
 		if l != nil {
 			*nouv.listes()[i] = nettoyerIds(*l)
 		}
@@ -268,8 +300,8 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		return
 	}
 	s.marques = nouv
-	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d",
-		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles))
+	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d",
+		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives))
 	tous := trameMarques(nouv, nil, "")
 	for autre := range s.clients {
 		if autre == c {
@@ -283,4 +315,55 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		}
 	}
 	repondre(nouv, "")
+}
+
+// Le préfixe des ids d'un service, tels que les clients les voient.
+var prefixeService = map[string]string{
+	"google": "", "messenger": "m:", "instagram": "i:", "whatsapp": "w:", "signal": "s:", "x": "x:",
+}
+
+// desarchiverSiRecu : un événement `message` d'un pont. Un message reçu (pas
+// envoyé par moi) plus récent que l'archivage d'une conversation de
+// `archives` l'en retire : nouvelles marques, gardées puis diffusées à tous,
+// avant l'événement lui-même. Idempotent : une conversation qui n'est plus
+// dans `archives` ne change rien. À appeler sous s.mu.
+func (s *Serveur) desarchiverSiRecu(svc string, ligne []byte) {
+	if len(s.marques.Archives) == 0 {
+		return
+	}
+	var ev struct {
+		Item struct {
+			Conv   string `json:"conv"`
+			FromMe bool   `json:"from_me"`
+			Time   int64  `json:"time"`
+		} `json:"item"`
+	}
+	if json.Unmarshal(ligne, &ev) != nil || ev.Item.Conv == "" || ev.Item.FromMe {
+		return
+	}
+	prefixe, ok := prefixeService[svc]
+	if !ok {
+		return
+	}
+	id := prefixe + ev.Item.Conv
+	depuis, archivee := s.marques.ArchivesDepuis[id]
+	if !archivee || ev.Item.Time <= depuis {
+		return
+	}
+	cur := s.marques
+	nouv := Marques{Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, ArchivesDepuis: cur.ArchivesDepuis}
+	for _, a := range cur.Archives {
+		if a != id {
+			nouv.Archives = append(nouv.Archives, a)
+		}
+	}
+	nouv.normaliser()
+	nouv.Version = cur.Version + 1
+	if err := garderMarques(nouv); err != nil {
+		logf("marques : écriture impossible : %v", err)
+		return
+	}
+	s.marques = nouv
+	logf("marques version %d : une conversation %s sort des archives (message reçu)", nouv.Version, svc)
+	s.diffuserVerrouille(trameMarques(nouv, nil, ""))
 }

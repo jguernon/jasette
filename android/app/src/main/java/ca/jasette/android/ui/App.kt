@@ -292,7 +292,8 @@ private fun Liste(
             }
         },
     ) { marges ->
-        val source = if (vue == Vue.Archives) Depot.archives else Depot.convs
+        // Les archives des services et celles de Jasette, ensemble ; ailleurs, sans elles.
+        val source = if (vue == Vue.Archives) Depot.toutesArchives else Depot.boite
         val rang = { c: Conv -> Marques.epingles.indexOf(c.id).let { if (it < 0) Int.MAX_VALUE else it } }
         // La barre de recherche filtre par nom, membres et aperçu (comme `correspond`).
         val f = ca.jasette.android.plier(filtre.trim())

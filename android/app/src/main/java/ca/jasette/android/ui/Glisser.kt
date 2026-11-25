@@ -55,6 +55,7 @@ import ca.jasette.android.Gestes
 import ca.jasette.android.peutArchiver
 import ca.jasette.android.peutSupprimer
 import ca.jasette.android.refusArchiverSupprimer
+import ca.jasette.android.texteSuppression
 import ca.jasette.android.t
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -66,8 +67,8 @@ private val iconeRepondre: ImageVector by lazy {
         .build()
 }
 
-/** Une conversation déjà archivée (on est alors dans la vue Archives : le geste désarchive). */
-private fun archivee(c: Conv) = c.archived || Depot.archives.any { it.id == c.id }
+/** Une conversation déjà archivée, par son service ou par Jasette (le geste désarchive). */
+private fun archivee(c: Conv) = Depot.estArchivee(c)
 
 /** Ce qu'une action rend possible pour cette conversation (sinon : grisée, message dans la barre). */
 private fun possible(a: ActionGeste, c: Conv) = when (a) {
@@ -232,7 +233,7 @@ private fun ConfirmerSuppression(c: Conv, fermer: () -> Unit, retiree: (String) 
         title = { Text(t("Supprimer la conversation ?"), color = P.texteFort) },
         text = {
             Text(
-                t("Elle sera supprimée de Google Messages, sur ton téléphone aussi. C'est définitif."),
+                c.texteSuppression,
                 color = P.texte,
             )
         },

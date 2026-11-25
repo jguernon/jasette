@@ -151,6 +151,10 @@ func (p *Pont) handleTable(tbl *table.LSTable, initial bool) {
 	}
 	for _, d := range tbl.LSDeleteThread {
 		if c := p.convs[idStr(p.canon(d.ThreadKey))]; c != nil {
+			// Supprimée ailleurs (ou par « delete ») : l'interface la retire.
+			if !c.Hidden {
+				emit("deleted", map[string]any{"conv": idStr(p.canon(d.ThreadKey))})
+			}
 			c.Hidden = true
 			touched[idStr(p.canon(d.ThreadKey))] = true
 		}

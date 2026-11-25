@@ -176,6 +176,7 @@ Révocation : `jasette-serveur --appareils` liste les appareils,
 `pont-signal/main.go` et `pont-x/main.go`). Particularités :
 
 - `{"cmd":"quit"}` est **ignoré** : le pont appartient au serveur.
+- `{"cmd":"delete","conv":"<id>"}` : supprime la conversation (§5.6).
 - `send_media` : `path` doit être un chemin **renvoyé par un dépôt** (§6.2) ;
   tout autre chemin est refusé.
 - Service non offert, ou pont en train de redémarrer : le serveur répond
@@ -288,16 +289,20 @@ dossier de données en 0700 avant de lancer le pont.
 - Les cookies et le code ne passent que dans la commande ; le serveur ne
   les écrit jamais dans ses journaux.
 
-### 5.5 Marques (Head, favoris, épinglées)
+### 5.5 Marques (Head, favoris, épinglées, archives)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
-tous ses appareils. Ce sont trois listes **ordonnées** d'ids de
+tous ses appareils. Ce sont quatre listes **ordonnées** d'ids de
 conversations, tels que l'interface les voit (« m: » pour Messenger,
-« i: » pour Instagram, sans préfixe pour Google) :
+« i: » pour Instagram, « w: » pour WhatsApp, « s: » pour Signal, « x: »
+pour X, sans préfixe pour Google) :
 
 - `head` : la grille en tête de la boîte de réception ;
 - `favoris` : la vue de l'étoile (`etoiles` dans les réglages du bureau) ;
-- `epingles` : les conversations épinglées en haut de la liste.
+- `epingles` : les conversations épinglées en haut de la liste ;
+- `archives` : l'**archivage propre à Jasette**, pour les services qui ne
+  savent pas archiver (Messenger, Instagram, Signal, X). Google et WhatsApp
+  archivent pour de vrai (commande `archive` de leur pont) et n'y vont pas.
 
 C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 
@@ -305,7 +310,7 @@ C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 changement, à **tous** les clients) :
 
 ```json
-{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"version":7}}
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"version":7}}
 ```
 
 `version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
@@ -314,14 +319,15 @@ encore rien reçu (listes vides).
 **Client → serveur** :
 
 ```json
-{"marques":{"head":[…],"favoris":[…],"epingles":[…],"version":7,"id":12}}
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"version":7,"id":12}}
 ```
 
 - `version` : la dernière version reçue du serveur (0 si aucune).
 - `id` (facultatif, entier) : renvoyé tel quel dans la réponse **à ce client
   seulement**, pour qu'il reconnaisse la réponse à sa propre trame.
 - Une liste absente ne change pas. Ids vides ou en double retirés ; au plus
-  5000 ids par liste, 512 octets par id.
+  5000 ids par liste, 512 octets par id. Un client d'avant `archives` (qui
+  n'envoie pas ce champ) ne les vide donc jamais : le serveur les garde.
 
 Règles du serveur :
 
@@ -352,9 +358,60 @@ réponse. À la réception :
 - sinon : les marques du serveur remplacent la copie locale.
 
 Rien n'est mis en file pendant une coupure : à la reconnexion, le rejeu
-donne l'état du serveur et la règle ci-dessus s'applique.
+donne l'état du serveur et la règle ci-dessus s'applique. Un serveur d'avant
+`archives` n'envoie pas ce champ : le client garde alors ses archives pour
+lui seul (sans les vider).
 
-### 5.6 Reconnexion (côté client)
+**Règle des archives.**
+
+- Une conversation de `archives` sort de la boîte de réception (et des vues
+  Favoris et par service) et va dans la vue Archives, avec les archives des
+  services (`{"cmd":"conversations","folder":"archive"}`).
+- Archiver l'ajoute à la fin de la liste ; Désarchiver l'en retire (« Annuler »
+  fait l'inverse, de la même façon).
+- **Un nouveau message reçu la ramène dans l'Inbox** : le serveur, à chaque
+  événement `message` d'un pont dont `item.from_me` est faux et dont
+  `item.time` (ms) est plus récent que le moment où l'id est entré dans
+  `archives` (horloge du serveur, gardée dans `marques.json` sous
+  `archives_depuis`, jamais envoyée), retire l'id, passe à `version+1` et
+  diffuse les nouvelles marques à tous, **avant** l'événement `message`
+  lui-même. Idempotent : un id qui n'y est plus ne change rien. Un message
+  envoyé par moi (`from_me`), une réaction ou la mise à jour d'un message
+  plus vieux que l'archivage ne la ramènent pas.
+- Sans serveur (ponts locaux), le client applique la même règle lui-même, à la
+  réception du message (Android : `Marques.desarchiverSiRecu`, avec l'heure où
+  l'id est entré dans sa liste). En mode client, il peut le faire aussi : la
+  diffusion du serveur arrive d'abord, et l'id n'y est déjà plus.
+
+### 5.6 Supprimer une conversation
+
+```json
+{"svc":"messenger","cmd":{"cmd":"delete","conv":"<id sans préfixe>"}}
+```
+
+Offert par Google (`pont`), Messenger (`pont-meta`) et Instagram
+(`pont-ig`, et `pont-meta` quand il sert Instagram). Le client retire la
+conversation tout de suite (liste, archives, messages, marques).
+
+- **Google** : rien de particulier en cas de réussite (la conversation
+  disparaît des listes suivantes) ; échec : `{"ev":"error","where":"delete","text":"suppression : …"}`.
+- **Messenger** (`DeleteThreadTask`, comme mautrix-meta : `remove_type` 0,
+  groupe de synchronisation 1 ; pour un fil chiffré, la clé de son fil
+  Facebook d'origine et le groupe 95) et **Instagram** (mutation
+  `ig_direct_hide_thread` d'instameow, avec l'identifiant court du fil) :
+  - réussite : `{"ev":"deleted","conv":"<id>"}` (id sans préfixe, comme
+    toujours côté pont), puis une nouvelle liste `conversations` (et celle des
+    archives si elle a été demandée) sans elle ;
+  - le même `deleted` arrive quand la conversation est supprimée ailleurs
+    (l'app, un autre appareil) ;
+  - échec : `{"ev":"error","where":"delete","text":"…"}`, puis la liste
+    renouvelée, où la conversation réapparaît. Un fil chiffré de Messenger
+    sans fil Facebook connu ne peut pas être supprimé par ce canal :
+    l'erreur le dit (« supprime-le dans l'app Messenger »).
+- C'est « Supprimer la discussion » : seulement pour moi, sur tous mes
+  appareils ; un groupe n'est **pas** quitté.
+
+### 5.7 Reconnexion (côté client)
 
 Une seule connexion par serveur, partagée par tous les services. Si elle
 tombe : montrer `state: reconnecting` pour chaque service branché, puis
@@ -442,7 +499,7 @@ Chaque pont a son dossier, en 0700 : `<données>/whatsapp/`,
 servis par `get`, §6.1).
 `<données>/serveur/` (0700) contient `cert.pem`, `cle.pem`,
 `appareils.json` (noms, SHA-256 des jetons, dates), `jumelage.json` (code en
-cours), `marques.json` (§5.5 ; écrit par fichier temporaire puis renommage,
+cours), `marques.json` (§5.5, avec `archives_depuis` en plus ; écrit par fichier temporaire puis renommage,
 la version précédente dans `marques.json.bak` ; un fichier illisible est mis
 de côté, jamais écrasé) et `depots/`, tous en 0600. Les journaux (sortie d'erreur) ne
 contiennent jamais de jeton, de code ni de cookie.
@@ -461,8 +518,8 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"svc":…,"ev":{…}}` | événement d'un pont |
 | C→S | `{"rejouer":"<svc>"}` | redemander l'état d'un service |
 | ↔ | `{"ping":n}` / `{"pong":n}` | signes de vie |
-| S→C | `{"marques":{"head","favoris","epingles","version"[,"id","refus"]}}` | rejeu, changement |
-| C→S | `{"marques":{"head","favoris","epingles","version"[,"id"]}}` | changement local |
+| S→C | `{"marques":{"head","favoris","epingles","archives","version"[,"id","refus"]}}` | rejeu, changement |
+| C→S | `{"marques":{"head","favoris","epingles","archives","version"[,"id"]}}` | changement local |
 | C→S | `{"get":{"id","chemin","sha256"}}` | télécharger |
 | S→C | `{"fichier":{"id",…}}` | morceaux ou erreur |
 | C→S | `{"put":{"id","nom","donnees","fin"}}` | téléverser |

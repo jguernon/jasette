@@ -233,6 +233,10 @@ func (p *Pont) recu(ligne []byte) {
 		} else {
 			delete(p.dernier, "history_pin")
 		}
+	case "message":
+		// Archives de Jasette : un message reçu ramène la conversation dans
+		// l'Inbox (les marques partent avant le message).
+		srv.desarchiverSiRecu(p.svc, ligne)
 	}
 	srv.diffuserVerrouille(trame)
 }

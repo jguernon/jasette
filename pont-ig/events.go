@@ -129,6 +129,10 @@ func (p *Pont) handleDelta(ctx context.Context, cli *instameow.Client, d *slidet
 		}
 	case *slidetypes.DeleteThreadEvent:
 		p.mu.Lock()
+		// Supprimée ailleurs (ou par « delete ») : l'interface la retire.
+		if !c.Hidden {
+			emit("deleted", map[string]any{"conv": conv})
+		}
 		c.Hidden = true
 		p.saveConv(conv, c)
 		p.listDirty = true

@@ -22,8 +22,13 @@ import org.json.JSONObject
  * On y garde aussi deux choix d'apparence : deux volets sur grand écran, et
  * l'heure de chaque message.
  *
+ * Et les archives de Jasette : les conversations archivées par Jasette elle-même,
+ * pour les services qui ne savent pas archiver (Messenger, Instagram, Signal,
+ * X ; Google et WhatsApp archivent pour de vrai). Un nouveau message reçu les
+ * ramène dans la boîte de réception ([desarchiverSiRecu]).
+ *
  * En mode client du serveur Jasette, le serveur est la source : il garde les
- * trois listes et les partage entre les appareils (serveur/PROTOCOLE.md,
+ * quatre listes et les partage entre les appareils (serveur/PROTOCOLE.md,
  * §5.5, et `SuiviMarques` dans src/distant.rs, dont ceci est la traduction).
  * La copie locale garde aussi la dernière version reçue (0 : jamais
  * synchronisé avec ce serveur) et « changées ici, pas encore confirmées ».
@@ -39,6 +44,14 @@ object Marques {
     val epingles: SnapshotStateList<String> = mutableStateListOf()
     /** Le Head : la grille en haut de la boîte de réception, dans l'ordre d'ajout. */
     val head: SnapshotStateList<String> = mutableStateListOf()
+    /** Les archives de Jasette (ids préfixés), dans l'ordre d'archivage. */
+    val archives: SnapshotStateList<String> = mutableStateListOf()
+    /**
+     * Depuis quand (ms, horloge du téléphone) chaque id est dans [archives], ici :
+     * seul un message reçu après cette heure la désarchive (pas une réaction
+     * ni la mise à jour d'un vieux message). Propre à l'appareil, jamais envoyé.
+     */
+    private val archivesDepuis = HashMap<String, Long>()
 
     /** Chaque bulle montre son heure (et sa date si ce n'est pas aujourd'hui), comme `details_heures`. */
     var heureChaqueMessage by mutableStateOf(false)
@@ -94,6 +107,21 @@ object Marques {
         favoris.addAll(lire(p, "favoris"))
         epingles.clear()
         epingles.addAll(lire(p, "epingles"))
+        archives.clear()
+        archives.addAll(lire(p, "archives"))
+        archivesDepuis.clear()
+        try {
+            val o = JSONObject(p.getString("archives_depuis", "{}") ?: "{}")
+            for (k in o.keys()) archivesDepuis[k] = o.optLong(k)
+        } catch (_: Exception) {}
+        majDepuis()
+    }
+
+    /** Une heure d'archivage pour chaque archive (maintenant, si elle manque), aucune pour les autres. */
+    private fun majDepuis() {
+        val maintenant = System.currentTimeMillis()
+        archivesDepuis.keys.retainAll(archives.toSet())
+        for (id in archives) if ((archivesDepuis[id] ?: 0L) <= 0L) archivesDepuis[id] = maintenant
     }
 
     private fun lire(p: SharedPreferences, cle: String): List<String> {
@@ -117,6 +145,8 @@ object Marques {
             ?.putString("favoris", JSONArray(favoris.toList()).toString())
             ?.putString("epingles", JSONArray(epingles.toList()).toString())
             ?.putString("head", JSONArray(head.toList()).toString())
+            ?.putString("archives", JSONArray(archives.toList()).toString())
+            ?.putString("archives_depuis", JSONObject(archivesDepuis.toMap()).toString())
             ?.putLong("version", version)
             ?.putBoolean("a_envoyer", aEnvoyer)
             ?.putString("serveur", serveurMarques)
@@ -126,6 +156,29 @@ object Marques {
     fun estFavori(id: String) = id in favoris
     fun estEpinglee(id: String) = id in epingles
     fun estDansHead(id: String) = id in head
+    fun estArchivee(id: String) = id in archives
+
+    /** Archive par Jasette (à la fin de la liste) ou désarchive ; rien si c'est déjà fait. */
+    fun archiver(id: String, oui: Boolean) {
+        if (oui == (id in archives)) return
+        if (oui) archives.add(id) else archives.remove(id)
+        majDepuis()
+        changement()
+    }
+
+    /**
+     * Un message reçu (pas envoyé par moi) dans [id], daté de [temps] (ms) :
+     * s'il est plus récent que l'archivage, la conversation revient dans la
+     * boîte de réception. Idempotent. En mode client, le serveur fait de même
+     * et sa diffusion arrive d'habitude avant le message : rien à faire alors.
+     */
+    fun desarchiverSiRecu(id: String, temps: Long) {
+        val depuis = archivesDepuis[id] ?: return
+        if (id !in archives || temps <= depuis) return
+        archives.remove(id)
+        majDepuis()
+        changement()
+    }
 
     /** Ajoute au Head (à la fin) ou l'en retire. */
     fun basculerHead(id: String) {
@@ -155,37 +208,49 @@ object Marques {
         changement()
     }
 
-    /** Une conversation supprimée n'est plus ni favorite ni épinglée. */
+    /** Une conversation supprimée n'est plus ni favorite, ni épinglée, ni archivée. */
     fun oublier(id: String) {
         val a = favoris.remove(id)
         val b = epingles.remove(id)
         val c = head.remove(id)
-        if (a || b || c) changement()
+        val d = archives.remove(id)
+        if (d) majDepuis()
+        if (a || b || c || d) changement()
     }
 
     // ---- La synchronisation avec le serveur Jasette (§5.5) ----
 
-    /** Les trois listes, figées (head, favoris, épinglées). */
-    private data class Listes(val head: List<String>, val favoris: List<String>, val epingles: List<String>) {
-        fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty()
+    /** Les quatre listes, figées (head, favoris, épinglées, archives). */
+    private data class Listes(
+        val head: List<String>,
+        val favoris: List<String>,
+        val epingles: List<String>,
+        val archives: List<String>,
+    ) {
+        fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty()
 
         /** Chaque liste de this, dans son ordre, puis les ids de [b] qui n'y sont pas. */
         fun union(b: Listes) = Listes(
             (head + b.head).filter { it.isNotEmpty() }.distinct(),
             (favoris + b.favoris).filter { it.isNotEmpty() }.distinct(),
             (epingles + b.epingles).filter { it.isNotEmpty() }.distinct(),
+            (archives + b.archives).filter { it.isNotEmpty() }.distinct(),
         )
 
         /** Les ids de this absents de [b], liste par liste. */
-        fun moins(b: Listes) = Listes(head - b.head.toSet(), favoris - b.favoris.toSet(), epingles - b.epingles.toSet())
+        fun moins(b: Listes) = Listes(
+            head - b.head.toSet(), favoris - b.favoris.toSet(), epingles - b.epingles.toSet(),
+            archives - b.archives.toSet(),
+        )
     }
 
-    private fun listes() = Listes(head.toList(), favoris.toList(), epingles.toList())
+    private fun listes() = Listes(head.toList(), favoris.toList(), epingles.toList(), archives.toList())
 
     private fun poser(l: Listes) {
         if (head.toList() != l.head) { head.clear(); head.addAll(l.head) }
         if (favoris.toList() != l.favoris) { favoris.clear(); favoris.addAll(l.favoris) }
         if (epingles.toList() != l.epingles) { epingles.clear(); epingles.addAll(l.epingles) }
+        if (archives.toList() != l.archives) { archives.clear(); archives.addAll(l.archives); majDepuis() }
     }
 
     /** Envoie une trame au serveur ; faux si la connexion est coupée. Posé par [Depot] en mode client. */
@@ -219,7 +284,8 @@ object Marques {
         prochain++
         enVol = prochain to l
         val corps = JSONObject().put("head", JSONArray(l.head)).put("favoris", JSONArray(l.favoris))
-            .put("epingles", JSONArray(l.epingles)).put("version", version).put("id", prochain)
+            .put("epingles", JSONArray(l.epingles)).put("archives", JSONArray(l.archives))
+            .put("version", version).put("id", prochain)
         if (!envoi(JSONObject().put("marques", corps))) {
             // La connexion tombe : le rejeu suivant tranchera.
             synchro = false
@@ -238,6 +304,9 @@ object Marques {
             m.optJSONArray("head").chaines().distinct(),
             m.optJSONArray("favoris").chaines().distinct(),
             m.optJSONArray("epingles").chaines().distinct(),
+            // Un serveur d'avant les archives ne les envoie pas : elles restent
+            // alors propres à cet appareil (le serveur est censé avoir les nôtres).
+            if (m.has("archives")) m.optJSONArray("archives").chaines().distinct() else archives.toList(),
         )
         val v = m.optLong("version", -1)
         if (v < 0) return

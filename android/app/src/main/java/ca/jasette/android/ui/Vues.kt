@@ -73,6 +73,7 @@ import ca.jasette.android.t
 import ca.jasette.android.peutArchiver
 import ca.jasette.android.peutSupprimer
 import ca.jasette.android.refusArchiverSupprimer
+import ca.jasette.android.texteSuppression
 
 /**
  * Une action à faire dans le fil qui s'ouvre, demandée par le menu d'une
@@ -100,10 +101,10 @@ fun MenuDeListe(c: Conv, ouvert: Boolean, fermer: () -> Unit, retiree: (String) 
 
 /** Le nombre de conversations non lues d'une vue (la pastille du rail). */
 fun nonLus(v: Vue): Int = when (v) {
-    Vue.Tout -> Depot.convs.count { it.unread }
+    Vue.Tout -> Depot.boite.count { it.unread }
     Vue.Favoris -> Marques.favoris.count { id -> Depot.conv(id)?.unread == true }
-    Vue.Archives -> Depot.archives.count { it.unread }
-    is Vue.DuService -> Depot.convs.count { it.service == v.service && it.unread }
+    Vue.Archives -> Depot.toutesArchives.count { it.unread }
+    is Vue.DuService -> Depot.boite.count { it.service == v.service && it.unread }
 }
 
 /** Les services connectés, dans l'ordre du rail du bureau. */
@@ -418,7 +419,7 @@ fun MenuConversation(
     var confirmer by remember { mutableStateOf(false) }
     val archivable = c.peutArchiver
     val supprimable = c.peutSupprimer
-    val archivee = c.archived || Depot.archives.any { it.id == c.id }
+    val archivee = Depot.estArchivee(c)
     val epinglee = Marques.estEpinglee(c.id)
     val favori = Marques.estFavori(c.id)
     val dansHead = Marques.estDansHead(c.id)
@@ -471,7 +472,7 @@ fun MenuConversation(
             title = { Text(t("Supprimer la conversation ?"), color = P.texteFort) },
             text = {
                 Text(
-                    t("Elle sera supprimée de Google Messages, sur ton téléphone aussi. C'est définitif."),
+                    c.texteSuppression,
                     color = P.texte,
                 )
             },

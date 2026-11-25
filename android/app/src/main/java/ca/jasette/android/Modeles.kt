@@ -23,6 +23,13 @@ enum class Service(val titre: String, val court: String, val prefixe: String, va
     /** Un service préfixé (tous sauf Google) : ses nouvelles passent par `nouvelleMeta`. */
     val meta get() = this != GOOGLE
 
+    /**
+     * Le service archive lui-même (commande `archive` de son pont) : Google
+     * Messages et WhatsApp. Les autres passent par les archives de Jasette
+     * (`Marques.archives`, partagées par le serveur).
+     */
+    val archiveNatif get() = this == GOOGLE || this == WHATSAPP
+
     /** Servi seulement par le serveur Jasette (aucun pont embarqué sur le téléphone). */
     val serveurSeulement get() = this == WHATSAPP || this == SIGNAL || this == X
 

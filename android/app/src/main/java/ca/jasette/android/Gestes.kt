@@ -61,17 +61,30 @@ object Gestes {
 }
 
 /**
- * Archiver : Google Messages et WhatsApp (commande `archive` de leur pont).
- * Supprimer : Google Messages seulement. Le menu et les glissements suivent ces deux règles.
+ * Archiver : partout. Google Messages et WhatsApp par leur pont (commande
+ * `archive`) ; les autres par les archives de Jasette (`Marques.archives`).
+ * Seule exception : une conversation que Messenger ou Instagram ont eux-mêmes
+ * rangée dans leurs archives (venue de leur dossier d'archives) ne se
+ * désarchive que dans leur app.
+ * Supprimer : Google Messages, Messenger et Instagram (commande `delete`).
+ * Le menu et les glissements suivent ces deux règles.
  */
-val Conv.peutArchiver: Boolean get() = service == Service.GOOGLE || service == Service.WHATSAPP
-val Conv.peutSupprimer: Boolean get() = service == Service.GOOGLE
+val Conv.peutArchiver: Boolean get() = service.archiveNatif || !archived
+val Conv.peutSupprimer: Boolean
+    get() = service == Service.GOOGLE || service == Service.MESSENGER || service == Service.INSTAGRAM
 
 /** Pourquoi archiver ou supprimer n'est pas offert pour cette conversation (null si tout l'est). */
 val Conv.refusArchiverSupprimer: String?
     get() = when {
-        peutArchiver && peutSupprimer -> null
-        peutArchiver -> t("Supprimer : pas encore pour ce service.")
-        service == Service.MESSENGER || service == Service.INSTAGRAM -> t("Archiver et supprimer : bientôt pour Messenger.")
-        else -> t("Archiver et supprimer : pas encore pour ce service.")
+        !peutArchiver -> t("Archivée par le service : désarchive-la dans son app.")
+        !peutSupprimer -> t("Supprimer : pas encore pour ce service.")
+        else -> null
+    }
+
+/** Le texte de la confirmation de « Supprimer la conversation », selon le service. */
+val Conv.texteSuppression: String
+    get() = when (service) {
+        Service.MESSENGER -> t("Elle sera supprimée de Messenger, sur tous tes appareils. C'est définitif.")
+        Service.INSTAGRAM -> t("Elle sera supprimée d'Instagram, sur tous tes appareils. C'est définitif.")
+        else -> t("Elle sera supprimée de Google Messages, sur ton téléphone aussi. C'est définitif.")
     }

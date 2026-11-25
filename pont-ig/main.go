@@ -289,6 +289,8 @@ func main() {
 			go p.sendMedia(cmd)
 		case "read":
 			go p.markRead(cmd)
+		case "delete":
+			go p.deleteConv(cmd)
 		case "download":
 			go p.download(cmd)
 		case "new":

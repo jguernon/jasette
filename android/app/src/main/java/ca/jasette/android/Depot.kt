@@ -510,6 +510,14 @@ object Depot {
                 val m = Msg.de(v.optJSONObject("item") ?: return)
                 recevoirMessage(m)
             }
+            // Ponts Meta : une conversation supprimée (ici, sur un autre appareil ou dans l'app).
+            "deleted" -> {
+                val id = v.chaine("conv")
+                if (id.isEmpty()) return
+                if (convs.any { it.id == id }) remplacerConvs(convs.filter { it.id != id })
+                if (archives.any { it.id == id }) remplacerArchives(archives.filter { it.id != id })
+                messages.remove(id)
+            }
             "sent" -> {
                 if (!v.optBoolean("ok")) {
                     val tmp = v.chaine("tmp_id")
@@ -564,6 +572,8 @@ object Depot {
                 remplacerArchives(archives.map { if (it.id == c.id) c else it })
             }
         }
+        // Archives de Jasette : un message reçu ramène la conversation dans la boîte de réception.
+        if (nouveau && !m.fromMe) Marques.desarchiverSiRecu(m.conv, m.time)
         if (nouveau && !m.fromMe) {
             if (ouverteIci) {
                 commande(JSONObject().put("cmd", "read").put("conv", m.conv).put("msg", m.id))
@@ -587,6 +597,19 @@ object Depot {
 
     /** Une conversation, dans la boîte de réception ou les archives. */
     fun conv(id: String): Conv? = convs.firstOrNull { it.id == id } ?: archives.firstOrNull { it.id == id }
+
+    /** Archivée par Jasette (`Marques.archives`) : seulement pour les services qui n'archivent pas eux-mêmes. */
+    fun archiveeJasette(id: String) = !Service.de(id).archiveNatif && Marques.estArchivee(id)
+
+    /** Archivée, par son service ou par Jasette. */
+    fun estArchivee(c: Conv) = c.archived || archives.any { it.id == c.id } || archiveeJasette(c.id)
+
+    /** La boîte de réception (et les vues Favoris et par service) : sans les archives de Jasette. */
+    val boite: List<Conv> get() = convs.filter { !archiveeJasette(it.id) }
+
+    /** La vue Archives : celles des services et celles de Jasette, ensemble, les plus récentes d'abord. */
+    val toutesArchives: List<Conv>
+        get() = (archives + convs.filter { archiveeJasette(it.id) }).distinctBy { it.id }.sortedByDescending { it.time }
 
     /** Un compte déconnecté : ses conversations disparaissent de la liste (et des archives). */
     private fun oublier(service: Service) {
@@ -666,10 +689,16 @@ object Depot {
     fun pret(service: Service) = etat(service) == Etat.PRET
 
     /**
-     * Archive ou désarchive (Google et WhatsApp, voir `peutArchiver`), et le montre
-     * tout de suite ; le téléphone confirmera par une nouvelle « conversation ».
+     * Archive ou désarchive, et le montre tout de suite. Google et WhatsApp : par
+     * leur pont (le téléphone confirmera par une nouvelle « conversation ») ; les
+     * autres : par les archives de Jasette (`Marques.archives`, partagées par le
+     * serveur). « Annuler » appelle simplement l'inverse.
      */
     fun archiver(id: String, archiver: Boolean) {
+        if (!Service.de(id).archiveNatif) {
+            Marques.archiver(id, archiver)
+            return
+        }
         commande(JSONObject().put("cmd", "archive").put("conv", id).put("archived", archiver))
         if (archiver) {
             val c = convs.firstOrNull { it.id == id } ?: return
@@ -750,7 +779,11 @@ object Depot {
         commande(service, JSONObject().put("cmd", "new").put("number", numero.removePrefix(service.prefixe)))
     }
 
-    /** Supprime une conversation (Google seulement, comme au bureau). */
+    /**
+     * Supprime une conversation (Google, Messenger et Instagram : commande
+     * `delete`). Retirée tout de suite ; le pont confirme par l'événement
+     * `deleted` (Meta) ou, s'il échoue, la remet par sa liste et une erreur.
+     */
     fun supprimer(id: String) {
         commande(JSONObject().put("cmd", "delete").put("conv", id))
         remplacerConvs(convs.filter { it.id != id })
