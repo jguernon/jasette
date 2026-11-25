@@ -1133,6 +1133,8 @@ struct Jasette {
     /// appareil (code, vérification), les appareils jumelés, la vérification
     /// d'un serveur à confirmer (mode client), et les champs du jumelage.
     serveur_occupe: bool,
+    /// L'accueil montre la connexion Google (sinon : le choix du service).
+    accueil_google: bool,
     code_jumelage: Option<(String, String)>,
     appareils: Vec<String>,
     verif_client: Option<(String, String, pont::Verification)>,
@@ -1777,6 +1779,7 @@ impl Jasette {
             mosaiques: HashMap::new(),
             reglages,
             serveur_occupe: false,
+            accueil_google: false,
             code_jumelage: None,
             appareils: Vec::new(),
             verif_client: None,
@@ -5896,7 +5899,7 @@ impl Jasette {
                 div()
                     .text_center()
                     .text_color(th().texte)
-                    .child(t("Vos SMS et RCS de Google Messages, avec tout l'historique, sur votre bureau.")),
+                    .child(t("Google Messages, Messenger et Instagram au même endroit, avec tout l'historique.")),
             );
 
         if let Some(emoji) = &self.emoji {
@@ -5941,6 +5944,62 @@ impl Jasette {
                         .text_color(th().texte)
                         .child("Google Messages > Association d'appareils > Scanner le code QR"),
                 );
+        } else if let Some(svc) = SERVICES_META.into_iter().find(|s| self.meta(*s).connexion_ouverte) {
+            carte = carte.child(div().mt(px(10.)).text_color(th().texte).child(if svc == Service::Instagram {
+                t("Connectez-vous dans la fenêtre Instagram…")
+            } else {
+                t("Connectez-vous dans la fenêtre Facebook…")
+            }));
+        } else if !self.accueil_google {
+            // Le choix du premier service : aucun n'est obligatoire.
+            let service = |id: &'static str, svc: Service| {
+                div()
+                    .id(id)
+                    .w_full()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(14.))
+                    .px(px(14.))
+                    .py(px(10.))
+                    .rounded(rayon(14.))
+                    .bg(ton(blanc(0.55), th().surface))
+                    .cursor_pointer()
+                    .hover(|s| s.bg(th().survol))
+                    .child(logo(svc, 34.))
+                    .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(svc.nom()))
+                    .child(icone("chevron-right", 18., th().texte_pale))
+            };
+            carte = carte
+                .child(div().mt(px(6.)).text_size(px(13.)).text_color(th().texte_pale).child(t("Connectez un premier service :")))
+                .child(service("accueil-google", Service::GoogleMessages).on_click(cx.listener(|this, _, _, cx| {
+                    this.accueil_google = true;
+                    cx.notify();
+                })))
+                .child(service("accueil-messenger", Service::Messenger).on_click(cx.listener(|this, _, _, cx| {
+                    this.connecter_meta(Service::Messenger);
+                    cx.notify();
+                })))
+                .child(service("accueil-instagram", Service::Instagram).on_click(cx.listener(|this, _, _, cx| {
+                    this.connecter_meta(Service::Instagram);
+                    cx.notify();
+                })))
+                .when(self.reglages.mode_serveur.is_empty(), |d| {
+                    d.child(
+                        div()
+                            .id("accueil-serveur")
+                            .mt(px(4.))
+                            .text_size(px(13.))
+                            .text_color(th().accent)
+                            .cursor_pointer()
+                            .hover(|s| s.opacity(0.7))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.section = Some(Section::Serveur);
+                                cx.notify();
+                            }))
+                            .child(t("Utiliser mon serveur Jasette")),
+                    )
+                });
         } else {
             carte = carte
                 .child(
@@ -5964,6 +6023,19 @@ impl Jasette {
                             cx.notify();
                         }))
                         .child(t("Utiliser plutôt un code QR")),
+                )
+                .child(
+                    div()
+                        .id("autres-services")
+                        .text_size(px(13.))
+                        .text_color(th().texte_pale)
+                        .cursor_pointer()
+                        .hover(|s| s.opacity(0.7))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.accueil_google = false;
+                            cx.notify();
+                        }))
+                        .child(t("← Autres services")),
                 );
         }
         if let Some(e) = &self.erreur {
@@ -6049,8 +6121,14 @@ impl Jasette {
                     .child(halo(teinte().halo, 0.40, 300., 520., 760.))
             });
 
-        // Premier lancement, aucun compte : l'écran de connexion seul.
-        if !self.etat.associe() && self.convs.is_empty() && self.section.is_none() {
+        // Premier lancement, aucun compte : l'écran d'accueil seul.
+        if !self.etat.associe()
+            && !self.messenger.associe()
+            && !self.instagram.associe()
+            && self.reglages.mode_serveur != "client"
+            && self.convs.is_empty()
+            && self.section.is_none()
+        {
             return page.child(self.ecran_connexion(cx));
         }
 
@@ -6592,6 +6670,10 @@ fn t(fr: &'static str) -> &'static str {
         "Jasette s'ouvre toute seule à l'ouverture de session : les messages arrivent dès le départ." => "Jasette opens by itself when you log in, so messages arrive right away.",
         "Icône de l'app" => "App icon",
         "Blanche" => "White",
+        "Google Messages, Messenger et Instagram au même endroit, avec tout l'historique." => "Google Messages, Messenger and Instagram in one place, with your full history.",
+        "Connectez un premier service :" => "Connect a first service:",
+        "Utiliser mon serveur Jasette" => "Use my Jasette server",
+        "← Autres services" => "← Other services",
         "Créé par" => "Created by",
         "Archiver" => "Archive",
         "Épingler en haut" => "Pin to top",
