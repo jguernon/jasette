@@ -143,6 +143,10 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
             ChoixVolets()
 
             Spacer(Modifier.height(12.dp))
+            Text(t("Gestes"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            ChoixGestes()
+
+            Spacer(Modifier.height(12.dp))
             Text(t("Icône de l'app"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             ChoixIcone()
 

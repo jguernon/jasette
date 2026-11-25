@@ -279,4 +279,12 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "est trop gros pour" to "is too large for",
     "lecture impossible" to "cannot be read",
     "Échec de l'envoi · Réessayer" to "Failed to send · Retry",
+    // Réglages → Gestes : les glissements sur les conversations de la liste.
+    "Gestes" to "Gestures",
+    "Glisser vers la droite" to "Swipe right",
+    "Glisser vers la gauche" to "Swipe left",
+    "Répondre" to "Reply",
+    "Rien" to "Nothing",
+    "Conversation archivée" to "Conversation archived",
+    "Conversation désarchivée" to "Conversation unarchived",
 )

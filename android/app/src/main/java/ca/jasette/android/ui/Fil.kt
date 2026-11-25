@@ -743,6 +743,18 @@ private fun Saisie(conv: String, actif: Boolean) {
     val video = rememberLauncherForActivityResult(ActivityResultContracts.CaptureVideo()) { ok ->
         capture?.let { if (ok) ajouter(listOf(it)) }
     }
+    // Ouvert par le glissement « Répondre » : le curseur dans le champ, le clavier ouvert.
+    val focusSaisie = remember { androidx.compose.ui.focus.FocusRequester() }
+    val clavier = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val clavierPour = ca.jasette.android.Gestes.clavierPour
+    LaunchedEffect(clavierPour, actif) {
+        if (clavierPour == conv && actif) {
+            kotlinx.coroutines.delay(150)
+            runCatching { focusSaisie.requestFocus() }
+            clavier?.show()
+            ca.jasette.android.Gestes.clavierPour = null
+        }
+    }
     Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding()) {
         erreurEnvoi?.let {
             Text(it, color = P.danger, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
@@ -822,7 +834,7 @@ private fun Saisie(conv: String, actif: Boolean) {
                     textStyle = TextStyle(color = P.texteFort, fontSize = 16.sp, fontFamily = P.police),
                     cursorBrush = SolidColor(P.accent),
                     maxLines = 6,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focusSaisie),
                 )
             }
             Spacer(Modifier.width(8.dp))

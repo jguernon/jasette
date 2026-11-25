@@ -66,6 +66,7 @@ import ca.jasette.android.t
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Phone
+import kotlinx.coroutines.launch
 
 /** Les écrans de l'app (pas de bibliothèque de navigation : une pile toute simple). */
 sealed interface Ecran {
@@ -215,6 +216,19 @@ private fun Liste(
     var reorganiser by remember { mutableStateOf(false) }
     var filtre by remember { mutableStateOf("") }
     var nouveau by remember { mutableStateOf(false) }
+    // La barre du bas des glissements : « Conversation archivée · Annuler », etc.
+    val barreMessages = remember { androidx.compose.material3.SnackbarHostState() }
+    val portee = androidx.compose.runtime.rememberCoroutineScope()
+    fun annoncer(message: String, annuler: (() -> Unit)?) {
+        portee.launch {
+            barreMessages.currentSnackbarData?.dismiss()
+            val r = barreMessages.showSnackbar(
+                message, actionLabel = if (annuler != null) t("Annuler") else null,
+                duration = androidx.compose.material3.SnackbarDuration.Short,
+            )
+            if (r == androidx.compose.material3.SnackbarResult.ActionPerformed) annuler?.invoke()
+        }
+    }
     LaunchedEffect(vue) {
         reorganiser = false
         if (vue == Vue.Archives) Depot.chargerArchives()
@@ -251,6 +265,14 @@ private fun Liste(
             )
         },
         bottomBar = { if (!large) BarreBas(vue, choisirVue) },
+        snackbarHost = {
+            androidx.compose.material3.SnackbarHost(barreMessages) { d ->
+                androidx.compose.material3.Snackbar(
+                    d, shape = forme(12.dp), containerColor = P.menu, contentColor = P.texteFort,
+                    actionColor = P.accent,
+                )
+            }
+        },
         floatingActionButton = {
             if (!reorganiser) {
                 FloatingActionButton(
@@ -315,14 +337,23 @@ private fun Liste(
                     if (nbEpingles > 0 && i == nbEpingles) {
                         HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), color = P.traitFin)
                     }
-                    Rangee(
+                    // Glisser à droite ou à gauche (Réglages → Gestes) ; pas en mode Réorganiser.
+                    RangeeGlissable(
                         c,
-                        choisie = c.id == choisie,
-                        epinglee = i < nbEpingles,
-                        badge = vue !is Vue.DuService,
-                        reorganiser = reorg,
+                        actif = !reorg,
+                        ouvrir = { ouvrir(c.id) },
                         retiree = retiree,
-                    ) { ouvrir(c.id) }
+                        annoncer = ::annoncer,
+                    ) {
+                        Rangee(
+                            c,
+                            choisie = c.id == choisie,
+                            epinglee = i < nbEpingles,
+                            badge = vue !is Vue.DuService,
+                            reorganiser = reorg,
+                            retiree = retiree,
+                        ) { ouvrir(c.id) }
+                    }
                 }
             }
             // La recherche : aussi les personnes trouvées par Messenger et Instagram
