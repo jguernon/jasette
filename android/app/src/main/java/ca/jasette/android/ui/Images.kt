@@ -34,6 +34,11 @@ fun oublierImagesContenu() {
     for (k in cache.snapshot().keys) if (k.startsWith("content:")) cache.remove(k)
 }
 
+/** Oublie les images décodées d'un fichier (réécrit sous le même nom). */
+fun oublierImage(chemin: String) {
+    for (k in cache.snapshot().keys) if (k.startsWith("$chemin@")) cache.remove(k)
+}
+
 /**
  * Décode [chemin] : un fichier, ou une URI « content:// » (photo d'un contact,
  * lue directement par le ContentResolver, sans copie sur le disque).
@@ -67,6 +72,7 @@ fun ImageFichier(
     modifier: Modifier = Modifier,
     cote: Int = 1024,
     contentScale: ContentScale = ContentScale.Crop,
+    filtre: androidx.compose.ui.graphics.ColorFilter? = null,
     enAttente: @Composable () -> Unit = {},
 ) {
     val resolveur = LocalContext.current.applicationContext.contentResolver
@@ -75,7 +81,7 @@ fun ImageFichier(
     }
     val img = image
     if (img != null) {
-        Image(img, contentDescription = null, modifier = modifier, contentScale = contentScale)
+        Image(img, contentDescription = null, modifier = modifier, contentScale = contentScale, colorFilter = filtre)
     } else {
         Box(modifier) { enAttente() }
     }

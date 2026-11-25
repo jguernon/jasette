@@ -15,6 +15,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -77,16 +78,22 @@ private fun initiales(nom: String): String? {
  * L'avatar d'une conversation, avec le petit badge de son service. La photo
  * d'un contact du téléphone passe avant celle du service quand le réglage est
  * actif (voir [ca.jasette.android.Contacts.photoPour]) ; la grande photo pour les gros avatars.
+ * Sans photo du service, celle gardée par [ca.jasette.android.CacheMarques] (conversation marquée).
+ * [grise] : la conversation n'est pas chargée (service absent) ; le logo du service reste en couleur.
  */
 @Composable
-fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true) {
+fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false) {
     val photo = ca.jasette.android.Contacts.photoPour(conv, grande = taille >= 48.dp) ?: Depot.avatars[conv.id]
+        ?: ca.jasette.android.CacheMarques.avatar(conv.id)
     Box(Modifier.size(taille)) {
         val rond = Modifier.size(taille).clip(formeRonde)
         if (photo != null) {
-            ImageFichier(photo, rond.background(P.surface), cote = 256)
+            ImageFichier(
+                photo, rond.background(P.surface).then(if (grise) Modifier.alpha(0.7f) else Modifier), cote = 256,
+                filtre = if (grise) filtreGris else null,
+            )
         } else {
-            val base = couleurHex(conv.color) ?: P.avatarDefaut
+            val base = if (grise) GRIS_ABSENT else couleurHex(conv.color) ?: P.avatarDefaut
             Box(rond.background(fondAvatar(base)), contentAlignment = Alignment.Center) {
                 val i = if (conv.group) null else initiales(conv.name)
                 if (i != null) {
@@ -106,6 +113,9 @@ fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true) {
         }
     }
 }
+
+/** Le fond d'un avatar sans photo d'une conversation absente (un gris neutre ; EGA : gris foncé). */
+private val GRIS_ABSENT = Color(0xff6e6e73)
 
 private val heureFmt = DateTimeFormatter.ofPattern("HH:mm")
 private val jourFmtFr = DateTimeFormatter.ofPattern("d MMM", Locale.CANADA_FRENCH)

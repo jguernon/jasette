@@ -169,13 +169,20 @@ fun App(activite: Activity) {
                             VerticalDivider(color = P.traitFin)
                             Box(Modifier.weight(1f).fillMaxHeight().background(P.fil)) {
                                 if (id != null) {
-                                    key(id) { Fil(activite, id, retour = { ouverte = null }, volet = true, retiree = { ouverte = null }) }
+                                    key(id) {
+                                        Fil(
+                                            activite, id, retour = { ouverte = null }, volet = true, retiree = { ouverte = null },
+                                            reglages = { aller(Ecran.Reglages) },
+                                        )
+                                    }
                                 } else {
                                     VoletVide()
                                 }
                             }
                         }
-                        id != null -> key(id) { Fil(activite, id, retour = { ouverte = null }, retiree = { ouverte = null }) }
+                        id != null -> key(id) {
+                            Fil(activite, id, retour = { ouverte = null }, retiree = { ouverte = null }, reglages = { aller(Ecran.Reglages) })
+                        }
                         else -> liste()
                     }
                 }
@@ -298,7 +305,13 @@ private fun Liste(
         },
     ) { marges ->
         // Les archives des services et celles de Jasette, ensemble ; ailleurs, sans elles.
-        val source = if (vue == Vue.Archives) Depot.toutesArchives else Depot.boite
+        // Les favoris et les épinglées sont tous montrés, chargés ou non : ceux dont la
+        // conversation est absente (service coupé, pas encore prêt) viennent du cache des marques.
+        val source = when (vue) {
+            Vue.Archives -> Depot.toutesArchives
+            Vue.Favoris -> Marques.favoris.map { convMarquee(it) }
+            else -> Depot.boite + epinglesAbsentes()
+        }
         val rang = { c: Conv -> Marques.epingles.indexOf(c.id).let { if (it < 0) Int.MAX_VALUE else it } }
         // La barre de recherche filtre par nom, membres et aperçu (comme `correspond`).
         val f = ca.jasette.android.plier(filtre.trim())
@@ -319,8 +332,8 @@ private fun Liste(
             filtrees.sortedBy(rang)
         }
         val nbEpingles = if (vue == Vue.Favoris) 0 else visibles.count { rang(it) != Int.MAX_VALUE }
-        // Le Head : la grille des favoris en haut de la boîte de réception.
-        val head = if (vue == Vue.Tout && f.isEmpty()) Marques.head.mapNotNull { id -> Depot.convs.firstOrNull { it.id == id } } else emptyList()
+        // Le Head : la grille en haut de la boîte de réception, tous ses ids (chargés ou du cache).
+        val head = if (vue == Vue.Tout && f.isEmpty()) Marques.head.map { convMarquee(it) } else emptyList()
         val reorg = reorganiser && vue == Vue.Favoris
         LaunchedEffect(f) { Depot.chercherContacts(if (f.length >= 2) filtre.trim() else "") }
         LazyColumn(Modifier.fillMaxSize().padding(marges)) {
@@ -354,7 +367,8 @@ private fun Liste(
                     // Glisser à droite ou à gauche (Réglages → Gestes) ; pas en mode Réorganiser.
                     RangeeGlissable(
                         c,
-                        actif = !reorg,
+                        // Pas de glissement (archiver, supprimer) sur une conversation absente.
+                        actif = !reorg && Depot.conv(c.id) != null,
                         ouvrir = { ouvrir(c.id) },
                         retiree = retiree,
                         annoncer = ::annoncer,

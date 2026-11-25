@@ -62,6 +62,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -298,6 +299,10 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
  * cases se partagent la largeur et les avatars rapetissent jusqu'à un minimum
  * lisible (au-delà, la grille défile de côté). Seuls colonnes × rangées Head
  * sont montrés : les autres restent dans le Head, simplement cachés.
+ *
+ * Tous les ids du Head y sont, chargés ou non : une conversation absente
+ * (service coupé ou pas encore prêt) vient de [ca.jasette.android.CacheMarques],
+ * grisée, avec « déconnecté » ou « chargement… » (voir [absence]).
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -350,7 +355,9 @@ private fun CaseHead(
     retiree: (String) -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
-    val nom = c.name.ifEmpty { t("Sans nom") }
+    val absente = absence(c.id)
+    // Jamais vue (ni chargée, ni en cache) : pas de nom, seulement l'avatar générique et le logo.
+    val nom = if (c.name.isEmpty() && absente != null) "" else c.name.ifEmpty { t("Sans nom") }
     val prenom = if (c.group) nom else nom.split(Regex("\\s+")).firstOrNull() ?: nom
     // Le point des non-lus suit la taille de l'avatar (13 dp pour 54 dp).
     val point = (avatar * (13f / 54f)).coerceAtLeast(9.dp)
@@ -363,7 +370,7 @@ private fun CaseHead(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box {
-                Avatar(c, avatar)
+                Avatar(c, avatar, grise = absente.grise())
                 if (c.unread) {
                     Box(
                         Modifier.align(Alignment.TopEnd).size(point).clip(formeRonde).background(P.fond)
@@ -375,9 +382,16 @@ private fun CaseHead(
             Text(
                 prenom, fontSize = police, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-                color = if (c.unread) P.texteFort else P.texte,
+                color = if (c.unread) P.texteFort else if (absente.grise()) P.textePale else P.texte,
                 modifier = Modifier.padding(horizontal = 4.dp),
             )
+            absente.indication()?.let {
+                Text(
+                    it, fontSize = police * 0.85f, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center, color = P.textePale, fontStyle = FontStyle.Italic,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+            }
         }
         MenuDeListe(c, menu, fermer = { menu = false }, retiree = retiree, ouvrir = { ouvrir(c.id) })
     }
@@ -396,6 +410,9 @@ fun Rangee(
     onClick: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
+    // Pas chargée (favori ou épinglée d'un service absent) : la fiche du cache, grisée.
+    val absente = absence(c.id)
+    val indication = absente.indication()
     Box {
         Row(
             Modifier.fillMaxWidth()
@@ -404,12 +421,14 @@ fun Rangee(
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Avatar(c, 52.dp, badge = badge)
+            // Le logo du service toujours en pastille sur une conversation absente.
+            Avatar(c, 52.dp, badge = badge || absente != null, grise = absente.grise())
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        c.name.ifEmpty { c.members.joinToString(", ") }, color = P.texteFort,
+                        c.name.ifEmpty { c.members.joinToString(", ") },
+                        color = if (absente.grise()) P.texte else P.texteFort,
                         fontWeight = if (c.unread) FontWeight.Bold else FontWeight.SemiBold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), fontSize = 16.sp,
                     )
@@ -420,7 +439,11 @@ fun Rangee(
                     }
                     if (!reorganiser) {
                         Spacer(Modifier.width(6.dp))
-                        Text(heureListe(c.time), color = if (c.unread) P.accent else P.textePale, fontSize = 12.sp)
+                        if (indication != null) {
+                            Text(indication, color = P.textePale, fontSize = 12.sp, fontStyle = FontStyle.Italic)
+                        } else {
+                            Text(heureListe(c.time), color = if (c.unread) P.accent else P.textePale, fontSize = 12.sp)
+                        }
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -469,8 +492,11 @@ fun MenuConversation(
     rechercher: () -> Unit,
 ) {
     var confirmer by remember { mutableStateOf(false) }
-    val archivable = c.peutArchiver
-    val supprimable = c.peutSupprimer
+    // Une conversation absente (affichée depuis le cache des marques) : seules ses
+    // marques se changent ; archiver ou supprimer attend que son service la charge.
+    val chargee = Depot.conv(c.id) != null
+    val archivable = c.peutArchiver && chargee
+    val supprimable = c.peutSupprimer && chargee
     val archivee = Depot.estArchivee(c)
     val epinglee = Marques.estEpinglee(c.id)
     val favori = Marques.estFavori(c.id)

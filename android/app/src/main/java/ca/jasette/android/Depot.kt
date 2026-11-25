@@ -536,7 +536,10 @@ object Depot {
             "avatar" -> {
                 val conv = v.chaine("conv")
                 val path = v.chaine("path")
-                if (conv.isNotEmpty() && path.isNotEmpty()) avatars[conv] = path
+                if (conv.isNotEmpty() && path.isNotEmpty()) {
+                    avatars[conv] = path
+                    CacheMarques.noterAvatar(conv)
+                }
             }
             "avatars_groupe" -> {
                 // Pas de mosaïque (encore) : la photo du premier membre qui en a une.
@@ -547,6 +550,7 @@ object Depot {
                     val path = membres.getJSONObject(i).chaine("path")
                     if (path.isNotEmpty()) {
                         avatars[conv] = path
+                        CacheMarques.noterAvatar(conv)
                         break
                     }
                 }
@@ -587,6 +591,10 @@ object Depot {
                 if (convs.any { it.id == id }) remplacerConvs(convs.filter { it.id != id })
                 if (archives.any { it.id == id }) remplacerArchives(archives.filter { it.id != id })
                 messages.remove(id)
+                // Une suppression explicite (ici ou ailleurs) : ses marques partent aussi.
+                // C'est, avec Depot.supprimer, le seul retrait automatique de marques :
+                // une conversation simplement absente (service coupé, liste rechargée) les garde.
+                Marques.oublier(id)
             }
             "sent" -> {
                 if (!v.optBoolean("ok")) {
@@ -657,12 +665,15 @@ object Depot {
         val triee = liste.sortedByDescending { it.time }
         convs.clear()
         convs.addAll(triee)
+        // Les conversations marquées (Head, favoris, épingles) : gardées pour quand leur service sera absent.
+        CacheMarques.noter(triee)
     }
 
     private fun remplacerArchives(liste: List<Conv>) {
         val triee = liste.sortedByDescending { it.time }
         archives.clear()
         archives.addAll(triee)
+        CacheMarques.noter(triee)
     }
 
     /** Une conversation, dans la boîte de réception ou les archives. */
@@ -681,7 +692,11 @@ object Depot {
     val toutesArchives: List<Conv>
         get() = (archives + convs.filter { archiveeJasette(it.id) }).distinctBy { it.id }.sortedByDescending { it.time }
 
-    /** Un compte déconnecté : ses conversations disparaissent de la liste (et des archives). */
+    /**
+     * Un compte déconnecté : ses conversations disparaissent de la liste (et des
+     * archives). Ses marques (Head, favoris, épingles) restent : elles s'affichent
+     * depuis [CacheMarques].
+     */
     private fun oublier(service: Service) {
         if (convs.any { it.service == service }) remplacerConvs(convs.filter { it.service != service })
         if (archives.any { it.service == service }) remplacerArchives(archives.filter { it.service != service })

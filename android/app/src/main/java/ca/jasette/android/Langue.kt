@@ -343,4 +343,12 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Code d'accès" to "Passcode",
     "Pas encore de code ? Active d'abord X Chat dans l'application X ou sur x.com/messages." to
         "No passcode yet? First turn on X Chat in the X app or at x.com/messages.",
+    // Head, favoris et épingles d'un service absent (CacheMarques, ui/Absentes.kt).
+    "chargement…" to "loading…",
+    "déconnecté" to "disconnected",
+    "se connecte…" to "is connecting…",
+    "n'est pas connecté" to "is not connected",
+    "Les messages de cette conversation s'afficheront dès que le service sera connecté." to
+        "This conversation's messages will appear as soon as the service is connected.",
+    "Réglages → Comptes" to "Settings → Accounts",
 )

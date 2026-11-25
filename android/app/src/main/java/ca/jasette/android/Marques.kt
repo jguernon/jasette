@@ -300,6 +300,7 @@ object Marques {
     private fun changement() {
         aEnvoyer = true
         garder()
+        CacheMarques.synchroniser()
         pousser()
     }
 
@@ -385,6 +386,7 @@ object Marques {
             }
         }
         if (Triple(listes(), version, aEnvoyer) != avant || serveurMarques != serveurAvant) garder()
+        if (listes() != avant.first) CacheMarques.synchroniser()
         pousser()
     }
 }

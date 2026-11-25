@@ -118,11 +118,26 @@ import ca.jasette.android.statut
  * Le fil d'une conversation : bulles, images, réactions, et la barre d'envoi.
  * [volet] : affiché à droite de la liste (deux volets) ; pas de flèche retour alors.
  * [retiree] : la conversation vient d'être archivée ou supprimée par le menu.
+ * [reglages] : ouvre Réglages → Comptes (conversation d'un service pas connecté).
+ *
+ * Une conversation marquée mais pas chargée (son service est coupé ou se
+ * connecte) s'ouvre aussi : son en-tête vient du cache des marques, et le fil
+ * montre les messages déjà reçus s'il y en a, sinon [FilHorsLigne].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun Fil(activite: Activity, id: String, retour: () -> Unit, volet: Boolean = false, retiree: (String) -> Unit = {}) {
+fun Fil(
+    activite: Activity,
+    id: String,
+    retour: () -> Unit,
+    volet: Boolean = false,
+    retiree: (String) -> Unit = {},
+    reglages: () -> Unit = {},
+) {
     val conv = Depot.conv(id)
+    // Ce que montre l'en-tête : la conversation, ou sa fiche gardée si elle est marquée.
+    val entete = conv ?: if (estMarquee(id)) convMarquee(id) else null
+    val absente = absence(id)
     val liste = Depot.messages[id].orEmpty()
     var plein by remember { mutableStateOf<String?>(null) }
     var menu by remember { mutableStateOf(false) }
@@ -200,6 +215,13 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit, volet: Boolean = fal
         NotificationManagerCompat.from(activite).cancel(PontService.idNotification(id))
         onDispose { if (Depot.ouverte == id) Depot.ouverte = null }
     }
+    // Ouverte avant que son service soit prêt : les messages sont demandés dès qu'il l'est.
+    val pret = Depot.pret(Service.de(id))
+    var etaitPret by remember { mutableStateOf(pret) }
+    LaunchedEffect(pret) {
+        if (pret && !etaitPret && !Depot.messages.containsKey(id)) Depot.ouvrir(id)
+        etaitPret = pret
+    }
 
     Scaffold(
         // En deux volets, le fond du volet est déjà posé (pas de double voile au verre).
@@ -211,29 +233,31 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit, volet: Boolean = fal
                 },
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (conv != null) Avatar(conv, 36.dp)
+                        if (entete != null) Avatar(entete, 36.dp, grise = absente.grise())
                         Spacer(Modifier.width(10.dp))
                         // Le nom et le service, serrés et centrés sur l'avatar : la barre donne
                         // au titre l'interligne de titleLarge (28 sp), qui les poussait vers le haut.
                         Column(verticalArrangement = Arrangement.Center) {
                             Text(
-                                conv?.name ?: "", fontSize = 17.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold,
+                                entete?.name ?: "", fontSize = 17.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis, style = androidx.compose.material3.LocalTextStyle.current.merge(TITRE_SERRE),
                             )
                             Text(
-                                Service.de(id).court + if (conv?.rcs == true) " · RCS" else "",
+                                Service.de(id).court + (if (conv?.rcs == true) " · RCS" else "") +
+                                    (absente.indication()?.let { " · $it" } ?: ""),
                                 fontSize = 12.sp, lineHeight = 15.sp, color = P.textePale, style = androidx.compose.material3.LocalTextStyle.current.merge(TITRE_SERRE),
                             )
                         }
                     }
                 },
                 actions = {
-                    if (conv != null) {
-                        BoutonsAppel(activite, conv)
+                    if (conv != null) BoutonsAppel(activite, conv)
+                    // Le menu aussi sur une conversation absente : retirer du Head ou des favoris.
+                    if (entete != null) {
                         Box {
                             IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, t("Plus")) }
                             MenuConversation(
-                                conv, menu, fermer = { menu = false }, retiree = retiree,
+                                entete, menu, fermer = { menu = false }, retiree = retiree,
                                 medias = { galerie = true },
                                 rechercher = { recherche = true },
                             )
@@ -269,6 +293,10 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit, volet: Boolean = fal
         val inverse = liste.asReversed()
         LaunchedEffect(liste.lastOrNull()?.id) { if (liste.isNotEmpty()) etat.animateScrollToItem(0) }
         Box(Modifier.fillMaxSize().padding(marges).onGloballyPositioned { conteneur = it }) {
+        if (conv == null && liste.isEmpty() && absente.grise()) {
+            // Pas chargée, aucun message reçu : le service n'est pas là.
+            FilHorsLigne(Service.de(id), absente, reglages)
+        } else
         LazyColumn(
             Modifier.fillMaxSize(),
             state = etat,

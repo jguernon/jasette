@@ -492,7 +492,7 @@ private fun FormulaireClient(occupe: Boolean) {
 }
 
 @Composable
-private fun BoutonAccent(texte: String, onClick: () -> Unit) {
+internal fun BoutonAccent(texte: String, onClick: () -> Unit) {
     Button(
         onClick = onClick, shape = formeBouton,
         colors = ButtonDefaults.buttonColors(containerColor = P.accentPlein, contentColor = P.surAccent),
