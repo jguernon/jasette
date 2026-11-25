@@ -1,7 +1,7 @@
 # Jasette
 
 Toutes tes messageries dans une seule app : Google Messages (SMS/RCS), Messenger,
-Instagram, WhatsApp, Signal et X. Pour Linux et Android.
+Instagram, WhatsApp, Signal, X et Telegram. Pour Linux et Android.
 
 Page de présentation et téléchargements : https://jonathanguernon.net/jasette/
 
@@ -11,7 +11,8 @@ Page de présentation et téléchargements : https://jonathanguernon.net/jasette
 - **Ponts** (`pont*/`) : un petit programme Go par service, qui parle le
   protocole du service au nom de ton compte. Ils reposent sur les bibliothèques
   de [mautrix](https://github.com/mautrix) (gmessages, meta, whatsmeow,
-  signalmeow) et sur [libsignal](https://github.com/signalapp/libsignal).
+  signalmeow), sur [libsignal](https://github.com/signalapp/libsignal) et, pour
+  Telegram, sur [gotd/td](https://github.com/gotd/td).
 - **Serveur Jasette** (`serveur/`) : facultatif. Il garde les sessions sur une
   machine toujours allumée, et tes autres appareils (bureau, Android) s'y
   branchent, par un lien TLS épinglé et un jumelage à code. Protocole :
@@ -47,6 +48,14 @@ android/compiler.sh --release    # l'APK seul, signé avec signing/ (jamais dans
 
 Signal demande `libsignal_ffi.a` : voir `pont-signal/build.sh` et
 `android/build-libsignal.sh`.
+
+Telegram demande l'`api_id` et l'`api_hash` de **ta propre application** :
+connecte-toi sur https://my.telegram.org, ouvre « API development tools » et
+remplis le formulaire (nom et nom court au choix). Entre-les ensuite dans
+Réglages > Comptes > Telegram (ou dans `JASETTE_TELEGRAM_API_ID` et
+`JASETTE_TELEGRAM_API_HASH`). Jasette n'en fournit aucun par défaut et
+n'emprunte pas ceux d'une autre application (Telegram Desktop, par exemple) :
+le pont les garde dans `<données>/telegram/api.json` (0600).
 
 ## Vie privée
 

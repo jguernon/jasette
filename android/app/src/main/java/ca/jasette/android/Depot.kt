@@ -92,6 +92,14 @@ object Depot {
     }
     /** WhatsApp et Signal, pendant l'association : le texte du code QR à afficher (`ev qr`). */
     val qr = mutableStateMapOf<Service, String>()
+    /**
+     * Telegram : l'étape de la connexion (`ev login_step` : « code »,
+     * « password »), l'indice du mot de passe, et l'application réglée
+     * (`ev api` : api_id et api_hash de my.telegram.org).
+     */
+    var etapeTelegram by mutableStateOf<String?>(null)
+    var indiceTelegram by mutableStateOf<String?>(null)
+    var apiTelegram by mutableStateOf<Boolean?>(null)
     /** WhatsApp, « Associer avec un numéro de téléphone » : le code à taper (`ev pair_code`). */
     val codeAssociation = mutableStateMapOf<Service, String>()
     /** L'emoji à toucher sur le téléphone pendant l'association Google. */
@@ -325,6 +333,7 @@ object Depot {
         Service.WHATSAPP -> executable("libjasette-wa.so")
         Service.SIGNAL -> executable("libjasette-signal.so")
         Service.X -> executable("libjasette-x.so")
+        Service.TELEGRAM -> executable("libjasette-telegram.so")
         else -> null
     }
 
@@ -528,6 +537,34 @@ object Depot {
         commande(Service.WHATSAPP, JSONObject().put("cmd", "pair_phone").put("number", numero))
     }
 
+    /** Telegram : l'api_id et l'api_hash de l'application de l'utilisateur (gardés par le pont, 0600). */
+    fun telegramApi(id: String, hash: String) {
+        erreur = null
+        commande(Service.TELEGRAM, JSONObject().put("cmd", "api").put("api_id", id).put("api_hash", hash))
+    }
+
+    /** Telegram : le numéro → Telegram envoie un code dans l'app (`ev login_step`). */
+    fun telegramNumero(numero: String) {
+        erreur = null
+        qr.remove(Service.TELEGRAM)
+        etapeTelegram = "attente"
+        commande(Service.TELEGRAM, JSONObject().put("cmd", "login").put("number", numero))
+    }
+
+    /** Telegram : le code reçu. */
+    fun telegramCode(code: String) {
+        erreur = null
+        etapeTelegram = "attente"
+        commande(Service.TELEGRAM, JSONObject().put("cmd", "login_code").put("code", code))
+    }
+
+    /** Telegram : le mot de passe (vérification en deux étapes). */
+    fun telegramMotDePasse(mdp: String) {
+        erreur = null
+        etapeTelegram = "attente"
+        commande(Service.TELEGRAM, JSONObject().put("cmd", "login_password").put("password", mdp))
+    }
+
     /** X : les cookies de x.com et le code X Chat, en un seul essai (X verrouille après quelques codes faux). */
     fun connecterX(cookies: Map<String, String>, pin: String) {
         erreur = null
@@ -558,6 +595,10 @@ object Depot {
                 if (apres != Etat.ASSOCIATION) {
                     qr.remove(service)
                     codeAssociation.remove(service)
+                    if (service == Service.TELEGRAM) {
+                        etapeTelegram = null
+                        indiceTelegram = null
+                    }
                 }
             }
             "paired" -> {
@@ -575,6 +616,18 @@ object Depot {
                 }
             }
             "account" -> v.chaine("name").let { if (it.isNotEmpty()) noms[service] = it else noms.remove(service) }
+            // Telegram : l'étape suivante de la connexion, et l'application réglée.
+            "login_step" -> {
+                val etape = v.chaine("step")
+                if (etape == "password") {
+                    v.chaine("hint").let { if (it.isNotEmpty()) indiceTelegram = it }
+                } else {
+                    indiceTelegram = null
+                }
+                etapeTelegram = etape.ifEmpty { null }
+                qr.remove(service)
+            }
+            "api" -> apiTelegram = v.optBoolean("set")
             "avatar_moi" -> monAvatar(service, v.chaine("path"))
             "history_pin" -> when {
                 v.optBoolean("needed") -> besoinNip = true
@@ -596,6 +649,8 @@ object Depot {
                     demandesFil.removeAll { Service.de(it) == service }
                 }
                 if (texte.isNotEmpty()) erreur = "${service.court} : ${t(texte)}"
+                // Telegram : le code ou le mot de passe refusé, on peut réessayer.
+                if (service == Service.TELEGRAM && etapeTelegram == "attente") etapeTelegram = null
             }
             "pont_ferme" -> pontFerme(service)
             else -> nouvelle(v, service)

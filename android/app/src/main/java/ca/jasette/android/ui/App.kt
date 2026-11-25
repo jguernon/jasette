@@ -197,7 +197,10 @@ fun App(activite: Activity) {
                 )
                 Ecran.Serveur -> ServeurJasette(retour = ::retour)
                 // WhatsApp et Signal : code QR ou code à taper ; les autres : la fenêtre web (X : puis son code).
-                is Ecran.Connexion -> if (ecran.service == Service.WHATSAPP || ecran.service == Service.SIGNAL) {
+                // Telegram : numéro et code, ou code QR (Telegram.kt).
+                is Ecran.Connexion -> if (ecran.service == Service.TELEGRAM) {
+                    AssociationTelegram(fini = ::retour)
+                } else if (ecran.service == Service.WHATSAPP || ecran.service == Service.SIGNAL) {
                     Association(ecran.service, ecran.plateforme, fini = ::retour)
                 } else {
                     Connexion(ecran.service, ecran.plateforme, fini = ::retour)
@@ -448,6 +451,7 @@ private fun detailPersonne(s: Service, id: String): String = when (s) {
     Service.WHATSAPP -> t("Nouvelle conversation WhatsApp")
     Service.SIGNAL -> t("Nouvelle conversation Signal")
     Service.X -> t("Nouvelle conversation X")
+    Service.TELEGRAM -> t("Nouvelle conversation Telegram")
 }
 
 /**

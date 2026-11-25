@@ -151,9 +151,10 @@ Réponses :
 ```
 
 `services` : ceux que ce serveur fait tourner (`--services`), dans l'ordre
-`google`, `messenger`, `instagram`, `whatsapp`, `signal`, `x`. Les trois
-derniers sont **facultatifs** : le serveur ne les lance que si leur binaire
-est présent (`jasette-wa`, `jasette-signal`, `jasette-x`, voir §5.4) ; sinon
+`google`, `messenger`, `instagram`, `whatsapp`, `signal`, `x`, `telegram`. Les
+quatre derniers sont **facultatifs** : le serveur ne les lance que si leur
+binaire est présent (`jasette-wa`, `jasette-signal`, `jasette-x`,
+`jasette-telegram`, voir §5.4) ; sinon
 ils sont simplement absents de la liste. Le client n'affiche que les
 services de cette liste. Après `ok`, la connexion passe au régime du §5,
 sans limite de durée.
@@ -170,10 +171,10 @@ Révocation : `jasette-serveur --appareils` liste les appareils,
 {"svc":"google","cmd":{"cmd":"messages","conv":"123","count":30}}
 ```
 
-`svc` : `google`, `messenger`, `instagram`, `whatsapp`, `signal` ou `x`.
+`svc` : `google`, `messenger`, `instagram`, `whatsapp`, `signal`, `x` ou `telegram`.
 `cmd` : exactement la commande qu'on écrirait sur l'entrée standard du pont
 (voir l'en-tête de `pont/main.go`, `pont-meta/main.go`, `pont-wa/main.go`,
-`pont-signal/main.go` et `pont-x/main.go`). Particularités :
+`pont-signal/main.go`, `pont-x/main.go` et `pont-telegram/main.go`). Particularités :
 
 - `{"cmd":"quit"}` est **ignoré** : le pont appartient au serveur.
 - `{"cmd":"delete","conv":"<id>"}` : supprime la conversation (§5.6).
@@ -196,12 +197,14 @@ autre client.
 **Rejeu.** Juste après `{"auth":"ok"}`, le serveur envoie d'abord les
 marques (`{"marques":{…}}`, §5.5), puis, pour chaque service, le dernier
 état connu, dans cet ordre et s'ils existent : `hello`,
-`state`, `account`, `avatar_moi`, `qr` (seulement en cours d'association),
+`state`, `account`, `avatar_moi`, `api` (Telegram : application réglée ou
+non), `qr` (seulement en cours d'association),
 `pair_code` (WhatsApp, seulement en cours d'association par code),
+`login_step` (Telegram, seulement en attente du code ou du mot de passe),
 `history_pin` (seulement s'il attend un NIP : `{"needed":true}`), puis les
 dernières listes `conversations` gardées (boîte de réception, puis archives :
 §5.8). Le `qr` et
-le `pair_code` gardés sont oubliés dès `paired`, `state` `ready` ou
+le `pair_code` (et le `login_step`) gardés sont oubliés dès `paired`, `state` `ready` ou
 `unpaired`, ou si le pont s'arrête ; un `pair_code` remplace le `qr` (le pont
 WhatsApp cesse alors de montrer des QR). Un client
 qui ajoute un service en cours de route peut redemander ce rejeu :
@@ -225,9 +228,9 @@ envoie ensuite `hello` puis son état. Le client ne voit jamais `pont_ferme`.
 - Un client trop lent (8192 événements en attente) est coupé ; il se
   reconnecte et reçoit le rejeu.
 
-### 5.4 Connexion des services WhatsApp, Signal et X
+### 5.4 Connexion des services WhatsApp, Signal, X et Telegram
 
-Ces trois ponts parlent le même protocole que les autres (mêmes commandes
+Ces quatre ponts parlent le même protocole que les autres (mêmes commandes
 `conversations`, `messages`, `send`, `send_media`, `react`, `read`,
 `download`, `new`, `search`, `search_messages`, `unpair`…, mêmes
 événements `hello`, `state`, `account`, `avatar`, `avatar_moi`,
@@ -240,6 +243,7 @@ l'association diffère. États : `connecting`, `pairing`, `ready`,
 | `whatsapp` | `jasette-wa` (ou `JASETTE_WA`) | `<données>/whatsapp/` | QR ou code à 8 caractères |
 | `signal` | `jasette-signal` (ou `JASETTE_SIGNAL`) | `<données>/signal/` | QR (appareil lié) |
 | `x` | `jasette-x` (ou `JASETTE_X`) | `<données>/x/` | cookies de x.com + code X Chat |
+| `telegram` | `jasette-telegram` (ou `JASETTE_TELEGRAM`) | `<données>/telegram/` | numéro + code (+ mot de passe), ou QR |
 
 Les binaires sont cherchés comme les autres : variable d'environnement,
 `--bin`, à côté de `jasette-serveur`, puis le `PATH`. Le serveur crée le
@@ -291,20 +295,55 @@ dossier de données en 0700 avant de lancer le pont.
 - Les cookies et le code ne passent que dans la commande ; le serveur ne
   les écrit jamais dans ses journaux.
 
+**Telegram** (une session de plus du compte, comme Telegram Desktop) :
+
+Telegram exige l'`api_id` et l'`api_hash` d'une application enregistrée par
+l'utilisateur sur https://my.telegram.org. Le pont les prend dans
+`JASETTE_TELEGRAM_API_ID` et `JASETTE_TELEGRAM_API_HASH`, sinon dans
+`<données>/telegram/api.json` (0600), qu'il écrit quand une commande les
+apporte. Aucune valeur par défaut. `{"ev":"api","set":true|false}` dit s'ils
+sont réglés (rejoué).
+
+```json
+{"svc":"telegram","cmd":{"cmd":"api","api_id":"123456","api_hash":"<32 hex>"}}
+{"svc":"telegram","cmd":{"cmd":"login","number":"+15145551234"}}
+{"svc":"telegram","cmd":{"cmd":"login_code","code":"12345"}}
+{"svc":"telegram","cmd":{"cmd":"login_password","password":"…"}}
+{"svc":"telegram","cmd":{"cmd":"pair"}}
+```
+
+- `login` → `state: pairing`, puis `{"ev":"login_step","step":"code","via":"app|sms|call|email"}`.
+- `login_code` → réussite, ou `{"ev":"login_step","step":"password","hint":"…"}`
+  (vérification en deux étapes). Un code ou un mot de passe faux : `error`
+  (`where` : `login_code`, `login_password`) puis la même étape, avec
+  `"retry":true`.
+- `pair` → `{"ev":"qr","code":"tg://login?token=…","data":"…"}`, renouvelé ;
+  à scanner dans Telegram (Paramètres > Appareils > Connecter un appareil).
+  Peut ensuite demander le mot de passe (`login_step`).
+- `login` et `pair` acceptent aussi `api_id` et `api_hash`.
+- Réussite : `paired`, puis `account`, `state: ready`. Échec : `error` et
+  `state: unpaired`.
+- `archive` (`conv`, `archived`) : les archives de Telegram. Les ids :
+  `u<n>` (personne), `g<n>` (groupe simple), `c<n>` (canal ou
+  supergroupe) ; un message : `<fil>/<numéro>`.
+- Le mot de passe et le code ne passent que dans la commande ; le serveur ne
+  les écrit jamais dans ses journaux.
+
 ### 5.5 Marques (Head, favoris, épinglées, archives)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont quatre listes **ordonnées** d'ids de
 conversations, tels que l'interface les voit (« m: » pour Messenger,
 « i: » pour Instagram, « w: » pour WhatsApp, « s: » pour Signal, « x: »
-pour X, sans préfixe pour Google) :
+pour X, « t: » pour Telegram, sans préfixe pour Google) :
 
 - `head` : la grille en tête de la boîte de réception ;
 - `favoris` : la vue de l'étoile (`etoiles` dans les réglages du bureau) ;
 - `epingles` : les conversations épinglées en haut de la liste ;
 - `archives` : l'**archivage propre à Jasette**, pour les services qui ne
-  savent pas archiver (Messenger, Instagram, Signal, X). Google et WhatsApp
-  archivent pour de vrai (commande `archive` de leur pont) et n'y vont pas.
+  savent pas archiver (Messenger, Instagram, Signal, X). Google, WhatsApp et
+  Telegram archivent pour de vrai (commande `archive` de leur pont) et n'y
+  vont pas.
 
 C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 
@@ -577,7 +616,7 @@ Le serveur ne sert que des fichiers réguliers :
 `<données>` = `JASETTE_DATA`, sinon `$XDG_DATA_HOME/jasette`, sinon
 `~/.local/share/jasette` (le même dossier que les ponts).
 Chaque pont a son dossier, en 0700 : `<données>/whatsapp/`,
-`<données>/signal/`, `<données>/x/` (bases SQLite et session : jamais
+`<données>/signal/`, `<données>/x/`, `<données>/telegram/` (bases SQLite et session : jamais
 servis par `get`, §6.1).
 `<données>/serveur/` (0700) contient `cert.pem`, `cle.pem`,
 `appareils.json` (noms, SHA-256 des jetons, dates), `jumelage.json` (code en

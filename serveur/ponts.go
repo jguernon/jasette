@@ -3,12 +3,12 @@
 // Chaque ligne de sa sortie standard est un événement JSON, emballé en
 // {"svc":...,"ev":...} et envoyé à tous les clients branchés. On garde le
 // dernier état connu (hello, state, account, avatar_moi, qr, pair_code,
-// history_pin) pour le rejouer aux clients qui arrivent, puis les listes de
+// history_pin, et pour Telegram login_step et api) pour le rejouer aux clients qui arrivent, puis les listes de
 // conversations et les derniers messages (cache.go, PROTOCOLE.md §5.8).
 //
 // Les services google, messenger et instagram sont les services de base :
 // sans leur pont, le serveur le signale. Les services whatsapp, signal et x
-// sont facultatifs : sans leur binaire, ils sont simplement omis.
+// (et telegram) sont facultatifs : sans leur binaire, ils sont simplement omis.
 package main
 
 import (
@@ -56,10 +56,12 @@ type demande struct {
 
 // Ordre du rejeu : d'abord qui l'on est, ensuite où l'on en est.
 // « pair_code » : le code d'association à huit caractères de WhatsApp.
-var sortesRejouees = []string{"hello", "state", "account", "avatar_moi", "qr", "pair_code", "history_pin"}
+// « login_step » : l'étape de la connexion de Telegram (code, mot de passe) ;
+// « api » : son application (api_id, api_hash) est-elle réglée.
+var sortesRejouees = []string{"hello", "state", "account", "avatar_moi", "api", "qr", "pair_code", "login_step", "history_pin"}
 
 // Tous les services connus, dans l'ordre où on les présente aux clients.
-var ordreServices = []string{"google", "messenger", "instagram", "whatsapp", "signal", "x"}
+var ordreServices = []string{"google", "messenger", "instagram", "whatsapp", "signal", "x", "telegram"}
 
 // Les services facultatifs : binaire, variable d'environnement qui peut le
 // désigner, et dossier de données (sous <données>) que le pont utilise.
@@ -67,6 +69,7 @@ var pontsFacultatifs = map[string]struct{ bin, variable, dossier string }{
 	"whatsapp": {"jasette-wa", "JASETTE_WA", "whatsapp"},
 	"signal":   {"jasette-signal", "JASETTE_SIGNAL", "signal"},
 	"x":        {"jasette-x", "JASETTE_X", "x"},
+	"telegram": {"jasette-telegram", "JASETTE_TELEGRAM", "telegram"},
 }
 
 // errAbsent : le binaire d'un service facultatif n'est pas là ; ce n'est pas
@@ -117,7 +120,7 @@ func nouveauPont(srv *Serveur, svc, binDir string) (*Pont, error) {
 			p.bin = trouverPont("jasette-meta", "JASETTE_META", binDir)
 		}
 		p.env = append(p.env, "JASETTE_META_SERVICE=instagram")
-	case "whatsapp", "signal", "x":
+	case "whatsapp", "signal", "x", "telegram":
 		f := pontsFacultatifs[svc]
 		p.bin = trouverPont(f.bin, f.variable, binDir)
 		if p.bin == "" {
@@ -236,8 +239,12 @@ func (p *Pont) recu(ligne []byte) {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 	switch tete.Ev {
-	case "hello", "account", "avatar_moi", "qr":
+	case "hello", "account", "avatar_moi", "qr", "api":
 		p.dernier[tete.Ev] = trame
+	case "login_step":
+		// Telegram : le code ou le mot de passe attendu remplace le QR.
+		p.dernier["login_step"] = trame
+		delete(p.dernier, "qr")
 	case "pair_code":
 		// WhatsApp : avec un code d'association, le pont cesse de montrer
 		// des QR ; l'ancien QR ne doit plus être rejoué.
@@ -249,6 +256,7 @@ func (p *Pont) recu(ligne []byte) {
 			// Associé, ou association abandonnée : plus de code à montrer.
 			delete(p.dernier, "qr")
 			delete(p.dernier, "pair_code")
+			delete(p.dernier, "login_step")
 		}
 		avant := p.pret
 		p.pret = tete.State == "ready"
@@ -262,6 +270,7 @@ func (p *Pont) recu(ligne []byte) {
 	case "paired":
 		delete(p.dernier, "qr")
 		delete(p.dernier, "pair_code")
+		delete(p.dernier, "login_step")
 	case "history_pin":
 		if tete.Needed {
 			p.dernier["history_pin"] = trame
@@ -367,6 +376,7 @@ func (p *Pont) signalerArret() {
 	defer p.srv.mu.Unlock()
 	delete(p.dernier, "qr")
 	delete(p.dernier, "pair_code")
+	delete(p.dernier, "login_step")
 	delete(p.dernier, "history_pin")
 	p.dernier["state"] = trame
 	p.pret = false

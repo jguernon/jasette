@@ -31,6 +31,7 @@ if [[ "${1:-}" == "--jumeler" ]]; then
 fi
 export FAUX_AVATARS="$CAP/avatars" FAUX_LANGUE="${1:-fr}"
 export JASETTE_PONT="$CAP/faux-google" JASETTE_META="$CAP/faux-messenger" JASETTE_IG="$CAP/faux-instagram" \
-       JASETTE_WA="$CAP/faux-whatsapp" JASETTE_SIGNAL="$CAP/faux-signal" JASETTE_X="$CAP/faux-x"
+       JASETTE_WA="$CAP/faux-whatsapp" JASETTE_SIGNAL="$CAP/faux-signal" JASETTE_X="$CAP/faux-x" \
+       JASETTE_TELEGRAM="$CAP/faux-telegram"
 echo "Serveur fictif sur le port 47801 ($(hostname -I | awk '{print $1}')), langue ${FAUX_LANGUE}."
 exec "$SRV"

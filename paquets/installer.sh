@@ -20,7 +20,7 @@ if [ "${1:-}" = "--retirer" ]; then
 fi
 
 mkdir -p "$LIB" "$PREFIXE/bin" "$PREFIXE/share/applications"
-for f in jasette jasette-serveur jasette-pont jasette-meta jasette-ig jasette-wa jasette-signal jasette-x \
+for f in jasette jasette-serveur jasette-pont jasette-meta jasette-ig jasette-wa jasette-signal jasette-x jasette-telegram \
 	jasette-connexion.py jasette-connexion-meta.py jasette-connexion-x.py; do
 	install -m 755 "$ICI/$f" "$LIB/$f"
 done

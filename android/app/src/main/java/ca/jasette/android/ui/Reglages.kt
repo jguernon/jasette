@@ -120,11 +120,15 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
                                 Service.SIGNAL -> BoutonAccent(t("Lier avec un code QR")) { connecter(s, "qr") }
                                 // X : la fenêtre web de x.com, puis le code X Chat (Connexion.kt).
                                 Service.X -> BoutonAccent(t("Se connecter")) { connecter(s, "x") }
+                                // Telegram : numéro et code, ou code QR (Telegram.kt).
+                                Service.TELEGRAM -> BoutonAccent(t("Se connecter")) { connecter(s, "") }
                             }
                         }
                     }
                     if (s == Service.GOOGLE) Depot.emoji?.let { e -> BandeauEmoji(e) }
                     if (s == Service.MESSENGER && Depot.besoinNip) Nip()
+                    // Telegram pas encore connecté : son application (api_id, api_hash).
+                    if (s == Service.TELEGRAM && !Depot.etat(s).associe) ApiTelegram()
                 }
             }
             Depot.erreur?.let { Text(it, color = P.danger, fontSize = 14.sp) }

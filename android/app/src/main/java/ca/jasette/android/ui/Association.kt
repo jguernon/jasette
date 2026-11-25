@@ -126,7 +126,7 @@ fun Association(service: Service, mode: String, fini: () -> Unit) {
 
 /** Le code QR : `pair` au premier affichage, puis chaque `ev qr` le renouvelle. */
 @Composable
-private fun EtapeQr(service: Service) {
+internal fun EtapeQr(service: Service) {
     LaunchedEffect(service) { Depot.associerQr(service) }
     val code = Depot.qr[service]
     Column(
@@ -137,6 +137,8 @@ private fun EtapeQr(service: Service) {
         Text(
             if (service == Service.SIGNAL) {
                 t("Scanne-le avec un autre téléphone qui a Signal (Paramètres → Appareils liés). Les anciens messages ne sont pas récupérés.")
+            } else if (service == Service.TELEGRAM) {
+                t("Scanne-le avec un autre appareil qui a Telegram : Paramètres → Appareils → Connecter un appareil.")
             } else {
                 t("Scanne-le avec le téléphone qui a WhatsApp : Appareils connectés → Connecter un appareil.")
             },

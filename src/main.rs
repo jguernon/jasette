@@ -790,6 +790,7 @@ enum Service {
     WhatsApp,
     Signal,
     X,
+    Telegram,
 }
 
 impl Service {
@@ -801,6 +802,7 @@ impl Service {
             Service::WhatsApp => "WhatsApp",
             Service::Signal => "Signal",
             Service::X => "X",
+            Service::Telegram => "Telegram",
         }
     }
 
@@ -813,6 +815,7 @@ impl Service {
             Service::WhatsApp => "WhatsApp",
             Service::Signal => "Signal",
             Service::X => "X",
+            Service::Telegram => "Telegram",
         }
     }
 
@@ -825,13 +828,15 @@ impl Service {
             Service::WhatsApp => "w:",
             Service::Signal => "s:",
             Service::X => "x:",
+            Service::Telegram => "t:",
         }
     }
 
-    /// Google et WhatsApp archivent pour de vrai (commande `archive` de leur
-    /// pont) ; les autres passent par les archives de Jasette (les marques).
+    /// Google, WhatsApp et Telegram archivent pour de vrai (commande
+    /// `archive` de leur pont) ; les autres passent par les archives de
+    /// Jasette (les marques).
     fn archive_native(self) -> bool {
-        matches!(self, Service::GoogleMessages | Service::WhatsApp)
+        matches!(self, Service::GoogleMessages | Service::WhatsApp | Service::Telegram)
     }
 
     /// Les ponts qui savent supprimer une conversation (commande `delete`).
@@ -848,13 +853,14 @@ impl Service {
             Service::WhatsApp => "whatsapp",
             Service::Signal => "signal",
             Service::X => "x",
+            Service::Telegram => "telegram",
         }
     }
 
     /// Un service facultatif : son pont n'existe que si son binaire est là
     /// (ou si le serveur Jasette l'offre) ; sinon il est absent de l'interface.
     fn facultatif(self) -> bool {
-        matches!(self, Service::WhatsApp | Service::Signal | Service::X)
+        matches!(self, Service::WhatsApp | Service::Signal | Service::X | Service::Telegram)
     }
 
     /// Les ids d'éléments propres à ce service (barre latérale, pastilles).
@@ -866,6 +872,7 @@ impl Service {
             Service::WhatsApp => "r-whatsapp",
             Service::Signal => "r-signal",
             Service::X => "r-x",
+            Service::Telegram => "r-telegram",
         }
     }
 
@@ -877,6 +884,7 @@ impl Service {
             Service::WhatsApp => "chargement-whatsapp",
             Service::Signal => "chargement-signal",
             Service::X => "chargement-x",
+            Service::Telegram => "chargement-telegram",
         }
     }
 }
@@ -916,7 +924,8 @@ fn lancer_pont(r: &Reglages, svc: Service) -> Result<Pont, String> {
 /// Les services autres que Google, tous gérés comme un compte Meta : le pont
 /// Meta (une copie par service) pour Messenger et Instagram, un pont chacun
 /// (même protocole) pour WhatsApp, Signal et X.
-const SERVICES_META: [Service; 5] = [Service::Messenger, Service::Instagram, Service::WhatsApp, Service::Signal, Service::X];
+const SERVICES_META: [Service; 6] =
+    [Service::Messenger, Service::Instagram, Service::WhatsApp, Service::Signal, Service::X, Service::Telegram];
 
 /// Un compte Meta : son pont, son état, sa fenêtre de connexion.
 struct CompteMeta {
@@ -1005,6 +1014,7 @@ fn image_service(s: Service, taille: f32) -> Arc<gpui::Image> {
         Service::Instagram => (2u8, variantes!("instagram")),
         Service::WhatsApp => (3u8, variantes!("whatsapp")),
         Service::Signal => (4u8, variantes!("signal")),
+        Service::Telegram => (6u8, variantes!("telegram")),
         Service::X => return image_service_svg(s, taille),
     };
     let voulu = taille * 2.;
@@ -1701,6 +1711,7 @@ struct Jasette {
     whatsapp: CompteMeta,
     signal: CompteMeta,
     x: CompteMeta,
+    telegram: CompteMeta,
     /// L'écran d'association ouvert (WhatsApp, Signal ou X), dans Comptes.
     ajout_service: Option<Service>,
     /// WhatsApp : le numéro pour « Associer avec un numéro de téléphone ».
@@ -1709,6 +1720,17 @@ struct Jasette {
     /// X Chat, et le champ de ce code.
     cookies_x: Option<Value>,
     code_x: Entity<InputState>,
+    /// Telegram : l'étape de la connexion (« code », « password »), l'indice
+    /// du mot de passe, l'application réglée (api_id, api_hash : `ev api`)
+    /// et les champs.
+    etape_tg: Option<String>,
+    indice_tg: Option<String>,
+    api_tg: Option<bool>,
+    telephone_tg: Entity<InputState>,
+    code_tg: Entity<InputState>,
+    mdp_tg: Entity<InputState>,
+    api_id_tg: Entity<InputState>,
+    api_hash_tg: Entity<InputState>,
     besoin_nip: bool,
     nip: Entity<InputState>,
     convs: Vec<Conv>,
@@ -2203,7 +2225,7 @@ fn adresse_appel(conv: &Conv) -> Option<String> {
         Service::Messenger => Some(format!("https://www.messenger.com/t/{id}")),
         Service::Instagram => Some(format!("https://www.instagram.com/direct/t/{id}/")),
         // Pas d'appel par le web pour ceux-là : l'app du téléphone.
-        Service::WhatsApp | Service::Signal | Service::X => None,
+        Service::WhatsApp | Service::Signal | Service::X | Service::Telegram => None,
     }
 }
 
@@ -2336,6 +2358,40 @@ impl Jasette {
         cx.subscribe_in(&code_x, window, |this, _state, ev: &InputEvent, window, cx| {
             if let InputEvent::PressEnter { .. } = ev {
                 this.envoyer_code_x(window, cx);
+                cx.notify();
+            }
+        })
+        .detach();
+        // Telegram : numéro, code reçu, mot de passe, et l'application (my.telegram.org).
+        let telephone_tg = cx.new(|cx| InputState::new(window, cx).placeholder(t("Numéro, ex. : +1 514 555 1234")));
+        cx.subscribe_in(&telephone_tg, window, |this, _state, ev: &InputEvent, _window, cx| {
+            if let InputEvent::PressEnter { .. } = ev {
+                this.tg_envoyer_numero(cx);
+                cx.notify();
+            }
+        })
+        .detach();
+        let code_tg = cx.new(|cx| InputState::new(window, cx).placeholder(t("Code reçu dans Telegram")));
+        cx.subscribe_in(&code_tg, window, |this, _state, ev: &InputEvent, window, cx| {
+            if let InputEvent::PressEnter { .. } = ev {
+                this.tg_envoyer_code(window, cx);
+                cx.notify();
+            }
+        })
+        .detach();
+        let mdp_tg = cx.new(|cx| InputState::new(window, cx).placeholder(t("Mot de passe Telegram")).masked(true));
+        cx.subscribe_in(&mdp_tg, window, |this, _state, ev: &InputEvent, window, cx| {
+            if let InputEvent::PressEnter { .. } = ev {
+                this.tg_envoyer_mdp(window, cx);
+                cx.notify();
+            }
+        })
+        .detach();
+        let api_id_tg = cx.new(|cx| InputState::new(window, cx).placeholder("api_id"));
+        let api_hash_tg = cx.new(|cx| InputState::new(window, cx).placeholder("api_hash").masked(true));
+        cx.subscribe_in(&api_hash_tg, window, |this, _state, ev: &InputEvent, window, cx| {
+            if let InputEvent::PressEnter { .. } = ev {
+                this.tg_enregistrer_api(window, cx);
                 cx.notify();
             }
         })
@@ -2525,10 +2581,19 @@ impl Jasette {
             whatsapp: CompteMeta::lancer(Service::WhatsApp, &reglages),
             signal: CompteMeta::lancer(Service::Signal, &reglages),
             x: CompteMeta::lancer(Service::X, &reglages),
+            telegram: CompteMeta::lancer(Service::Telegram, &reglages),
             ajout_service: None,
             telephone_wa,
             cookies_x: None,
             code_x,
+            etape_tg: None,
+            indice_tg: None,
+            api_tg: None,
+            telephone_tg,
+            code_tg,
+            mdp_tg,
+            api_id_tg,
+            api_hash_tg,
             besoin_nip: false,
             nip,
             plus_anciens: cache.fils.iter().map(|(k, f)| (k.clone(), f.more)).collect(),
@@ -2664,6 +2729,7 @@ impl Jasette {
             Service::WhatsApp => &self.whatsapp,
             Service::Signal => &self.signal,
             Service::X => &self.x,
+            Service::Telegram => &self.telegram,
             Service::Messenger | Service::GoogleMessages => &self.messenger,
         }
     }
@@ -2674,6 +2740,7 @@ impl Jasette {
             Service::WhatsApp => &mut self.whatsapp,
             Service::Signal => &mut self.signal,
             Service::X => &mut self.x,
+            Service::Telegram => &mut self.telegram,
             Service::Messenger | Service::GoogleMessages => &mut self.messenger,
         }
     }
@@ -2724,6 +2791,10 @@ impl Jasette {
                 if matches!(etat, Etat::Pret | Etat::NonAssocie) {
                     m.qr = None;
                     m.code = None;
+                    if svc == Service::Telegram {
+                        self.etape_tg = None;
+                        self.indice_tg = None;
+                    }
                 }
                 if etat == Etat::NonAssocie {
                     self.convs.retain(|c| service_de(&c.id) != svc);
@@ -2755,6 +2826,21 @@ impl Jasette {
                 }
             }
             "account" => self.meta_mut(svc).nom = v.get("name").and_then(Value::as_str).map(str::to_string),
+            // Telegram : l'étape suivante de la connexion (code reçu, mot de passe).
+            "login_step" => {
+                let etape = v.get("step").and_then(Value::as_str).map(str::to_string);
+                if etape.as_deref() == Some("password") {
+                    if let Some(h) = v.get("hint").and_then(Value::as_str) {
+                        self.indice_tg = Some(h.to_string());
+                    }
+                } else {
+                    self.indice_tg = None;
+                }
+                self.etape_tg = etape;
+                self.meta_mut(svc).qr = None;
+            }
+            // Telegram : l'application (api_id, api_hash) est-elle réglée ?
+            "api" => self.api_tg = v.get("set").and_then(Value::as_bool),
             "avatar_moi" => self.meta_mut(svc).avatar = v.get("path").and_then(Value::as_str).map(|p| carre(PathBuf::from(p))),
             "history_pin" => {
                 if v.get("needed").and_then(Value::as_bool) == Some(true) {
@@ -2854,6 +2940,18 @@ impl Jasette {
     /// dont les cookies reviennent par `connexion`. WhatsApp et Signal :
     /// l'écran d'association, avec les QR du pont (ou du rejeu du serveur).
     fn connecter_meta(&mut self, svc: Service) {
+        // Telegram : son écran (numéro et code, ou code QR) ; rien n'est envoyé encore.
+        if svc == Service::Telegram {
+            self.erreur = None;
+            self.ajout_service = Some(svc);
+            self.section = Some(Section::Comptes);
+            self.etape_tg = None;
+            self.indice_tg = None;
+            let m = self.meta_mut(svc);
+            m.qr = None;
+            m.code = None;
+            return;
+        }
         if matches!(svc, Service::WhatsApp | Service::Signal) {
             self.erreur = None;
             self.ajout_service = Some(svc);
@@ -2918,6 +3016,119 @@ impl Jasette {
         self.erreur = None;
         self.whatsapp.code = None;
         self.commande_svc(Service::WhatsApp, json!({"cmd": "pair_phone", "number": format!("+{chiffres}")}));
+    }
+
+    /// Telegram : le numéro → Telegram envoie un code dans l'app (ou par SMS).
+    fn tg_envoyer_numero(&mut self, cx: &mut Context<Self>) {
+        let brut = self.telephone_tg.read(cx).value().trim().to_string();
+        let chiffres: String = brut.chars().filter(char::is_ascii_digit).collect();
+        if chiffres.len() < 8 || !est_numero(&brut) {
+            self.erreur = Some(t("Entrez le numéro complet, avec l'indicatif du pays (ex. : +1 514 555 1234).").into());
+            return;
+        }
+        self.erreur = None;
+        self.telegram.qr = None;
+        self.telegram.etat = Etat::Association;
+        self.commande_svc(Service::Telegram, json!({"cmd": "login", "number": format!("+{chiffres}")}));
+    }
+
+    /// Telegram : le code reçu.
+    fn tg_envoyer_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let code: String = self.code_tg.read(cx).value().chars().filter(char::is_ascii_digit).collect();
+        if code.len() < 4 {
+            self.erreur = Some(t("Entrez le code reçu dans Telegram.").into());
+            return;
+        }
+        self.erreur = None;
+        self.code_tg.update(cx, |s, cx| s.set_value("", window, cx));
+        self.etape_tg = Some("attente".into());
+        self.commande_svc(Service::Telegram, json!({"cmd": "login_code", "code": code}));
+    }
+
+    /// Telegram : le mot de passe (vérification en deux étapes).
+    fn tg_envoyer_mdp(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mdp = self.mdp_tg.read(cx).value().to_string();
+        if mdp.is_empty() {
+            return;
+        }
+        self.erreur = None;
+        self.mdp_tg.update(cx, |s, cx| s.set_value("", window, cx));
+        self.etape_tg = Some("attente".into());
+        self.commande_svc(Service::Telegram, json!({"cmd": "login_password", "password": mdp}));
+    }
+
+    /// Telegram : la connexion par code QR (Paramètres → Appareils → Connecter un appareil).
+    fn tg_qr(&mut self) {
+        self.erreur = None;
+        self.etape_tg = None;
+        self.telegram.etat = Etat::Association;
+        self.commande_svc(Service::Telegram, json!({"cmd": "pair"}));
+    }
+
+    /// Telegram : l'api_id et l'api_hash de l'application de l'utilisateur
+    /// (my.telegram.org). Gardés par le pont seulement (api.json, 0600).
+    fn tg_enregistrer_api(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let id = self.api_id_tg.read(cx).value().trim().to_string();
+        let hash = self.api_hash_tg.read(cx).value().trim().to_lowercase();
+        let id_ok = !id.is_empty() && id.len() <= 12 && id.chars().all(|c| c.is_ascii_digit());
+        let hash_ok = hash.len() == 32 && hash.chars().all(|c| c.is_ascii_hexdigit());
+        if !id_ok || !hash_ok {
+            self.erreur = Some(t("L'api_id est un nombre et l'api_hash a 32 caractères (lettres a-f et chiffres).").into());
+            return;
+        }
+        self.erreur = None;
+        self.api_hash_tg.update(cx, |s, cx| s.set_value("", window, cx));
+        self.commande_svc(Service::Telegram, json!({"cmd": "api", "api_id": id, "api_hash": hash}));
+    }
+
+    /// Telegram : l'explication et les champs de l'application (api_id, api_hash).
+    fn bloc_api_telegram(&self, cx: &mut Context<Self>) -> Div {
+        let regle = self.api_tg == Some(true);
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .px(px(16.))
+            .pb(px(13.))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(th().texte)
+                    .child(t("Telegram demande à chaque application son propre identifiant. Créez le vôtre, gratuitement : connectez-vous sur my.telegram.org avec votre numéro, ouvrez « API development tools », remplissez le formulaire (nom et nom court au choix), puis copiez ici l'api_id et l'api_hash. Ils restent sur cet appareil (ou sur votre serveur Jasette).")),
+            )
+            .child(
+                div()
+                    .id("tg-mytelegram")
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(4.))
+                    .text_size(px(13.))
+                    .text_color(th().accent)
+                    .cursor_pointer()
+                    .hover(|s| s.opacity(0.7))
+                    .child(icone("external-link", 14., th().accent))
+                    .child("my.telegram.org")
+                    .on_click(|_, _, _| ouvrir_adresse("https://my.telegram.org/apps")),
+            )
+            .when(regle, |d| {
+                d.child(div().text_size(px(12.)).text_color(th().texte_pale).child(t("Application réglée. Pour la changer, entrez un autre api_id et api_hash.")))
+            })
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(verre(0.8, 999.).w(px(110.)).flex_none().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.api_id_tg).appearance(false)))
+                    .child(verre(0.8, 999.).flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.api_hash_tg).appearance(false)))
+                    .child(bouton_texte("tg-api", t("Enregistrer"), ACCENT).on_click(cx.listener(|this, _, window, cx| {
+                        this.tg_enregistrer_api(window, cx);
+                        cx.notify();
+                    }))),
+            )
     }
 
     /// X : envoie les cookies de x.com et le code X Chat au pont (un seul essai).
@@ -4415,10 +4626,11 @@ impl Jasette {
                 )
             })
             // WhatsApp, Signal et X : seulement s'ils ont donné une photo.
-            .children([Service::WhatsApp, Service::Signal, Service::X].into_iter().filter(|s| self.meta(*s).avatar.is_some()).map(|svc| {
+            .children([Service::WhatsApp, Service::Signal, Service::X, Service::Telegram].into_iter().filter(|s| self.meta(*s).avatar.is_some()).map(|svc| {
                 let (id, titre, initiale, couleur) = match svc {
                     Service::WhatsApp => ("av-wa", t("Avatar de WhatsApp"), "W", "#25d366"),
                     Service::Signal => ("av-signal", t("Avatar de Signal"), "S", "#3a76f0"),
+                    Service::Telegram => ("av-telegram", t("Avatar de Telegram"), "T", "#2aabee"),
                     _ => ("av-x", t("Avatar de X"), "X", "#000000"),
                 };
                 let compte = self.meta(svc);
@@ -5079,6 +5291,7 @@ impl Jasette {
                 Service::WhatsApp => t("Nouvelle conversation WhatsApp").to_string(),
                 Service::Signal => t("Nouvelle conversation Signal").to_string(),
                 Service::X => t("Nouvelle conversation X").to_string(),
+                Service::Telegram => t("Nouvelle conversation Telegram").to_string(),
                 Service::Messenger => t("Nouvelle conversation Messenger").to_string(),
             };
             // Un contact du téléphone : sa photo, s'il en a une.
@@ -8636,6 +8849,8 @@ impl Jasette {
         let compte = self.meta(svc);
         // WhatsApp, Signal et X en cours d'association ne sont pas encore « connectés ».
         let meta_associe = compte.deja_connu(svc);
+        // Telegram pas encore connecté : son application (api_id, api_hash).
+        let api_tg = (svc == Service::Telegram && compte.pont.is_some() && !meta_associe).then(|| self.bloc_api_telegram(cx));
         let detail_meta = if compte.pont.is_none() {
             format!("{} ({})", t("Pont introuvable"), svc.court())
         } else if compte.connexion_ouverte {
@@ -8701,6 +8916,7 @@ impl Jasette {
                         })
                     }),
             )
+            .children(api_tg)
             // L'historique chiffré de Messenger demande le NIP choisi dans l'app Messenger.
             .when(svc == Service::Messenger && self.besoin_nip, |d| {
                 d.child(
@@ -8775,6 +8991,7 @@ impl Jasette {
                 Service::Instagram => "choix-instagram",
                 Service::WhatsApp => "choix-whatsapp",
                 Service::Signal => "choix-signal",
+                Service::Telegram => "choix-telegram",
                 _ => "choix-x",
             };
             carte = carte.child(
@@ -8921,6 +9138,68 @@ impl Jasette {
                         .child(t("Les anciens messages ne sont pas récupérés : seuls ceux reçus après la liaison s'affichent.")),
                 );
             }
+            Service::Telegram => {
+                let champ = |e: &Entity<InputState>| verre(0.8, 999.).flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
+                let rangee = || div().w_full().flex().flex_row().items_center().gap(px(8.));
+                if self.api_tg != Some(true) {
+                    carte = carte.child(self.bloc_api_telegram(cx).px(px(0.)));
+                } else if self.etape_tg.as_deref() == Some("code") {
+                    carte = carte.child(texte(t("Entrez le code que Telegram vient d'envoyer dans l'app Telegram (sur votre téléphone ou un autre appareil connecté), ou par SMS.").into())).child(
+                        rangee().child(champ(&self.code_tg)).child(bouton_texte("tg-code", t("Continuer"), ACCENT).on_click(cx.listener(|this, _, window, cx| {
+                            this.tg_envoyer_code(window, cx);
+                            cx.notify();
+                        }))),
+                    );
+                } else if self.etape_tg.as_deref() == Some("password") {
+                    carte = carte.child(texte(t("Ce compte est protégé par un mot de passe (vérification en deux étapes). Entrez-le pour continuer.").into()));
+                    if let Some(h) = &self.indice_tg {
+                        carte = carte.child(texte(format!("{} {h}", t("Indice :"))));
+                    }
+                    carte = carte.child(rangee().child(champ(&self.mdp_tg)).child(bouton_texte("tg-mdp", t("Continuer"), ACCENT).on_click(cx.listener(
+                        |this, _, window, cx| {
+                            this.tg_envoyer_mdp(window, cx);
+                            cx.notify();
+                        },
+                    ))));
+                } else if let Some(q) = &compte.qr {
+                    carte = carte
+                        .child(texte(t("Sur votre téléphone : Telegram → Paramètres → Appareils → Connecter un appareil, puis scannez ce code.").into()))
+                        .child(qr(q));
+                } else if self.etape_tg.is_some() || matches!(compte.etat, Etat::Association | Etat::Connexion) {
+                    carte = carte.child(attente("Un instant…"));
+                } else {
+                    carte = carte
+                        .child(texte(t("Entrez votre numéro Telegram, avec l'indicatif du pays : Telegram vous enverra un code.").into()))
+                        .child(rangee().child(champ(&self.telephone_tg)).child(bouton_texte("tg-numero", t("Recevoir un code"), ACCENT).on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.tg_envoyer_numero(cx);
+                                cx.notify();
+                            }),
+                        )))
+                        .child(div().mt(px(8.)).w_full().h(px(1.)).bg(th().survol))
+                        .child(texte(t("Plus simple : connectez-vous avec un code QR, à scanner sur le téléphone (Paramètres → Appareils → Connecter un appareil).").into()))
+                        .child(Self::bouton_principal("tg-qr", t("Se connecter avec un code QR")).on_click(cx.listener(|this, _, _, cx| {
+                            this.tg_qr();
+                            cx.notify();
+                        })));
+                }
+                // Revenir au choix (numéro ou QR), ou un nouveau code QR.
+                if self.api_tg == Some(true) && (self.etape_tg.is_some() || compte.qr.is_some()) {
+                    carte = carte.child(
+                        div()
+                            .id("tg-recommencer")
+                            .text_size(px(13.))
+                            .text_color(th().accent)
+                            .cursor_pointer()
+                            .hover(|s| s.opacity(0.7))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.connecter_meta(Service::Telegram);
+                                cx.notify();
+                            }))
+                            .child(t("Recommencer")),
+                    );
+                }
+            }
             _ => {
                 if compte.connexion_ouverte {
                     carte = carte.child(attente("Connectez-vous dans la fenêtre x.com…"));
@@ -8983,6 +9262,7 @@ impl Jasette {
             this.ajout_service = None;
             this.cookies_x = None;
             this.erreur = None;
+            this.etape_tg = None;
             cx.notify();
         })));
         if let Some(e) = &self.erreur {
@@ -9011,7 +9291,7 @@ impl Jasette {
                 div()
                     .text_center()
                     .text_color(th().texte)
-                    .child(t("Google Messages, Messenger, Instagram, WhatsApp, Signal et X au même endroit.")),
+                    .child(t("Google Messages, Messenger, Instagram, WhatsApp, Signal, X et Telegram au même endroit.")),
             );
 
         if let Some(emoji) = &self.emoji {
@@ -9163,6 +9443,7 @@ impl Jasette {
                     let id = match svc {
                         Service::WhatsApp => "accueil-whatsapp",
                         Service::Signal => "accueil-signal",
+                        Service::Telegram => "accueil-telegram",
                         _ => "accueil-x",
                     };
                     service(id, svc).on_click(cx.listener(move |this, _, _, cx| {
@@ -9926,8 +10207,8 @@ fn t(fr: &'static str) -> &'static str {
         "Jasette s'ouvre toute seule à l'ouverture de session : les messages arrivent dès le départ." => "Jasette opens by itself when you log in, so messages arrive right away.",
         "Icône de l'app" => "App icon",
         "Blanche" => "White",
-        "Google Messages, Messenger, Instagram, WhatsApp, Signal et X au même endroit." => {
-            "Google Messages, Messenger, Instagram, WhatsApp, Signal and X in one place."
+        "Google Messages, Messenger, Instagram, WhatsApp, Signal, X et Telegram au même endroit." => {
+            "Google Messages, Messenger, Instagram, WhatsApp, Signal, X and Telegram in one place."
         }
         "Connectez un premier service :" => "Connect a first service:",
         "← Autres services" => "← Other services",
@@ -10057,6 +10338,39 @@ fn t(fr: &'static str) -> &'static str {
         "Le code X Chat est fait de 4 chiffres." => "The X Chat code is 4 digits.",
         "Avatar de WhatsApp" => "WhatsApp avatar",
         "Avatar de Signal" => "Signal avatar",
+        "Avatar de Telegram" => "Telegram avatar",
+        "Nouvelle conversation Telegram" => "New Telegram chat",
+        "Code reçu dans Telegram" => "Code received in Telegram",
+        "Mot de passe Telegram" => "Telegram password",
+        "Entrez le code reçu dans Telegram." => "Enter the code received in Telegram.",
+        "L'api_id est un nombre et l'api_hash a 32 caractères (lettres a-f et chiffres)." => {
+            "The api_id is a number and the api_hash has 32 characters (letters a-f and digits)."
+        }
+        "Telegram demande à chaque application son propre identifiant. Créez le vôtre, gratuitement : connectez-vous sur my.telegram.org avec votre numéro, ouvrez « API development tools », remplissez le formulaire (nom et nom court au choix), puis copiez ici l'api_id et l'api_hash. Ils restent sur cet appareil (ou sur votre serveur Jasette)." => {
+            "Telegram requires each app to have its own identifier. Create yours for free: sign in at my.telegram.org with your number, open “API development tools”, fill in the form (any name and short name), then paste the api_id and api_hash here. They stay on this device (or on your Jasette server)."
+        }
+        "Application réglée. Pour la changer, entrez un autre api_id et api_hash." => {
+            "App set. To change it, enter another api_id and api_hash."
+        }
+        "Enregistrer" => "Save",
+        "Entrez le code que Telegram vient d'envoyer dans l'app Telegram (sur votre téléphone ou un autre appareil connecté), ou par SMS." => {
+            "Enter the code Telegram just sent in the Telegram app (on your phone or another signed-in device), or by SMS."
+        }
+        "Ce compte est protégé par un mot de passe (vérification en deux étapes). Entrez-le pour continuer." => {
+            "This account is protected by a password (two-step verification). Enter it to continue."
+        }
+        "Indice :" => "Hint:",
+        "Sur votre téléphone : Telegram → Paramètres → Appareils → Connecter un appareil, puis scannez ce code." => {
+            "On your phone: Telegram → Settings → Devices → Link Desktop Device, then scan this code."
+        }
+        "Entrez votre numéro Telegram, avec l'indicatif du pays : Telegram vous enverra un code." => {
+            "Enter your Telegram number, with the country code: Telegram will send you a code."
+        }
+        "Plus simple : connectez-vous avec un code QR, à scanner sur le téléphone (Paramètres → Appareils → Connecter un appareil)." => {
+            "Simpler: sign in with a QR code, scanned on your phone (Settings → Devices → Link Desktop Device)."
+        }
+        "Se connecter avec un code QR" => "Sign in with a QR code",
+        "Recommencer" => "Start over",
         "Avatar de X" => "X avatar",
         "Nouvelle conversation WhatsApp" => "New WhatsApp chat",
         "Nouvelle conversation Signal" => "New Signal chat",

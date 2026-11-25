@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Jasette Android — compile les ponts Go pour android/arm64.
 #
-# Les ponts (../pont, ../pont-meta, ../pont-wa, ../pont-x et ../pont-signal)
+# Les ponts (../pont, ../pont-meta, ../pont-wa, ../pont-x, ../pont-telegram
+# et ../pont-signal)
 # ne sont pas modifiés : on les compile
 # tels quels en exécutables, nommés lib*.so et rangés dans
 # ../.cache/android-jni/arm64-v8a/ (le dossier jniLibs de l'app, voir
@@ -51,6 +52,7 @@ construire pont libjasette-pont.so
 construire pont-meta libjasette-meta.so
 construire pont-wa libjasette-wa.so
 construire pont-x libjasette-x.so
+construire pont-telegram libjasette-telegram.so
 
 LIBSIGNAL="$CACHE/libsignal-target/aarch64-linux-android/release"
 if [[ -f "$LIBSIGNAL/libsignal_ffi.a" ]]; then

@@ -6,10 +6,11 @@ import org.json.JSONObject
 /**
  * Les services. Les ids des services autres que Google portent un préfixe dans
  * l'interface, comme sur le bureau : « m: » pour Messenger, « i: » pour
- * Instagram, « w: » pour WhatsApp, « s: » pour Signal, « x: » pour X. Le
+ * Instagram, « w: » pour WhatsApp, « s: » pour Signal, « x: » pour X, « t: »
+ * pour Telegram. Le
  * préfixe dit aussi à quel pont envoyer une commande.
  *
- * WhatsApp, Signal et X : leurs ponts tournent sur le serveur Jasette, ou
+ * WhatsApp, Signal, X et Telegram : leurs ponts tournent sur le serveur Jasette, ou
  * sur le téléphone (mode « Sur cet appareil ») quand l'APK les embarque
  * (voir [serveurSeulement] et Depot.services).
  */
@@ -19,35 +20,36 @@ enum class Service(val titre: String, val court: String, val prefixe: String, va
     INSTAGRAM("Instagram", "Instagram", "i:", "instagram"),
     WHATSAPP("WhatsApp", "WhatsApp", "w:", "whatsapp"),
     SIGNAL("Signal", "Signal", "s:", "signal"),
-    X("X", "X", "x:", "x");
+    X("X", "X", "x:", "x"),
+    TELEGRAM("Telegram", "Telegram", "t:", "telegram");
 
     /** Un service préfixé (tous sauf Google) : ses nouvelles passent par `nouvelleMeta`. */
     val meta get() = this != GOOGLE
 
     /**
      * Le service archive lui-même (commande `archive` de son pont) : Google
-     * Messages et WhatsApp. Les autres passent par les archives de Jasette
+     * Messages, WhatsApp et Telegram. Les autres passent par les archives de Jasette
      * (`Marques.archives`, partagées par le serveur).
      */
-    val archiveNatif get() = this == GOOGLE || this == WHATSAPP
+    val archiveNatif get() = this == GOOGLE || this == WHATSAPP || this == TELEGRAM
 
     /**
-     * WhatsApp, Signal ou X : servi par le serveur Jasette, ou sur cet appareil
+     * WhatsApp, Signal, X ou Telegram : servi par le serveur Jasette, ou sur cet appareil
      * seulement si son pont a été compilé dans l'APK (sinon, service absent).
      */
-    val serveurSeulement get() = this == WHATSAPP || this == SIGNAL || this == X
+    val serveurSeulement get() = this == WHATSAPP || this == SIGNAL || this == X || this == TELEGRAM
 
     /** « Nouveau message » interroge-t-il ce pont (commande `search`) ? */
-    val cherchePersonnes get() = this == MESSENGER || this == INSTAGRAM || this == WHATSAPP || this == SIGNAL
+    val cherchePersonnes get() = this == MESSENGER || this == INSTAGRAM || this == WHATSAPP || this == SIGNAL || this == TELEGRAM
 
     /** Un numéro tapé se cherche-t-il aussi dans ce pont ? (pas chez Meta) */
     val chercheNumeros get() = this == GOOGLE || this == WHATSAPP || this == SIGNAL
 
     /**
      * La taille d'envoi maximale d'un fichier (octets) : environ 100 Mo pour
-     * Google Messages (RCS), WhatsApp et Signal, 25 Mo pour les autres.
+     * Google Messages (RCS), WhatsApp, Signal et Telegram, 25 Mo pour les autres.
      */
-    val limiteEnvoi: Long get() = if (this == GOOGLE || this == WHATSAPP || this == SIGNAL) 100L shl 20 else 25L shl 20
+    val limiteEnvoi: Long get() = if (this == GOOGLE || this == WHATSAPP || this == SIGNAL || this == TELEGRAM) 100L shl 20 else 25L shl 20
 
     /** Le texte peut-il partir avec un fichier (champ `text` de `send_media`) ? */
     val texteAvecFichier get() = meta

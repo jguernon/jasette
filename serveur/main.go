@@ -9,7 +9,7 @@
 //
 // Usage :
 //
-//	jasette-serveur [--port 47800] [--ecoute ADRESSE] [--services google,messenger,instagram,whatsapp,signal,x] [--bin DOSSIER]
+//	jasette-serveur [--port 47800] [--ecoute ADRESSE] [--services google,messenger,instagram,whatsapp,signal,x,telegram] [--bin DOSSIER]
 //	jasette-serveur --jumeler         affiche un code de jumelage (10 minutes)
 //	jasette-serveur --appareils       liste les appareils jumelés
 //	jasette-serveur --revoquer NOM    retire un appareil (débranché aussitôt)
@@ -46,7 +46,7 @@ func main() {
 	port := flag.Int("port", portDefaut(), "port TCP d'écoute (TLS)")
 	ecoute := flag.String("ecoute", "", "adresse d'écoute (défaut : toutes)")
 	services := flag.String("services", strings.Join(ordreServices, ","),
-		"services à servir, séparés par des virgules (whatsapp, signal, x : omis sans leur binaire)")
+		"services à servir, séparés par des virgules (whatsapp, signal, x, telegram : omis sans leur binaire)")
 	binDir := flag.String("bin", "", "dossier des ponts (défaut : à côté de jasette-serveur)")
 	jumeler := flag.Bool("jumeler", false, "afficher un code de jumelage valable 10 minutes")
 	appareils := flag.Bool("appareils", false, "lister les appareils jumelés")

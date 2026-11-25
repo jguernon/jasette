@@ -276,6 +276,30 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Nouvelle conversation Messenger" to "New Messenger chat",
     "Nouvelle conversation WhatsApp" to "New WhatsApp chat",
     "Nouvelle conversation Signal" to "New Signal chat",
+    "Nouvelle conversation Telegram" to "New Telegram chat",
+    // Telegram (Telegram.kt).
+    "Connecter Telegram" to "Connect Telegram",
+    "Application Telegram" to "Telegram app",
+    "Telegram demande à chaque application son propre identifiant. Crée le tien, gratuitement : connecte-toi sur my.telegram.org avec ton numéro, ouvre « API development tools », remplis le formulaire (nom et nom court au choix), puis copie ici l'api_id et l'api_hash. Ils restent sur ce téléphone." to
+        "Telegram requires each app to have its own identifier. Create yours for free: sign in at my.telegram.org with your number, open “API development tools”, fill in the form (any name and short name), then paste the api_id and api_hash here. They stay on this phone.",
+    "Ouvrir my.telegram.org" to "Open my.telegram.org",
+    "Application réglée. Pour la changer, entre un autre api_id et api_hash." to "App set. To change it, enter another api_id and api_hash.",
+    "Enregistrer" to "Save",
+    "Entre ton numéro Telegram, avec l'indicatif du pays : Telegram t'enverra un code." to
+        "Enter your Telegram number, with the country code: Telegram will send you a code.",
+    "Recevoir un code" to "Get a code",
+    "Se connecter plutôt avec un code QR" to "Sign in with a QR code instead",
+    "Se connecter plutôt avec mon numéro" to "Sign in with my number instead",
+    "Entre le code que Telegram vient d'envoyer dans l'app Telegram (sur un autre appareil connecté), ou par SMS." to
+        "Enter the code Telegram just sent in the Telegram app (on another signed-in device), or by SMS.",
+    "Code" to "Code",
+    "Ce compte est protégé par un mot de passe (vérification en deux étapes)." to
+        "This account is protected by a password (two-step verification).",
+    "Indice :" to "Hint:",
+    "Mot de passe" to "Password",
+    "Recommencer" to "Start over",
+    "Scanne-le avec un autre appareil qui a Telegram : Paramètres → Appareils → Connecter un appareil." to
+        "Scan it with another device that has Telegram: Settings → Devices → Link Desktop Device.",
     "Nouvelle conversation X" to "New X chat",
     "Connecte-le depuis Jasette sur ton ordinateur" to "Connect it from Jasette on your computer",
     "Supprimer : pas encore pour ce service." to "Delete: not yet for this service.",
