@@ -1103,6 +1103,12 @@ struct Reglages {
     /// Afficher l'heure de chaque message (le (i) du fil reste un interrupteur ponctuel).
     #[serde(default)]
     heures_messages: bool,
+    /// « Utiliser les photos de mes contacts » (les contacts du téléphone, par Google Messages).
+    #[serde(default = "vrai")]
+    photos_contacts: bool,
+    /// « Aussi pour Messenger et Instagram (par le nom) ».
+    #[serde(default)]
+    photos_contacts_meta: bool,
     /// Serveur Jasette : la dernière version des marques (Head, favoris,
     /// épinglées) reçue du serveur ; 0 = jamais synchronisé avec lui.
     #[serde(default)]
@@ -1154,6 +1160,8 @@ impl Default for Reglages {
             etoiles: Vec::new(),
             epingles: Vec::new(),
             heures_messages: false,
+            photos_contacts: true,
+            photos_contacts_meta: false,
             marques_version: 0,
             marques_a_envoyer: false,
             marques_serveur: String::new(),
@@ -1500,6 +1508,12 @@ struct Jasette {
     echecs: HashSet<String>,
     ouvrir_apres: HashSet<String>,
     avatars: HashMap<String, PathBuf>,
+    /// Les photos des contacts du téléphone (pont Google), en mémoire seulement :
+    /// par clé de numéro (10 derniers chiffres), et par nom plié (noms ambigus écartés).
+    photos_numeros: HashMap<String, PathBuf>,
+    photos_noms: HashMap<String, PathBuf>,
+    /// La dernière demande `contacts` au pont Google (refaite toutes les 30 minutes).
+    contacts_demandes: Option<Instant>,
     /// Les membres d'un groupe sans photo (nom, couleur, photo), pour la mosaïque.
     mosaiques: HashMap<String, Vec<(String, String, Option<PathBuf>)>>,
     // Réglages
@@ -1902,6 +1916,13 @@ fn ouvrir_fichier(p: &PathBuf) {
         .spawn();
 }
 
+/// La clé d'un numéro : ses 10 derniers chiffres (Amérique du Nord), sinon tous ;
+/// rien sous 7 chiffres (numéros courts, adresses).
+fn cle_numero(numero: &str) -> Option<String> {
+    let chiffres: Vec<char> = numero.chars().filter(char::is_ascii_digit).collect();
+    (chiffres.len() >= 7).then(|| chiffres[chiffres.len().saturating_sub(10)..].iter().collect())
+}
+
 /// Sans accents ni majuscules, pour la recherche.
 fn plier(s: &str) -> String {
     s.chars()
@@ -2074,6 +2095,14 @@ impl Jasette {
                             this.nouvelle(l);
                             change = true;
                         }
+                        // Les photos des contacts du téléphone : une fois Google prêt, puis toutes les 30 minutes.
+                        if this.etat == Etat::Pret
+                            && this.reglages.photos_contacts
+                            && this.contacts_demandes.is_none_or(|t| t.elapsed() >= Duration::from_secs(30 * 60))
+                        {
+                            this.contacts_demandes = Some(Instant::now());
+                            this.commande(json!({"cmd": "contacts"}));
+                        }
                         for svc in SERVICES_META {
                             let lignes: Vec<Value> = this.meta(svc).pont.as_ref().map(|p| p.recevoir()).unwrap_or_default();
                             for mut l in lignes {
@@ -2201,6 +2230,9 @@ impl Jasette {
             echecs: HashSet::new(),
             ouvrir_apres: HashSet::new(),
             avatars: HashMap::new(),
+            photos_numeros: HashMap::new(),
+            photos_noms: HashMap::new(),
+            contacts_demandes: None,
             mosaiques: HashMap::new(),
             reglages,
             suivi_marques: pont::SuiviMarques::default(),
@@ -2533,6 +2565,10 @@ impl Jasette {
                 self.etat = match v.get("state").and_then(Value::as_str).unwrap_or_default() {
                     "unpaired" => {
                         self.emoji = None;
+                        // Plus de téléphone : on oublie ses contacts.
+                        self.photos_numeros.clear();
+                        self.photos_noms.clear();
+                        self.contacts_demandes = None;
                         Etat::NonAssocie
                     }
                     "pairing" => Etat::Association,
@@ -2636,7 +2672,19 @@ impl Jasette {
                     }
                 }
             }
+            "contacts" => self.contacts_recus(&v),
             "search" => {
+                // Une photo déjà connue d'un contact trouvé : gardée pour « Nouveau message ».
+                if let Some(a) = v["items"].as_array() {
+                    for x in a {
+                        if let (Some(cle), Some(chemin)) = (
+                            x.get("id").and_then(Value::as_str).and_then(cle_numero),
+                            x.get("path").and_then(Value::as_str).filter(|p| !p.is_empty()),
+                        ) {
+                            self.photos_numeros.entry(cle).or_insert_with(|| carre(PathBuf::from(chemin)));
+                        }
+                    }
+                }
                 // Les contacts du téléphone (pont Google) : ids = numéros, sans préfixe.
                 if v.get("query").and_then(Value::as_str) == Some(self.nouveau_texte.as_str()) {
                     self.resultats_meta.retain(|(id, _)| service_de(id) != Service::GoogleMessages);
@@ -3405,7 +3453,7 @@ impl Jasette {
     /// L'avatar d'une conversation : sa photo, sinon (groupe) la mosaïque de
     /// ses membres, sinon les initiales.
     fn avatar_conv(&self, conv: &Conv, nom: &str, taille: f32) -> AnyElement {
-        let photo = self.avatars.get(&conv.id);
+        let photo = self.photo_conv(conv);
         if conv.group
             && photo.is_none()
             && let Some(membres) = self.mosaiques.get(&conv.id)
@@ -3413,6 +3461,59 @@ impl Jasette {
             return mosaique(membres, taille);
         }
         avatar(nom, &conv.color, conv.group, photo, taille)
+    }
+
+    /// La photo d'une conversation. Réglage actif : celle du contact du téléphone
+    /// (Google à deux : même numéro ; Messenger et Instagram, si choisi : même nom
+    /// exact, plié), sinon celle du service. Les groupes gardent la leur.
+    fn photo_conv(&self, conv: &Conv) -> Option<&PathBuf> {
+        let service = self.avatars.get(&conv.id);
+        if conv.group || !self.reglages.photos_contacts {
+            return service;
+        }
+        let contact = match service_de(&conv.id) {
+            Service::GoogleMessages => {
+                let numero = if conv.number.is_empty() { conv.members.first().map(String::as_str).unwrap_or("") } else { &conv.number };
+                cle_numero(numero).and_then(|k| self.photos_numeros.get(&k))
+            }
+            _ if self.reglages.photos_contacts_meta => {
+                let nom = plier(conv.name.trim());
+                if nom.is_empty() { None } else { self.photos_noms.get(&nom) }
+            }
+            _ => None,
+        };
+        contact.or(service)
+    }
+
+    /// La liste `contacts` du pont Google : les deux tables de photos, refaites à neuf.
+    fn contacts_recus(&mut self, v: &Value) {
+        let mut numeros = HashMap::new();
+        // Nom plié → la photo, ou None si deux contacts différents portent ce nom.
+        let mut noms: HashMap<String, Option<Option<String>>> = HashMap::new();
+        for x in v["items"].as_array().map(Vec::as_slice).unwrap_or_default() {
+            let chemin = x.get("path").and_then(Value::as_str).filter(|p| !p.is_empty()).map(str::to_string);
+            if let (Some(cle), Some(c)) = (x.get("id").and_then(Value::as_str).and_then(cle_numero), &chemin) {
+                numeros.entry(cle).or_insert_with(|| c.clone());
+            }
+            let nom = plier(x.get("name").and_then(Value::as_str).unwrap_or_default().trim());
+            if nom.is_empty() {
+                continue;
+            }
+            // Le même contact revient une fois par numéro, avec la même photo :
+            // une photo différente (ou absente) veut dire un autre contact.
+            noms.entry(nom)
+                .and_modify(|e| {
+                    if e.as_ref().is_some_and(|p| *p != chemin) {
+                        *e = None;
+                    }
+                })
+                .or_insert(Some(chemin));
+        }
+        // Les photos sont mises au carré une seule fois par chemin.
+        let mut carres: HashMap<String, PathBuf> = HashMap::new();
+        let mut au_carre = |c: String| carres.entry(c.clone()).or_insert_with(|| carre(PathBuf::from(c))).clone();
+        self.photos_numeros = numeros.into_iter().map(|(k, c)| (k, au_carre(c))).collect();
+        self.photos_noms = noms.into_iter().filter_map(|(k, e)| Some((k, au_carre(e??)))).collect();
     }
 
     fn photo_moi(&self) -> Option<PathBuf> {
@@ -3728,6 +3829,7 @@ impl Jasette {
             .to_string();
         panneau(th().rail, th().rayon_rail)
             .w(px(68.))
+            .flex_none()
             .h_full()
             .flex()
             .flex_col()
@@ -4162,7 +4264,7 @@ impl Jasette {
             let id = c.id.clone();
             let s = service_de(&c.id);
             boite = boite.child(
-                ligne(SharedString::from(format!("sugg-{}", c.id)), c.name.clone(), s.nom().into(), s, self.avatars.get(&c.id))
+                ligne(SharedString::from(format!("sugg-{}", c.id)), c.name.clone(), s.nom().into(), s, self.photo_conv(c))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.nouveau_ouvert = false;
                         this.numero.update(cx, |s, cx| s.set_value("", window, cx));
@@ -4186,8 +4288,10 @@ impl Jasette {
                 Service::GoogleMessages => format!("{} · {id}", t("Contact")),
                 _ => t("Nouvelle conversation Messenger").to_string(),
             };
+            // Un contact du téléphone : sa photo, s'il en a une.
+            let photo = if svc == Service::GoogleMessages { cle_numero(id).and_then(|k| self.photos_numeros.get(&k)) } else { None };
             boite = boite.child(
-                ligne(SharedString::from(format!("sugg-{id}")), nom.clone(), detail.into(), svc, None)
+                ligne(SharedString::from(format!("sugg-{id}")), nom.clone(), detail.into(), svc, photo)
                     .on_click(cx.listener(move |this, _, window, cx| {
                         if svc == Service::GoogleMessages {
                             this.commande(json!({"cmd": "new", "number": fbid}));
@@ -6155,6 +6259,7 @@ impl Jasette {
         let comptes_actifs = usize::from(self.etat.associe());
         let gauche = panneau(th().liste, th().rayon_liste)
             .w(px(300.))
+            .flex_none()
             .h_full()
             .flex()
             .flex_col()
@@ -6462,6 +6567,39 @@ impl Jasette {
                             cx.notify();
                         }),
                     )))
+                    .child(div().h(px(14.)))
+                    .child(
+                        groupe()
+                            .child(ligne_interrupteur(
+                                "a-photos-contacts",
+                                t("Utiliser les photos de mes contacts"),
+                                t("La photo d'un contact du téléphone remplace celle de Google Messages, par le numéro."),
+                                self.reglages.photos_contacts,
+                                cx.listener(|this, _, _, cx| {
+                                    this.reglages.photos_contacts = !this.reglages.photos_contacts;
+                                    this.reglages.garder();
+                                    // Réactivé : redemandé tout de suite.
+                                    this.contacts_demandes = None;
+                                    cx.notify();
+                                }),
+                            ))
+                            .child(separateur())
+                            .child(
+                                div().when(!self.reglages.photos_contacts, |d| d.opacity(0.45)).child(ligne_interrupteur(
+                                    "a-photos-meta",
+                                    t("Aussi pour Messenger et Instagram (par le nom)"),
+                                    t("Seulement quand un seul contact porte exactement le nom de la conversation."),
+                                    self.reglages.photos_contacts && self.reglages.photos_contacts_meta,
+                                    cx.listener(|this, _, _, cx| {
+                                        if this.reglages.photos_contacts {
+                                            this.reglages.photos_contacts_meta = !this.reglages.photos_contacts_meta;
+                                            this.reglages.garder();
+                                            cx.notify();
+                                        }
+                                    }),
+                                )),
+                            ),
+                    )
                     .child(
                         div()
                             .pt(px(22.))
@@ -6593,6 +6731,7 @@ impl Jasette {
             .flex()
             .flex_row()
             .flex_1()
+            .min_w(px(0.))
             .h_full()
             .gap(px(th().ecart))
             .when(th().sombre, |d| d.bg(th().liste))
@@ -6600,6 +6739,7 @@ impl Jasette {
             .child(
                 panneau(th().fil, th().rayon_fil)
                     .flex_1()
+                    .min_w(px(0.))
                     .h_full()
                     .when(th().marge_fil > 0., |d| d.h_auto().m(px(th().marge_fil)))
                     .overflow_hidden()
@@ -8088,6 +8228,14 @@ fn t(fr: &'static str) -> &'static str {
         "Aperçu du message" => "Message preview",
         "Aplats gris et fil noir, bulles plates." => "Flat grays, black thread, flat bubbles.",
         "Apparence" => "Appearance",
+        "Aussi pour Messenger et Instagram (par le nom)" => "Also for Messenger and Instagram (by name)",
+        "La photo d'un contact du téléphone remplace celle de Google Messages, par le numéro." => {
+            "A phone contact's photo replaces the Google Messages one, matched by number."
+        }
+        "Seulement quand un seul contact porte exactement le nom de la conversation." => {
+            "Only when exactly one contact has the conversation's exact name."
+        }
+        "Utiliser les photos de mes contacts" => "Use my contacts' photos",
         "À propos" => "About",
         "Archives" => "Archive",
         "Association" => "Pairing",

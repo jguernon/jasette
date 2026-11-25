@@ -1239,6 +1239,10 @@ mod essais {
             let mut ev = json!({"ev": "avatar", "conv": "x", "path": fichier});
             google.cx.reecrire(&mut ev);
             assert_eq!(ev["path"].as_str().unwrap(), local.to_str().unwrap());
+            // Aussi dans une liste (les contacts : `items[].path`).
+            let mut ev = json!({"ev": "contacts", "items": [{"id": "5145550000", "name": "x", "path": fichier}]});
+            google.cx.reecrire(&mut ev);
+            assert_eq!(ev["items"][0]["path"].as_str().unwrap(), local.to_str().unwrap());
             // Hors des racines : refusé.
             assert!(google.cx.telecharger("/etc/passwd").is_none());
             assert!(google.cx.telecharger(&format!("{fichier}/../../serveur/cle.pem")).is_none());
