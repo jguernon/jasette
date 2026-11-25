@@ -203,7 +203,6 @@ private fun CarteServeur(adresse: String) {
             }
         }
         Text(t("Les services se connectent et se déconnectent sur le serveur."), color = P.textePale, fontSize = 12.sp)
-        BoutonQuitterServeur()
     }
 }
 
