@@ -1,4 +1,6 @@
 // Jasette Android : l'interface en Compose, les ponts Go du bureau comme processus.
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -8,6 +10,15 @@ plugins {
 val versionJasette: String = rootProject.file("../Cargo.toml").readLines()
     .first { it.startsWith("version = ") }
     .substringAfter('"').substringBefore('"')
+
+// La clé de signature release (aussi la clé d'importation de Google Play) :
+// ../signing/jasette-release.properties (storeFile, storePassword, keyAlias,
+// keyPassword), jamais dans git. Sans ce fichier, tout se compile comme avant
+// (debug), et un APK release sort non signé.
+val fichierSignature = rootProject.file("../signing/jasette-release.properties")
+val signature: Properties? = if (fichierSignature.isFile) {
+    Properties().apply { fichierSignature.inputStream().use { load(it) } }
+} else null
 
 android {
     namespace = "ca.jasette.android"
@@ -23,9 +34,22 @@ android {
         ndk { abiFilters += "arm64-v8a" }
     }
 
+    signingConfigs {
+        if (signature != null) {
+            create("release") {
+                storeFile = fichierSignature.parentFile.resolve(signature.getProperty("storeFile"))
+                storePassword = signature.getProperty("storePassword")
+                keyAlias = signature.getProperty("keyAlias")
+                keyPassword = signature.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // R8 (minify) reste éteint, comme pour le debug.
             isMinifyEnabled = false
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
 

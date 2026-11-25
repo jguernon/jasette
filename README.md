@@ -33,6 +33,14 @@ cd serveur && go build -o ../.cache/bin/jasette-serveur .
 android/compiler.sh                          # l'APK (ponts arm64 compris)
 ```
 
+Les paquets à télécharger (`.deb`, `.tar.gz`, APK release signé, `SHA256SUMS`)
+sortent dans `.cache/paquets/` :
+
+```sh
+paquets/empaqueter.sh            # tout ; --sans-apk pour Linux seulement
+android/compiler.sh --release    # l'APK seul, signé avec signing/ (jamais dans git)
+```
+
 Signal demande `libsignal_ffi.a` : voir `pont-signal/build.sh` et
 `android/build-libsignal.sh`.
 

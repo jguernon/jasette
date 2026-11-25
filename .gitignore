@@ -8,3 +8,7 @@ android/**/build/
 android/.gradle/
 android/.kotlin/
 android/local.properties
+# Clés de signature (Android release, clé d'importation Google Play) : jamais dans git.
+signing/
+*.jks
+*.keystore
