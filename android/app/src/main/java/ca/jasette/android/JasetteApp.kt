@@ -10,6 +10,7 @@ class JasetteApp : Application() {
         Marques.charger(this)
         Prive.charger(this)
         CacheMarques.charger(this)
+        Apercus.charger(this)
         ca.jasette.android.ui.Apparence.charger(this)
     }
 }

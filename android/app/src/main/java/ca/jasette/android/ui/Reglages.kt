@@ -158,6 +158,7 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
             ChoixGrilleHead()
             ChoixTailleMessages()
             ChoixHeures()
+            ChoixApercus()
             ChoixContacts()
             ChoixTeinte()
             ChoixVolets()
@@ -761,6 +762,29 @@ private fun ChoixHeures() {
             Spacer(Modifier.width(12.dp))
             // L'interrupteur du bureau : piste d'accent allumé, grise et visible éteint.
             Interrupteur(oui) { ca.jasette.android.Marques.choisirHeureChaqueMessage(it) }
+        }
+    }
+}
+
+/** Réglages → Apparence : « Aperçus des liens » (activé par défaut ; ceux du service restent affichés). */
+@Composable
+private fun ChoixApercus() {
+    val oui = ca.jasette.android.Apercus.actifs
+    Groupe {
+        Row(
+            Modifier.fillMaxWidth().clickable { ca.jasette.android.Apercus.choisir(!oui) }
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(t("Aperçus des liens"), color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text(
+                    t("Jasette va chercher l'image et le titre des liens (par le serveur Jasette s'il y en a un). Les aperçus envoyés par le service restent affichés."),
+                    color = P.textePale, fontSize = 13.sp,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Interrupteur(oui) { ca.jasette.android.Apercus.choisir(it) }
         }
     }
 }

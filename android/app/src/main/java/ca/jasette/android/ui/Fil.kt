@@ -107,6 +107,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.style.TextDecoration
 import kotlinx.coroutines.launch
 import ca.jasette.android.Msg
 import ca.jasette.android.Piece
@@ -308,6 +313,10 @@ fun Fil(
         // Le plus récent en bas : la liste est inversée.
         val inverse = liste.asReversed()
         LaunchedEffect(liste.lastOrNull()?.id) { if (liste.isNotEmpty()) etat.animateScrollToItem(0) }
+        // Les aperçus des liens (PROTOCOLE.md, §5.9) : ils arrivent quand ils sont prêts.
+        LaunchedEffect(liste, ca.jasette.android.Apercus.actifs) {
+            ca.jasette.android.Apercus.demander(liste, Depot.connexionServeur())
+        }
         // Les messages prennent tout l'écran et défilent sous l'en-tête et la saisie : leurs
         // hauteurs deviennent un contentPadding, lu à la mesure (le clavier qui s'ouvre ne
         // recompose pas le fil).
@@ -413,6 +422,12 @@ fun Fil(
                         }
                     } else {
                         null
+                    },
+                    copierLien = ca.jasette.android.Liens.premier(m.text)?.let { u ->
+                        {
+                            reaction = null
+                            pressePapiers.setText(AnnotatedString(u))
+                        }
                     },
                 )
             }
@@ -565,12 +580,15 @@ private fun Message(
                             .combinedClickable(onClick = { if (echec) reessayer() }, onLongClick = appuiLong)
                             .padding(horizontal = 13.dp, vertical = 8.dp),
                     ) {
+                        val contexte = LocalContext.current
                         Text(
-                            surligner(m.text, surligne, courant), color = if (m.fromMe) P.surAccent else P.texteFort,
+                            avecLiens(surligner(m.text, surligne, courant), m.fromMe) { ouvrirLien(contexte, it) },
+                            color = if (m.fromMe) P.surAccent else P.texteFort,
                             fontSize = (15f * ca.jasette.android.Marques.tailleMessages).sp,
                             lineHeight = (20f * ca.jasette.android.Marques.tailleMessages).sp,
                         )
                     }
+                    ca.jasette.android.Apercus.de(m)?.let { (a, image) -> CarteApercu(a, image, appuiLong) }
                 }
             }
             if (aReactions) {
@@ -628,7 +646,7 @@ private fun IconeCoche(c: Coche, surBulle: Boolean) {
 
 /** La barre flottante des réactions, au-dessus de la bulle. */
 @Composable
-private fun BarreReactions(m: Msg, choisir: (String) -> Unit, plus: () -> Unit, copier: (() -> Unit)?) {
+private fun BarreReactions(m: Msg, choisir: (String) -> Unit, plus: () -> Unit, copier: (() -> Unit)?, copierLien: (() -> Unit)? = null) {
     val mienne = m.reactions.firstOrNull { it.fromMe }?.emoji
     run {
         Row(
@@ -650,6 +668,11 @@ private fun BarreReactions(m: Msg, choisir: (String) -> Unit, plus: () -> Unit, 
             ) { Icon(Icons.Filled.Add, t("Plus de réactions"), tint = P.texteFort, modifier = Modifier.size(20.dp)) }
             if (copier != null) {
                 IconButton(onClick = copier) { Icon(Icones.copier, t("Copier le texte"), tint = P.icone) }
+            }
+            if (copierLien != null) {
+                IconButton(onClick = copierLien) {
+                    Text("🔗", fontSize = 20.sp, modifier = Modifier.semantics { contentDescription = t("Copier le lien") })
+                }
             }
         }
     }
@@ -1004,6 +1027,64 @@ private fun surligner(texte: String, q: String, courant: Boolean): AnnotatedStri
             val f = d + q.length - 1
             addStyle(style, origine[d], origine[f] + 1)
             d = plie.indexOf(q, d + q.length)
+        }
+    }
+}
+
+/** Les adresses du texte, soulignées et cliquables (le surlignage de la recherche reste). */
+private fun avecLiens(texte: AnnotatedString, surAccent: Boolean, ouvrir: (String) -> Unit): AnnotatedString {
+    val liens = ca.jasette.android.Liens.trouver(texte.text)
+    if (liens.isEmpty()) return texte
+    val couleur = when {
+        surAccent -> P.surAccent
+        P.ega -> couleur(EGA_CYAN_VIF)
+        P.clair -> P.accent
+        else -> couleur(0x6b9bff)
+    }
+    val style = TextLinkStyles(SpanStyle(color = couleur, textDecoration = TextDecoration.Underline))
+    return buildAnnotatedString {
+        append(texte)
+        for ((r, u) in liens) addLink(LinkAnnotation.Clickable(u, style) { ouvrir(u) }, r.first, r.last + 1)
+    }
+}
+
+/** Ouvre une adresse dans le navigateur par défaut. */
+private fun ouvrirLien(ctx: android.content.Context, u: String) {
+    try {
+        ctx.startActivity(
+            android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(u))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    } catch (_: Exception) {
+    }
+}
+
+/**
+ * La carte d'aperçu d'un lien, sous la bulle : l'image (16:9), le titre en
+ * gras (2 lignes), la description (2 lignes) et le domaine. Un toucher ouvre
+ * le lien ; l'appui long garde le menu du message.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun CarteApercu(a: ca.jasette.android.LienApercu, image: String?, appuiLong: () -> Unit) {
+    val contexte = LocalContext.current
+    Column(
+        Modifier.widthIn(max = 280.dp).fillMaxWidth(0.78f).carte(16.dp)
+            .combinedClickable(onClick = { ouvrirLien(contexte, a.url) }, onLongClick = appuiLong),
+    ) {
+        if (image != null && java.io.File(image).isFile) {
+            ImageFichier(image, Modifier.fillMaxWidth().aspectRatio(16f / 9f), cote = 720)
+        }
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 9.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            if (a.title.isNotEmpty()) {
+                Text(a.title, color = P.texteFort, fontWeight = FontWeight.Bold, fontSize = 14.sp, lineHeight = 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            if (a.description.isNotEmpty()) {
+                Text(a.description, color = P.texte, fontSize = 12.5.sp, lineHeight = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            val domaine = a.domaine
+            val pied = if (a.site.isEmpty() || a.site.equals(domaine, ignoreCase = true)) domaine else "${a.site} · $domaine"
+            Text("🔗 $pied", color = P.textePale, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

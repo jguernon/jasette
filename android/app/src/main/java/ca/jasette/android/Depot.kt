@@ -33,6 +33,9 @@ object Depot {
     /** En mode client : la connexion au serveur Jasette, partagée par les trois services. */
     private var connexion: ConnexionServeur? = null
 
+    /** La connexion au serveur Jasette (mode client), pour les aperçus de liens. */
+    fun connexionServeur(): ConnexionServeur? = connexion
+
     /** Le serveur Jasette jumelé (mode « client »), ou null : « Sur cet appareil ». */
     var serveur by mutableStateOf<ConfigServeur?>(null)
         private set

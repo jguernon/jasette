@@ -604,8 +604,9 @@ class ConnexionServeur(
                     }
                 }
             }
-            v.has("fichier") || v.has("depose") || v.has("mcp") -> {
-                val r = v.optJSONObject("fichier") ?: v.optJSONObject("depose") ?: v.optJSONObject("mcp") ?: return
+            v.has("fichier") || v.has("depose") || v.has("mcp") || v.has("apercu") -> {
+                val r = v.optJSONObject("fichier") ?: v.optJSONObject("depose") ?: v.optJSONObject("mcp")
+                    ?: v.optJSONObject("apercu") ?: return
                 attentes[r.optLong("id", -1)]?.offer(r)
             }
         }
@@ -657,6 +658,34 @@ class ConnexionServeur(
                 throw IOException(t("Le serveur Jasette ne répond pas. S'il est d'une version sans connexion MCP, mettez-le à jour."))
             }
             return EtatMcp.lire(r)
+        } finally {
+            attentes.remove(id)
+        }
+    }
+
+    /**
+     * L'aperçu d'un lien, demandé au serveur (PROTOCOLE.md, §5.9) : la réponse
+     * (son `image` déjà copiée ici), ou null si le serveur n'en a pas fait.
+     * Lève une exception sans réponse en 12 s (serveur d'avant les aperçus).
+     * Bloquant : hors du fil principal.
+     */
+    fun apercu(url: String): JSONObject? {
+        val l = lienCourant() ?: throw IOException("pas de connexion")
+        val (id, q) = attendre()
+        try {
+            val ligne = JSONObject().put("apercu", JSONObject().put("id", id).put("url", url)).toString()
+            executer(ecrivain) {
+                try {
+                    l.ecrire(ligne)
+                } catch (_: Exception) {
+                    l.fermer()
+                }
+            }
+            val r = q.poll(12, TimeUnit.SECONDS) ?: throw IOException("pas de réponse")
+            if (r.has("erreur")) return null
+            val image = r.chaine("image")
+            if (image.startsWith("/")) r.put("image", telecharger(image)?.path ?: "") else r.remove("image")
+            return r
         } finally {
             attentes.remove(id)
         }

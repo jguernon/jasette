@@ -165,6 +165,8 @@ data class Msg(
     val tmpId: String,
     val attachments: List<Piece>,
     val reactions: List<Reaction>,
+    /** L'aperçu du lien fourni par le service (`link_preview`, PROTOCOLE.md §5.9). */
+    val apercu: LienApercu? = null,
 ) {
     /** Un envoi local pas encore confirmé par le pont. */
     val local get() = id == tmpId
@@ -193,6 +195,7 @@ data class Msg(
                 JSONArray(reactions.map { JSONObject().put("emoji", it.emoji).put("sender", it.sender).put("from_me", it.fromMe) }),
             )
         }
+        apercu?.let { o.put("link_preview", it.json()) }
         return o
     }
 
@@ -225,6 +228,7 @@ data class Msg(
                     val r = reactions!!.getJSONObject(it)
                     Reaction(r.chaine("emoji"), r.chaine("sender"), r.optBoolean("from_me"))
                 }.filter { it.emoji.isNotEmpty() },
+                apercu = LienApercu.de(o.optJSONObject("link_preview")),
             )
         }
     }
