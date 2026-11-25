@@ -59,6 +59,48 @@ const HAUT_COMPOSEUR: f32 = 74.;
 /// Le fil commence et finit à cette distance des bords du panneau.
 const MARGE_FIL: f32 = 14.;
 
+/// Sous la grille du Head : l'air avant le filet qui la sépare de la liste.
+const HEAD_AIR: f32 = 6.;
+/// Au-dessus de la grille du Head : un peu d'air sous le titre.
+const HEAD_AIR_HAUT: f32 = 4.;
+/// La largeur utile de la liste pour le Head (370 px, moins les liserés, les
+/// marges et le cadre plus épais du thème EGA).
+const HEAD_LARGEUR: f32 = 340.;
+
+/// Les mesures d'une cellule du Head selon le nombre de colonnes : 88 px de
+/// large au plus (l'ancienne grille), moins si les colonnes ne tiennent pas ;
+/// l'avatar (54 px au plus, 28 au moins) et le prénom suivent.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct MesuresHead {
+    cellule_w: f32,
+    cellule_h: f32,
+    avatar: f32,
+    texte: f32,
+    texte_h: f32,
+    ecart: f32,
+}
+
+impl MesuresHead {
+    fn pour(colonnes: usize) -> Self {
+        let cellule_w = (HEAD_LARGEUR / colonnes.max(1) as f32).min(88.).floor();
+        let avatar = (cellule_w - 14.).clamp(28., 54.);
+        let texte: f32 = if cellule_w >= 70. {
+            12.
+        } else if cellule_w >= 52. {
+            11.
+        } else {
+            10.
+        };
+        let texte_h = (texte * 1.4_f32).ceil();
+        let ecart = if avatar >= 48. { 5. } else { 3. };
+        let marge = if avatar >= 48. { 8. } else { 6. };
+        Self { cellule_w, cellule_h: marge * 2. + avatar + ecart + texte_h, avatar, texte, texte_h, ecart }
+    }
+}
+
+/// Les colonnes du Head offertes dans Apparence.
+const COLONNES_HEAD: [usize; 4] = [3, 4, 5, 6];
+
 /// Le catalogue Unicode complet (emoji-test.txt, sans les variantes de
 /// teinte) : groupe, emoji, nom anglais.
 fn catalogue() -> &'static [(&'static str, &'static str, &'static str)] {
@@ -785,6 +827,17 @@ impl Service {
         }
     }
 
+    /// Google et WhatsApp archivent pour de vrai (commande `archive` de leur
+    /// pont) ; les autres passent par les archives de Jasette (les marques).
+    fn archive_native(self) -> bool {
+        matches!(self, Service::GoogleMessages | Service::WhatsApp)
+    }
+
+    /// Les ponts qui savent supprimer une conversation (commande `delete`).
+    fn supprimable(self) -> bool {
+        matches!(self, Service::GoogleMessages | Service::Messenger | Service::Instagram)
+    }
+
     /// Le nom du service dans les réglages et les nouvelles des ponts.
     fn cle(self) -> &'static str {
         match self {
@@ -932,7 +985,9 @@ fn image_service(s: Service, taille: f32) -> Arc<gpui::Image> {
         Service::GoogleMessages => (0u8, variantes!("google-messages")),
         Service::Messenger => (1u8, variantes!("messenger")),
         Service::Instagram => (2u8, variantes!("instagram")),
-        Service::WhatsApp | Service::Signal | Service::X => return image_service_svg(s, taille),
+        Service::WhatsApp => (3u8, variantes!("whatsapp")),
+        Service::Signal => (4u8, variantes!("signal")),
+        Service::X => return image_service_svg(s, taille),
     };
     let voulu = taille * 2.;
     let i = liste.iter().position(|(t, _)| *t >= voulu).unwrap_or(liste.len() - 1);
@@ -943,15 +998,13 @@ fn image_service(s: Service, taille: f32) -> Arc<gpui::Image> {
         .clone()
 }
 
-/// Les logos de WhatsApp, Signal et X : des SVG simples dessinés pour Jasette.
+/// Le logo de X : un SVG simple dessiné pour Jasette.
 /// GPUI dessine un SVG à sa taille propre (×2) : chaque taille d'affichage a
 /// donc sa copie, avec `width` et `height` à cette taille. X est noir, blanc
 /// en thème sombre (sa couleur est remplacée dans le texte du SVG).
 fn image_service_svg(s: Service, taille: f32) -> Arc<gpui::Image> {
     static CACHE: std::sync::OnceLock<Mutex<HashMap<(u8, u32, bool), Arc<gpui::Image>>>> = std::sync::OnceLock::new();
     let (cle, source) = match s {
-        Service::WhatsApp => (0u8, include_str!("../assets/services/whatsapp.svg")),
-        Service::Signal => (1u8, include_str!("../assets/services/signal.svg")),
         _ => (2u8, include_str!("../assets/services/x.svg")),
     };
     let blanc = s == Service::X && th().sombre;
@@ -1204,6 +1257,24 @@ struct Reglages {
     /// Les conversations épinglées en haut de la liste, dans l'ordre d'épinglage.
     #[serde(default)]
     epingles: Vec<String>,
+    /// Les archives propres à Jasette (Messenger, Instagram, Signal, X ; jamais
+    /// Google ni WhatsApp, qui archivent eux-mêmes), dans l'ordre d'archivage.
+    #[serde(default)]
+    archives: Vec<String>,
+    /// L'heure (ms) où chaque id est entré dans `archives`, gardée sur cet
+    /// appareil seulement : un message reçu plus récent la ramène dans l'Inbox.
+    #[serde(default)]
+    archives_depuis: HashMap<String, i64>,
+    /// La grille du Head : son nombre de colonnes, de 3 à 6 (« 5 ») ; vide = 4.
+    /// Une ancienne valeur « colonnes x rangées » (« 8x3 ») donne ses colonnes,
+    /// ramenées entre 3 et 6. Propre à cet appareil.
+    #[serde(default)]
+    head_grille: String,
+    /// Le cache local des conversations marquées (Head, favoris, épinglées,
+    /// archives de Jasette) : de quoi les montrer quand leur service est
+    /// déconnecté, pas prêt ou absent. Propre à cet appareil.
+    #[serde(default)]
+    marques_cache: HashMap<String, ConvMarquee>,
     /// Le thème : "sombre" (ou vide, le défaut) ou "verre".
     #[serde(default)]
     theme: String,
@@ -1239,6 +1310,30 @@ struct Reglages {
     marques_base: Option<BlocMarques>,
 }
 
+/// Une conversation marquée, telle que vue la dernière fois (`marques_cache`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+struct ConvMarquee {
+    #[serde(default)]
+    nom: String,
+    /// La clé du service (« google », « messenger »…).
+    #[serde(default)]
+    service: String,
+    /// La copie de son avatar, dans le dossier de données.
+    #[serde(default)]
+    avatar: Option<PathBuf>,
+    /// L'avatar copié (pour ne le recopier que s'il change).
+    #[serde(default)]
+    avatar_source: Option<PathBuf>,
+    #[serde(default)]
+    time: i64,
+    #[serde(default)]
+    apercu: String,
+    #[serde(default)]
+    groupe: bool,
+    #[serde(default)]
+    color: String,
+}
+
 /// Ce qui, dans les réglages, touche aux marques : les trois listes et
 /// leur état de synchronisation avec le serveur Jasette.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1269,6 +1364,10 @@ impl Default for Reglages {
             serveur: None,
             etoiles: Vec::new(),
             epingles: Vec::new(),
+            archives: Vec::new(),
+            archives_depuis: HashMap::new(),
+            head_grille: String::new(),
+            marques_cache: HashMap::new(),
             heures_messages: false,
             photos_contacts: true,
             photos_contacts_meta: false,
@@ -1321,6 +1420,7 @@ impl Reglages {
             // Pas de reglages.json, mais une copie : on la reprend.
             Err(_) => Self::lire_fichier(&bak).unwrap_or_default(),
         };
+        r.maj_archives_depuis();
         r.marques_base = Some(r.bloc());
         r
     }
@@ -1368,6 +1468,7 @@ impl Reglages {
                     head: self.head.clone(),
                     favoris: self.etoiles.clone(),
                     epingles: self.epingles.clone(),
+                    archives: self.archives.clone(),
                 },
                 version: self.marques_version,
                 a_envoyer: self.marques_a_envoyer,
@@ -1380,9 +1481,37 @@ impl Reglages {
         self.head = b.copie.listes.head;
         self.etoiles = b.copie.listes.favoris;
         self.epingles = b.copie.listes.epingles;
+        self.archives = b.copie.listes.archives;
         self.marques_version = b.copie.version;
         self.marques_a_envoyer = b.copie.a_envoyer;
         self.marques_serveur = b.serveur;
+        self.maj_archives_depuis();
+    }
+
+    /// Une heure d'archivage pour chaque archive (maintenant, si elle manque),
+    /// aucune pour les autres (comme `Marques.majDepuis` d'Android).
+    fn maj_archives_depuis(&mut self) {
+        let maintenant = maintenant_ms();
+        let archives = &self.archives;
+        self.archives_depuis.retain(|id, _| archives.contains(id));
+        for id in &self.archives {
+            let t = self.archives_depuis.entry(id.clone()).or_insert(0);
+            if *t <= 0 {
+                *t = maintenant;
+            }
+        }
+    }
+
+    /// Archivée par Jasette : seulement pour les services qui n'archivent pas eux-mêmes.
+    fn archivee_jasette(&self, id: &str) -> bool {
+        !service_de(id).archive_native() && self.archives.iter().any(|x| x == id)
+    }
+
+    /// Les colonnes du Head : 3 à 6, 4 par défaut (les anciennes valeurs
+    /// « colonnes x rangées » gardent leurs colonnes, ramenées entre 3 et 6).
+    fn colonnes_head(&self) -> usize {
+        let c = self.head_grille.split(['x', '×']).next().unwrap_or("").trim();
+        c.parse::<usize>().map(|c| c.clamp(3, 6)).unwrap_or(4)
     }
 
     /// Fusion à trois des marques avec celles du disque (`disque`), qu'une
@@ -1630,6 +1759,11 @@ struct Jasette {
     echecs: HashSet<String>,
     ouvrir_apres: HashSet<String>,
     avatars: HashMap<String, PathBuf>,
+    /// Les conversations marquées absentes (service déconnecté, pas prêt ou
+    /// absent), refaites depuis `marques_cache` : montrées grisées.
+    fantomes: Vec<Conv>,
+    /// Les fantômes ont été faits une première fois (au démarrage, sans attendre un pont).
+    fantomes_faits: bool,
     /// Les photos des contacts du téléphone (pont Google), en mémoire seulement :
     /// par clé de numéro (10 derniers chiffres), et par nom plié (noms ambigus écartés).
     photos_numeros: HashMap<String, PathBuf>,
@@ -2289,6 +2423,12 @@ impl Jasette {
                             this.marques_recues(n);
                             change = true;
                         }
+                        // Le cache des conversations marquées, et leurs fantômes.
+                        if change || !this.fantomes_faits {
+                            this.fantomes_faits = true;
+                            this.maj_cache_marques();
+                            change = true;
+                        }
                         let retour = this.connexion.lock().ok().and_then(|mut r| r.take());
                         if let Some(r) = retour {
                             this.connexion_ouverte = false;
@@ -2390,6 +2530,8 @@ impl Jasette {
             echecs: HashSet::new(),
             ouvrir_apres: HashSet::new(),
             avatars: HashMap::new(),
+            fantomes: Vec::new(),
+            fantomes_faits: false,
             photos_numeros: HashMap::new(),
             photos_noms: HashMap::new(),
             contacts_demandes: None,
@@ -2616,7 +2758,9 @@ impl Jasette {
                     // Pas d'erreur rouge pour un service jamais connecté, sauf
                     // pendant qu'on l'associe (écran d'ajout ou fenêtre ouverte).
                     let m = self.meta(svc);
-                    if m.deja_connu(svc) || m.connexion_ouverte || self.ajout_service == Some(svc) {
+                    // Une suppression ratée se montre toujours : la conversation réapparaît.
+                    let suppression = v.get("where").and_then(Value::as_str) == Some("delete");
+                    if suppression || m.deja_connu(svc) || m.connexion_ouverte || self.ajout_service == Some(svc) {
                         self.erreur = Some(format!("{} : {texte}", svc.court()));
                     } else {
                         eprintln!("jasette : {} : {texte}", svc.court());
@@ -2727,11 +2871,214 @@ impl Jasette {
     }
 
     fn conv(&self, id: &str) -> Option<&Conv> {
-        self.convs.iter().chain(self.archives.iter()).find(|c| c.id == id)
+        self.convs.iter().chain(self.archives.iter()).chain(self.fantomes.iter()).find(|c| c.id == id)
     }
 
+    /// Une conversation marquée qui n'est pas chargée : montrée depuis le cache.
+    fn est_fantome(&self, id: &str) -> bool {
+        self.fantomes.iter().any(|c| c.id == id)
+    }
+
+    /// Le service est prêt ou en train de se connecter : ses conversations
+    /// vont arriver (« chargement… » plutôt que « déconnecté »).
+    fn service_en_route(&self, svc: Service) -> bool {
+        if svc == Service::GoogleMessages {
+            return matches!(self.etat, Etat::Pret | Etat::Connexion | Etat::Reconnexion | Etat::Demarrage);
+        }
+        let m = self.meta(svc);
+        !m.absent
+            && (matches!(m.etat, Etat::Pret | Etat::Connexion | Etat::Reconnexion)
+                || (m.etat == Etat::Demarrage && m.pont.is_some() && m.deja_connu(svc)))
+    }
+
+    /// Les ids marqués : Head, favoris, épinglées, archives de Jasette.
+    fn ids_marques(&self) -> Vec<String> {
+        let r = &self.reglages;
+        let mut ids: Vec<String> = Vec::new();
+        for id in r.head.iter().chain(&r.etoiles).chain(&r.epingles).chain(&r.archives) {
+            if !ids.contains(id) {
+                ids.push(id.clone());
+            }
+        }
+        ids
+    }
+
+    /// Tient à jour le cache des conversations marquées (nom, service, avatar
+    /// copié, date, aperçu) et refait les fantômes de celles qui manquent.
+    /// N'écrit les réglages que si le cache change ; ne retire jamais une marque.
+    fn maj_cache_marques(&mut self) {
+        let ids = self.ids_marques();
+        let mut change = false;
+        let dossier = dossier_donnees().join("marques-avatars");
+        for id in &ids {
+            let Some(c) = self.convs.iter().chain(self.archives.iter()).find(|c| &c.id == id) else { continue };
+            let ancien = self.reglages.marques_cache.get(id).cloned().unwrap_or_default();
+            let mut e = ConvMarquee {
+                nom: c.name.clone(),
+                service: service_de(id).cle().to_string(),
+                time: c.time,
+                apercu: c.preview.clone(),
+                groupe: c.group,
+                color: c.color.clone(),
+                avatar: ancien.avatar.clone(),
+                avatar_source: ancien.avatar_source.clone(),
+            };
+            // L'avatar : copié dans le dossier de données, seulement s'il a changé.
+            if let Some(source) = self.photo_conv(c).cloned()
+                && !source.starts_with(&dossier)
+                && e.avatar_source.as_ref() != Some(&source)
+            {
+                let nom: String = id.chars().map(|x| if x.is_ascii_alphanumeric() { x } else { '_' }).collect();
+                let ext = source.extension().and_then(|x| x.to_str()).unwrap_or("img");
+                let cible = dossier.join(format!("{nom}.{ext}"));
+                if std::fs::create_dir_all(&dossier).is_ok() && std::fs::copy(&source, &cible).is_ok() {
+                    e.avatar = Some(cible);
+                    e.avatar_source = Some(source);
+                }
+            }
+            if e != ancien {
+                self.reglages.marques_cache.insert(id.clone(), e);
+                change = true;
+            }
+        }
+        // Une conversation qui n'est plus marquée nulle part : son entrée et sa copie partent.
+        let orphelins: Vec<String> = self.reglages.marques_cache.keys().filter(|k| !ids.contains(k)).cloned().collect();
+        for k in orphelins {
+            if let Some(e) = self.reglages.marques_cache.remove(&k)
+                && let Some(a) = e.avatar
+            {
+                let _ = std::fs::remove_file(a);
+            }
+            change = true;
+        }
+        if change {
+            self.reglages.garder();
+        }
+        // Les fantômes : les marquées qui ne sont pas chargées.
+        let mut fantomes = Vec::new();
+        for id in &ids {
+            if self.convs.iter().chain(self.archives.iter()).any(|c| &c.id == id) {
+                continue;
+            }
+            let svc = service_de(id);
+            let e = self.reglages.marques_cache.get(id).cloned().unwrap_or_default();
+            let etat = t(if self.service_en_route(svc) { "chargement…" } else { "déconnecté" });
+            let apercu = if e.apercu.is_empty() { etat.to_string() } else { format!("{etat} · {}", e.apercu) };
+            let v = json!({"id": id, "name": e.nom, "preview": apercu, "time": e.time, "group": e.groupe, "color": e.color});
+            if let Ok(c) = serde_json::from_value::<Conv>(v) {
+                fantomes.push(c);
+            }
+            if let Some(a) = e.avatar
+                && !self.avatars.contains_key(id)
+                && a.is_file()
+            {
+                self.avatars.insert(id.clone(), a);
+            }
+        }
+        self.fantomes = fantomes;
+    }
+
+    /// Les non-lues de la boîte de réception (sans les archives de Jasette).
     fn non_lus(&self) -> usize {
-        self.convs.iter().filter(|c| c.unread).count()
+        self.convs.iter().filter(|c| c.unread && !self.reglages.archivee_jasette(&c.id)).count()
+    }
+
+    /// La boîte de réception (et les vues Favoris et par service) : sans les archives de Jasette.
+    /// Les fantômes y sont aussi : épinglés partout, favoris dans la vue Favoris.
+    fn boite(&self) -> Vec<&Conv> {
+        let r = &self.reglages;
+        let mut l: Vec<&Conv> = self.convs.iter().filter(|c| !r.archivee_jasette(&c.id)).collect();
+        l.extend(self.fantomes.iter().filter(|c| {
+            !r.archivee_jasette(&c.id)
+                && (r.epingles.contains(&c.id) || (self.vue == Vue::Favoris && r.etoiles.contains(&c.id)))
+        }));
+        l
+    }
+
+    /// La vue Archives : celles des services et celles de Jasette, ensemble, les plus récentes d'abord.
+    fn toutes_archives(&self) -> Vec<&Conv> {
+        let mut vues = HashSet::new();
+        let mut l: Vec<&Conv> = self
+            .archives
+            .iter()
+            .chain(self.convs.iter().chain(self.fantomes.iter()).filter(|c| self.reglages.archivee_jasette(&c.id)))
+            .filter(|c| vues.insert(c.id.as_str()))
+            .collect();
+        l.sort_by(|a, b| b.time.cmp(&a.time));
+        l
+    }
+
+    /// Archivée par son service (venue de son dossier d'archives) ou par Jasette.
+    fn est_archivee(&self, id: &str) -> bool {
+        self.archives.iter().any(|c| c.id == id) || self.reglages.archivee_jasette(id)
+    }
+
+    /// Archive ou désarchive, et le montre tout de suite. Google et WhatsApp :
+    /// par leur pont (le téléphone confirmera) ; les autres : par les archives
+    /// de Jasette (les marques, partagées par le serveur s'il y en a un).
+    fn archiver(&mut self, id: String, oui: bool) {
+        if !service_de(&id).archive_native() {
+            if oui == self.reglages.archives.contains(&id) {
+                return;
+            }
+            if oui {
+                self.reglages.archives.push(id);
+                self.choisie = None;
+            } else {
+                self.reglages.archives.retain(|x| x != &id);
+            }
+            self.marques_changees();
+            return;
+        }
+        self.commande(json!({"cmd": "archive", "conv": id, "archived": oui}));
+        if !oui {
+            if let Some(i) = self.archives.iter().position(|c| c.id == id) {
+                let mut c = self.archives.remove(i);
+                c.archived = false;
+                self.convs.push(c);
+                self.convs.sort_by(|a, b| b.time.cmp(&a.time));
+            }
+        } else if let Some(i) = self.convs.iter().position(|c| c.id == id) {
+            let mut c = self.convs.remove(i);
+            c.archived = true;
+            self.archives.insert(0, c);
+            self.choisie = None;
+        }
+    }
+
+    /// Un message reçu (pas envoyé par moi) dans `id`, daté de `temps` (ms) :
+    /// plus récent que l'archivage par Jasette, il ramène la conversation dans
+    /// l'Inbox. Idempotent ; en mode client, le serveur l'a d'habitude déjà fait.
+    fn desarchiver_si_recu(&mut self, id: &str, temps: i64) {
+        if !self.reglages.archivee_jasette(id) {
+            return;
+        }
+        if self.reglages.archives_depuis.get(id).is_some_and(|depuis| temps > *depuis) {
+            self.reglages.archives.retain(|x| x != id);
+            self.marques_changees();
+        }
+    }
+
+    /// Une conversation supprimée (ici, ailleurs ou dans l'app du service) :
+    /// retirée des listes, des messages et des marques.
+    fn retirer_conversation(&mut self, id: &str) {
+        self.convs.retain(|c| c.id != id);
+        self.archives.retain(|c| c.id != id);
+        self.messages.remove(id);
+        if self.choisie.as_deref() == Some(id) {
+            self.choisie = None;
+            self.menu_conv = false;
+            self.confirmer_suppression = false;
+        }
+        let r = &mut self.reglages;
+        let avant = r.head.len() + r.etoiles.len() + r.epingles.len() + r.archives.len();
+        r.head.retain(|x| x != id);
+        r.etoiles.retain(|x| x != id);
+        r.epingles.retain(|x| x != id);
+        r.archives.retain(|x| x != id);
+        if r.head.len() + r.etoiles.len() + r.epingles.len() + r.archives.len() != avant {
+            self.marques_changees();
+        }
     }
 
     /// Demande au pont de télécharger une pièce jointe (une seule fois).
@@ -2873,6 +3220,12 @@ impl Jasette {
                 if avant != self.etat {
                     self.banniere_fermee = false;
                 }
+                // Prêt : on demande la liste. Le pont l'envoie de lui-même à son
+                // démarrage, mais un client d'un serveur Jasette qui se branche
+                // plus tard ne la recevrait jamais (le serveur ne la rejoue pas).
+                if avant != Etat::Pret && self.etat == Etat::Pret {
+                    self.commande(json!({"cmd": "conversations", "count": 50}));
+                }
             }
             "account" => {
                 // Rejoué à chaque (re)connexion : n'écrire les réglages que s'il change.
@@ -2916,7 +3269,7 @@ impl Jasette {
                     } else {
                         fusion(&mut self.convs, items);
                         if self.choisie.is_none()
-                            && let Some(first) = self.convs.first()
+                            && let Some(first) = self.boite().first()
                         {
                             let id = first.id.clone();
                             self.choisir(id);
@@ -3092,6 +3445,10 @@ impl Jasette {
                     if ouverte && self.fil_cherche_ouvert {
                         self.recalculer_fil();
                     }
+                    // Archives de Jasette : un message reçu ramène la conversation dans l'Inbox.
+                    if nouveau && !m.from_me {
+                        self.desarchiver_si_recu(&m.conv, m.time);
+                    }
                     if nouveau && !m.from_me {
                         if ouverte && self.active {
                             self.commande(json!({"cmd": "read", "conv": m.conv, "msg": m.id}));
@@ -3118,6 +3475,13 @@ impl Jasette {
                     self.chargement = None;
                     self.fil_plus_loin = false;
                     self.cible = None;
+                }
+            }
+            // Ponts Meta : une conversation supprimée (ici, sur un autre appareil ou dans l'app).
+            "deleted" => {
+                if let Some(id) = v.get("conv").and_then(Value::as_str).filter(|id| !id.is_empty()) {
+                    let id = id.to_string();
+                    self.retirer_conversation(&id);
                 }
             }
             "pont_ferme" => self.erreur = Some("Le pont s'est arrêté (voir le terminal).".into()),
@@ -3342,7 +3706,7 @@ impl Jasette {
 
     /// Un résultat cliqué : la conversation s'ouvre, défile jusqu'au message et le marque.
     fn ouvrir_resultat(&mut self, conv: String, id: String) {
-        if self.vue == Vue::Archives && !self.archives.iter().any(|c| c.id == conv) {
+        if self.vue == Vue::Archives && !self.est_archivee(&conv) {
             self.vue = Vue::Tout;
         }
         self.choisir(conv.clone());
@@ -4413,6 +4777,11 @@ impl Jasette {
                 ),
             );
         }
+        // Le Head, dans l'en-tête fixe : le dégradé commence sous lui.
+        if let Some((head, h)) = self.head_entete(cx) {
+            col = col.child(head);
+            haut += h;
+        }
         // Comme le fil : la liste passe sous un en-tête givré qui s'efface
         // en dégradé, et ne dessine jamais dans les coins arrondis.
         let givre = |a: f32| alpha(th().givre_liste, a);
@@ -4480,6 +4849,7 @@ impl Jasette {
         if let Some(t) = trame {
             self.envoyer_marques(t);
         }
+        self.maj_cache_marques();
     }
 
     /// Une nouvelle du serveur à propos des marques : la copie locale suit.
@@ -4656,12 +5026,109 @@ impl Jasette {
         (boite, n)
     }
 
+    /// Le Head : la grille d'avatars en tête de liste (Inbox, sans recherche
+    /// ni filtre), posée dans l'en-tête fixe, hors de la zone défilante : le
+    /// fondu de l'en-tête commence sous elle et ne la couvre jamais. Rend la
+    /// grille et sa hauteur. De 3 à 6 colonnes (88 px au plus ; les avatars
+    /// rapetissent pour tenir), autant de rangées qu'il faut : tous les Head.
+    fn head_entete(&self, cx: &mut Context<Self>) -> Option<(gpui::Stateful<Div>, f32)> {
+        if !self.filtre.is_empty() || self.non_lus_seulement || self.vue != Vue::Tout {
+            return None;
+        }
+        let tous: Vec<&Conv> = self.reglages.head.iter().filter_map(|id| self.conv(id)).filter(|c| self.correspond(c)).collect();
+        if tous.is_empty() {
+            return None;
+        }
+        // Toutes les rangées qu'il faut : aucun Head caché.
+        let cols = self.reglages.colonnes_head();
+        let montres = tous;
+        let rangees = montres.len().div_ceil(cols);
+        let mesures = MesuresHead::pour(cols);
+        let h_grille = rangees as f32 * mesures.cellule_h;
+        // Un pixel de plus : l'arrondi ne doit jamais faire passer la dernière colonne à la ligne.
+        let mut grille = div().flex_none().flex().flex_row().flex_wrap().w(px(mesures.cellule_w * cols as f32 + 1.));
+        for conv in &montres {
+            let id = conv.id.clone();
+            let choisie = self.choisie.as_deref() == Some(conv.id.as_str());
+            let nom = if conv.name.is_empty() { t("Sans nom").to_string() } else { conv.name.clone() };
+            let prenom = if conv.group { nom.clone() } else { nom.split_whitespace().next().unwrap_or(&nom).to_string() };
+            let pastille = (mesures.avatar * 0.22).round().max(9.);
+            grille = grille.child(
+                div()
+                    .id(SharedString::from(format!("fav-{}", conv.id)))
+                    .when(self.est_fantome(&conv.id), |d| d.opacity(0.45))
+                    .w(px(mesures.cellule_w))
+                    .h(px(mesures.cellule_h))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(mesures.ecart))
+                    .rounded(rayon(14.))
+                    .cursor_pointer()
+                    .when(choisie, |d| d.bg(th().choisi))
+                    .when(!choisie, |d| d.hover(|s| s.bg(th().survol)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.choisir(id.clone());
+                        cx.notify();
+                    }))
+                    .child(
+                        div()
+                            .relative()
+                            .child(self.avatar_conv(conv, &nom, mesures.avatar))
+                            .child(
+                                div()
+                                    .absolute()
+                                    .right(px(-3.))
+                                    .bottom(px(-1.))
+                                    .child(logo(service_de(&conv.id), (mesures.avatar / 3.).round().max(12.))),
+                            )
+                            .when(conv.unread, |d| {
+                                d.child(
+                                    div()
+                                        .absolute()
+                                        .top(px(0.))
+                                        .right(px(0.))
+                                        .size(px(pastille))
+                                        .rounded(rayon(999.))
+                                        .bg(th().accent)
+                                        .border_2()
+                                        .border_color(th().liste),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px(mesures.texte_h))
+                            .px(px(3.))
+                            .text_center()
+                            .truncate()
+                            .text_size(px(mesures.texte))
+                            .text_color(if conv.unread { th().texte_fort } else { th().texte })
+                            .child(prenom),
+                    ),
+            );
+        }
+        let zone = div().flex().flex_row().justify_center().h(px(h_grille)).child(grille);
+        let bloc = div()
+            .id("head")
+            .flex()
+            .flex_col()
+            .px(px(8.))
+            .pt(px(HEAD_AIR_HAUT))
+            .child(zone)
+            .child(div().h(px(1.)).mx(px(10.)).mt(px(HEAD_AIR)).bg(th().survol));
+        Some((bloc, HEAD_AIR_HAUT + h_grille + HEAD_AIR + 1.))
+    }
+
     fn liste(&self, haut: f32, cx: &mut Context<Self>) -> impl IntoElement {
-        let source = if self.vue == Vue::Archives { &self.archives } else { &self.convs };
+        // Les archives de Jasette quittent la boîte et rejoignent celles des services.
+        let source = if self.vue == Vue::Archives { self.toutes_archives() } else { self.boite() };
         let badge = self.vue == Vue::Tout || self.vue == Vue::Archives;
         let mut col =
             div().id("convs").flex().flex_col().size_full().overflow_y_scroll().px(px(8.)).pt(px(haut)).pb(px(18.));
-        let mut visibles: Vec<&Conv> = source.iter().filter(|c| self.correspond(c)).collect();
+        let mut visibles: Vec<&Conv> = source.iter().copied().filter(|c| self.correspond(c)).collect();
         // Les épinglées d'abord, dans l'ordre où elles ont été épinglées.
         let rang = |c: &Conv| self.reglages.epingles.iter().position(|x| x == &c.id).unwrap_or(usize::MAX);
         visibles.sort_by_key(|c| rang(c));
@@ -4687,69 +5154,6 @@ impl Jasette {
         } else if visibles.is_empty() && self.resultats_msgs.is_empty() {
             col = col.child(div().p(px(16.)).text_color(th().texte_pale).child(t("Aucun résultat")));
         }
-        // Le Head : une grille d'avatars en tête de liste (sans recherche en cours).
-        let favoris: Vec<&Conv> = if self.filtre.is_empty() && !self.non_lus_seulement && self.vue == Vue::Tout {
-            self.reglages.head.iter().filter_map(|id| self.conv(id)).filter(|c| self.correspond(c)).collect()
-        } else {
-            Vec::new()
-        };
-        if !favoris.is_empty() {
-            let mut grille = div().flex().flex_row().flex_wrap().pb(px(6.));
-            for conv in &favoris {
-                let id = conv.id.clone();
-                let choisie = self.choisie.as_deref() == Some(conv.id.as_str());
-                let nom = if conv.name.is_empty() { t("Sans nom").to_string() } else { conv.name.clone() };
-                let prenom = if conv.group { nom.clone() } else { nom.split_whitespace().next().unwrap_or(&nom).to_string() };
-                grille = grille.child(
-                    div()
-                        .id(SharedString::from(format!("fav-{}", conv.id)))
-                        .w(px(88.))
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .gap(px(5.))
-                        .py(px(8.))
-                        .rounded(rayon(14.))
-                        .cursor_pointer()
-                        .when(choisie, |d| d.bg(th().choisi))
-                        .when(!choisie, |d| d.hover(|s| s.bg(th().survol)))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.choisir(id.clone());
-                            cx.notify();
-                        }))
-                        .child(
-                            div()
-                                .relative()
-                                .child(self.avatar_conv(conv, &nom, 54.))
-                                .child(div().absolute().right(px(-3.)).bottom(px(-1.)).child(logo(service_de(&conv.id), 18.)))
-                                .when(conv.unread, |d| {
-                                    d.child(
-                                        div()
-                                            .absolute()
-                                            .top(px(0.))
-                                            .right(px(0.))
-                                            .size(px(12.))
-                                            .rounded(rayon(999.))
-                                            .bg(th().accent)
-                                            .border_2()
-                                            .border_color(th().liste),
-                                    )
-                                }),
-                        )
-                        .child(
-                            div()
-                                .w_full()
-                                .px(px(4.))
-                                .text_center()
-                                .truncate()
-                                .text_size(px(12.))
-                                .text_color(if conv.unread { th().texte_fort } else { th().texte })
-                                .child(prenom),
-                        ),
-                );
-            }
-            col = col.child(grille).child(div().h(px(1.)).mx(px(10.)).mb(px(4.)).bg(th().survol));
-        }
         let n = visibles.len();
         for (i, conv) in visibles.into_iter().enumerate() {
             // Un peu d'air sous les épinglées.
@@ -4769,6 +5173,7 @@ impl Jasette {
             col = col.child(
                 div()
                     .id(SharedString::from(format!("c-{}", conv.id)))
+                    .when(self.est_fantome(&conv.id), |d| d.opacity(0.5))
                     .flex()
                     .flex_row()
                     .items_center()
@@ -5099,6 +5504,48 @@ impl Jasette {
     /// Le fil défilant, et en dessous la copie floue qui sert de verre dépoli
     /// sous l'en-tête (voir `panneau_fil`).
     fn fil(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        // Une conversation marquée dont le service n'est pas connecté, sans messages en cache.
+        if let Some(id) = self.choisie.clone()
+            && self.est_fantome(&id)
+            && self.messages.get(&id).is_none_or(|l| l.is_empty())
+        {
+            let svc = service_de(&id);
+            let pret = self.service_en_route(svc);
+            let texte = if pret {
+                t("Chargement…").to_string()
+            } else {
+                format!("{} {}", svc.court(), t("n'est pas connecté."))
+            };
+            return div()
+                .flex()
+                .flex_col()
+                .gap(px(12.))
+                .size_full()
+                .items_center()
+                .justify_center()
+                .text_color(th().texte_pale)
+                .child(logo(svc, 40.))
+                .child(texte)
+                .when(!pret, |d| {
+                    d.child(
+                        div()
+                            .id("fantome-comptes")
+                            .px(px(14.))
+                            .py(px(7.))
+                            .rounded(rayon(999.))
+                            .bg(alpha(th().accent, 0.15))
+                            .text_color(th().accent)
+                            .cursor_pointer()
+                            .hover(|s| s.bg(alpha(th().accent, 0.25)))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.section = Some(Section::Comptes);
+                                cx.notify();
+                            }))
+                            .child(t("Comptes")),
+                    )
+                })
+                .into_any_element();
+        }
         let Some(contenu) = self.fil_contenu(false, cx) else {
             return div()
                 .flex()
@@ -6380,10 +6827,16 @@ impl Jasette {
     /// Le menu « … » : médias, archiver, supprimer.
     fn menu_conversation(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(id) = self.choisie.clone() else { return div() };
-        let google = service_de(&id) == Service::GoogleMessages;
-        // WhatsApp sait archiver (commande « archive ») ; supprimer : Google seulement.
-        let archivable = google || service_de(&id) == Service::WhatsApp;
-        let archivee = self.archives.iter().any(|c| c.id == id);
+        let svc = service_de(&id);
+        // Archiver : partout. Google et WhatsApp par leur pont ; les autres par
+        // les archives de Jasette. Seule exception : une conversation que
+        // Messenger ou Instagram ont eux-mêmes archivée (venue de leur dossier
+        // d'archives) ne se désarchive que dans leur app.
+        // Supprimer : Google, Messenger et Instagram (commande « delete »).
+        let archivee_service = self.archives.iter().any(|c| c.id == id);
+        let archivable = svc.archive_native() || !archivee_service;
+        let archivee = if svc.archive_native() { archivee_service } else { self.reglages.archivee_jasette(&id) };
+        let supprimable = svc.supprimable();
         let item = |cle: &'static str, ic: &'static str, texte: String, couleur: Hsla, actif: bool| {
             div()
                 .id(cle)
@@ -6499,27 +6952,20 @@ impl Jasette {
                 .when(archivable, |d| {
                     d.on_click(cx.listener(move |this, _, _, cx| {
                         this.menu_conv = false;
-                        this.commande(json!({"cmd": "archive", "conv": id_a, "archived": !archivee}));
-                        // Tout de suite à l'écran ; le téléphone confirmera.
-                        if archivee {
-                            if let Some(i) = this.archives.iter().position(|c| c.id == id_a) {
-                                let mut c = this.archives.remove(i);
-                                c.archived = false;
-                                this.convs.push(c);
-                                this.convs.sort_by(|a, b| b.time.cmp(&a.time));
-                            }
-                        } else if let Some(i) = this.convs.iter().position(|c| c.id == id_a) {
-                            let mut c = this.convs.remove(i);
-                            c.archived = true;
-                            this.archives.insert(0, c);
-                            this.choisie = None;
-                        }
+                        // Tout de suite à l'écran ; le téléphone (ou le serveur) confirmera.
+                        this.archiver(id_a.clone(), !archivee);
                         cx.notify();
                     }))
                 }),
             );
-        if !google {
-            let note = if archivable { t("Supprimer : bientôt pour WhatsApp.") } else { t("Archiver et supprimer : bientôt pour Messenger.") };
+        let note = if !archivable {
+            Some(t("Archivée par le service : désarchive-la dans son app."))
+        } else if !supprimable {
+            Some(t("Supprimer : pas encore pour ce service."))
+        } else {
+            None
+        };
+        if let Some(note) = note {
             menu = menu.child(div().px(px(12.)).py(px(6.)).text_size(px(12.)).text_color(th().texte_pale).child(note));
         }
         let id_s = id.clone();
@@ -6529,18 +6975,18 @@ impl Jasette {
                 "trash",
                 if self.confirmer_suppression { t("Confirmer la suppression") } else { t("Supprimer la conversation") }.into(),
                 th().danger,
-                google,
+                supprimable,
             )
             .when(self.confirmer_suppression, |d| d.bg(alpha(th().danger, 0.12)))
-            .when(google, |d| {
+            .when(supprimable, |d| {
                 d.on_click(cx.listener(move |this, _, _, cx| {
                     if !this.confirmer_suppression {
                         this.confirmer_suppression = true;
                     } else {
+                        // Retirée tout de suite ; Messenger et Instagram confirment par
+                        // « deleted », ou disent leur erreur (elle réapparaît alors).
                         this.commande(json!({"cmd": "delete", "conv": id_s}));
-                        this.convs.retain(|c| c.id != id_s);
-                        this.archives.retain(|c| c.id != id_s);
-                        this.messages.remove(&id_s);
+                        this.retirer_conversation(&id_s);
                         this.choisie = None;
                         this.menu_conv = false;
                         this.confirmer_suppression = false;
@@ -6552,6 +6998,85 @@ impl Jasette {
     }
 
     // ---- Dessin : les réglages ----
+
+    /// Apparence : le choix de la grille du Head, une tuile par grille, avec
+    /// son aperçu (un point par avatar, à l'échelle de la liste).
+    fn choix_grille_head(&self, cx: &mut Context<Self>) -> Div {
+        let mut tuiles = div().flex().flex_row().flex_wrap().gap(px(8.));
+        for (i, cols) in COLONNES_HEAD.into_iter().enumerate() {
+            let choisie = self.reglages.colonnes_head() == cols;
+            // L'aperçu : trois rangées de points, à l'échelle de la liste (ramenée à 76 px).
+            let rangees = 3;
+            let m = MesuresHead::pour(cols);
+            let echelle = 76. / HEAD_LARGEUR;
+            let cellule = (m.cellule_w * echelle).max(4.);
+            let point = (m.avatar * echelle).max(3.).round();
+            let mut apercu = div().flex().flex_col().gap(px(3.));
+            for _ in 0..rangees {
+                let mut rangee = div().flex().flex_row();
+                for _ in 0..cols {
+                    rangee = rangee.child(
+                        div()
+                            .w(px(cellule))
+                            .flex()
+                            .justify_center()
+                            .child(div().size(px(point)).rounded(rayon(999.)).bg(alpha(th().accent, 0.85))),
+                    );
+                }
+                apercu = apercu.child(rangee);
+            }
+            let titre = format!("{cols} {}", t("colonnes"));
+            let detail = format!("{} {} px", t("avatars de"), m.avatar.round());
+            let v = cols.to_string();
+            tuiles = tuiles.child(
+                div()
+                    .id(("grille-head", i))
+                    .w(px(104.))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(6.))
+                    .p(px(8.))
+                    .rounded(rayon(14.))
+                    .cursor_pointer()
+                    .border_2()
+                    .border_color(if choisie { th().accent } else { hsla(0., 0., 0., 0.) })
+                    .hover(|s| s.bg(th().survol))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.reglages.head_grille = v.clone();
+                        this.reglages.garder();
+                        cx.notify();
+                    }))
+                    .child(
+                        div()
+                            .w(px(84.))
+                            .h(px(52.))
+                            .rounded(rayon(8.))
+                            .border_1()
+                            .border_color(th().trait_fin)
+                            .bg(th().liste)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(apercu),
+                    )
+                    .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(titre))
+                    .child(div().text_size(px(11.)).text_color(th().texte_pale).child(detail)),
+            );
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(10.))
+            .p(px(14.))
+            .child(tuiles)
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(th().texte_pale)
+                    .child(t("Tous les Head sont montrés : la grille prend autant de rangées qu'il faut.")),
+            )
+    }
 
     fn reglages_vue(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let section = self.section.unwrap_or(Section::Comptes);
@@ -6892,6 +7417,16 @@ impl Jasette {
                                 apercu_ega,
                             )),
                     )
+                    .child(
+                        div()
+                            .pt(px(22.))
+                            .pb(px(12.))
+                            .text_size(px(15.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(th().texte)
+                            .child(t("Grille du Head")),
+                    )
+                    .child(groupe().child(self.choix_grille_head(cx)))
                     .child(div().h(px(14.)))
                     .child(groupe().child(ligne_interrupteur(
                         "a-heures",
@@ -7089,7 +7624,8 @@ impl Jasette {
                     .h_full()
                     .when(th().marge_fil > 0., |d| d.h_auto().m(px(th().marge_fil)))
                     .overflow_hidden()
-                    .child(contenu),
+                    // Les sections longues (Apparence…) défilent.
+                    .child(div().id("reglages-defil").size_full().overflow_y_scroll().child(contenu)),
             )
     }
 
@@ -8853,6 +9389,11 @@ fn taille(octets: i64) -> String {
     }
 }
 
+/// L'heure actuelle, en millisecondes (comme `time` des messages).
+fn maintenant_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
 fn local(ms: i64) -> Option<chrono::DateTime<chrono::Local>> {
     chrono::DateTime::from_timestamp_millis(ms).map(|d| d.with_timezone(&chrono::Local))
 }
@@ -9071,7 +9612,14 @@ fn t(fr: &'static str) -> &'static str {
         "Désarchiver" => "Unarchive",
         "Supprimer la conversation" => "Delete conversation",
         "Confirmer la suppression" => "Confirm delete",
-        "Archiver et supprimer : bientôt pour Messenger." => "Archive and delete: coming soon for Messenger.",
+        "Archivée par le service : désarchive-la dans son app." => "Archived by the service: unarchive it in its app.",
+        "Grille du Head" => "Head grid",
+        "chargement…" => "loading…",
+        "déconnecté" => "disconnected",
+        "n'est pas connecté." => "is not connected.",
+        "colonnes" => "columns",
+        "avatars de" => "avatars",
+        "Tous les Head sont montrés : la grille prend autant de rangées qu'il faut." => "Every Head is shown: the grid takes as many rows as needed.",
         "Nom ou numéro de téléphone" => "Name or phone number",
         "Nouvelle conversation Messenger" => "New Messenger chat",
         "Nouveau message par Google Messages" => "New message via Google Messages",
@@ -9096,7 +9644,7 @@ fn t(fr: &'static str) -> &'static str {
         "Nouvelle conversation X" => "New X chat",
         "Nouveau message par WhatsApp" => "New message via WhatsApp",
         "Nouveau message par Signal" => "New message via Signal",
-        "Supprimer : bientôt pour WhatsApp." => "Delete: coming soon for WhatsApp.",
+        "Supprimer : pas encore pour ce service." => "Delete: not yet for this service.",
         "Connectez-vous dans la fenêtre x.com…" => "Sign in in the x.com window…",
         "Association en cours…" => "Pairing…",
         "Tous vos services sont déjà connectés." => "All your services are already connected.",
@@ -9241,6 +9789,17 @@ mod essais_reglages {
     use super::*;
 
     /// charger/garder dans un dossier de .cache (JASETTE_DATA), jamais dans les vraies données.
+    #[test]
+    fn colonnes_du_head() {
+        let c = |v: &str| Reglages { head_grille: v.into(), ..Reglages::default() }.colonnes_head();
+        assert_eq!(c(""), 4);
+        assert_eq!(c("5"), 5);
+        assert_eq!(c("8x3"), 6);
+        assert_eq!(c("4x2"), 4);
+        assert_eq!(c("2"), 3);
+        assert_eq!(c("n'importe"), 4);
+    }
+
     #[test]
     fn reglages_robustes() {
         let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".cache/essai-reglages");

@@ -920,21 +920,23 @@ impl Drop for PontDistant {
 }
 
 // ---------------------------------------------------------------------------
-// Les marques (Head, favoris, épinglées), gardées par le serveur
+// Les marques (Head, favoris, épinglées, archives), gardées par le serveur
 // ---------------------------------------------------------------------------
 
-/// Les trois listes ordonnées d'ids de conversations (PROTOCOLE.md, §5.5).
+/// Les quatre listes ordonnées d'ids de conversations (PROTOCOLE.md, §5.5).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Marques {
     pub head: Vec<String>,
     /// La vue de l'étoile (`etoiles` dans les réglages du bureau).
     pub favoris: Vec<String>,
     pub epingles: Vec<String>,
+    /// L'archivage propre à Jasette (Messenger, Instagram, Signal, X).
+    pub archives: Vec<String>,
 }
 
 impl Marques {
     pub fn vide(&self) -> bool {
-        self.head.is_empty() && self.favoris.is_empty() && self.epingles.is_empty()
+        self.head.is_empty() && self.favoris.is_empty() && self.epingles.is_empty() && self.archives.is_empty()
     }
 
     /// Chaque liste de `dabord`, dans son ordre, puis les ids de `ensuite` qui n'y sont pas.
@@ -952,6 +954,7 @@ impl Marques {
             head: unir(&dabord.head, &ensuite.head),
             favoris: unir(&dabord.favoris, &ensuite.favoris),
             epingles: unir(&dabord.epingles, &ensuite.epingles),
+            archives: unir(&dabord.archives, &ensuite.archives),
         }
     }
 
@@ -962,6 +965,7 @@ impl Marques {
             head: garder(&self.head, &autre.head),
             favoris: garder(&self.favoris, &autre.favoris),
             epingles: garder(&self.epingles, &autre.epingles),
+            archives: garder(&self.archives, &autre.archives),
         }
     }
 }
@@ -970,7 +974,9 @@ impl Marques {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NouvelleMarques {
     /// Une trame `{"marques":{…}}` : rejeu, diffusion ou réponse à notre envoi.
-    Recues { marques: Marques, version: u64, id: Option<u64>, refus: Option<String> },
+    /// `avec_archives` : faux pour un serveur d'avant `archives` (champ absent) ;
+    /// le client garde alors ses archives pour lui seul.
+    Recues { marques: Marques, version: u64, id: Option<u64>, refus: Option<String>, avec_archives: bool },
     /// La connexion est tombée : rien n'est plus en vol.
     Coupure,
 }
@@ -985,10 +991,16 @@ impl NouvelleMarques {
             }
         };
         Some(Self::Recues {
-            marques: Marques { head: liste("head")?, favoris: liste("favoris")?, epingles: liste("epingles")? },
+            marques: Marques {
+                head: liste("head")?,
+                favoris: liste("favoris")?,
+                epingles: liste("epingles")?,
+                archives: liste("archives")?,
+            },
             version: v.get("version")?.as_u64()?,
             id: v.get("id").and_then(Value::as_u64),
             refus: v.get("refus").and_then(Value::as_str).map(str::to_string),
+            avec_archives: v.get("archives").is_some_and(Value::is_array),
         })
     }
 }
@@ -1044,6 +1056,7 @@ impl SuiviMarques {
             "head": c.listes.head,
             "favoris": c.listes.favoris,
             "epingles": c.listes.epingles,
+            "archives": c.listes.archives,
             "version": c.version,
             "id": id,
         }}))
@@ -1057,7 +1070,14 @@ impl SuiviMarques {
                 self.reinitialiser();
                 return None;
             }
-            NouvelleMarques::Recues { marques, version, id, refus } => (marques, version, id, refus),
+            NouvelleMarques::Recues { marques, version, id, refus, avec_archives } => {
+                // Un serveur d'avant `archives` : nos archives restent les nôtres, jamais vidées.
+                let mut marques = marques;
+                if !avec_archives {
+                    marques.archives = c.listes.archives.clone();
+                }
+                (marques, version, id, refus)
+            }
         };
         self.synchro = true;
         let notre = matches!((&self.en_vol, id), (Some((e, _)), Some(i)) if *e == i);
@@ -1296,11 +1316,11 @@ mod essais {
 
     fn m(head: &[&str], favoris: &[&str], epingles: &[&str]) -> Marques {
         let v = |l: &[&str]| l.iter().map(|x| x.to_string()).collect();
-        Marques { head: v(head), favoris: v(favoris), epingles: v(epingles) }
+        Marques { head: v(head), favoris: v(favoris), epingles: v(epingles), archives: Vec::new() }
     }
 
     fn recues(marques: Marques, version: u64, id: Option<u64>) -> NouvelleMarques {
-        NouvelleMarques::Recues { marques, version, id, refus: None }
+        NouvelleMarques::Recues { marques, version, id, refus: None, avec_archives: true }
     }
 
     fn id_de(t: &Value) -> u64 {
@@ -1361,6 +1381,28 @@ mod essais {
     }
 
     #[test]
+    fn marques_archives() {
+        // Lues et envoyées comme les autres listes.
+        let n = NouvelleMarques::lire(&json!({"head": [], "favoris": [], "epingles": [], "archives": ["m:1"], "version": 3}));
+        assert!(matches!(&n, Some(NouvelleMarques::Recues { marques, avec_archives: true, .. }) if marques.archives == ["m:1"]));
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { listes: m(&[], &[], &[]), version: 3, a_envoyer: false };
+        assert!(s.recu(n.unwrap(), &mut c).is_none());
+        assert_eq!(c.listes.archives, ["m:1"]);
+        c.listes.archives.push("s:2".into());
+        let t = s.changement(&mut c).expect("envoi");
+        assert_eq!(t["marques"]["archives"], json!(["m:1", "s:2"]));
+        // Un serveur d'avant `archives` (champ absent) : les nôtres restent, sans rien renvoyer.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { listes: m(&[], &["a"], &[]), version: 3, a_envoyer: false };
+        c.listes.archives = vec!["m:1".into()];
+        let vieux = NouvelleMarques::lire(&json!({"head": [], "favoris": ["b"], "epingles": [], "version": 4})).unwrap();
+        assert!(s.recu(vieux, &mut c).is_none());
+        assert_eq!(c.listes.favoris, ["b"]);
+        assert_eq!(c.listes.archives, ["m:1"]);
+    }
+
+    #[test]
     fn marques_hors_ligne() {
         // Changé pendant une coupure, personne d'autre : la copie locale part telle quelle.
         let mut s = SuiviMarques::default();
@@ -1377,7 +1419,13 @@ mod essais {
         assert_eq!(t["marques"]["favoris"], json!(["a", "y", "x"]));
         // Refus du serveur : union avec les siennes.
         let id = id_de(&t);
-        let r = NouvelleMarques::Recues { marques: m(&[], &["z"], &[]), version: 9, id: Some(id), refus: Some("non".into()) };
+        let r = NouvelleMarques::Recues {
+            marques: m(&[], &["z"], &[]),
+            version: 9,
+            id: Some(id),
+            refus: Some("non".into()),
+            avec_archives: true,
+        };
         let t = s.recu(r, &mut c).expect("renvoi");
         assert_eq!(t["marques"]["favoris"], json!(["z", "a", "y", "x"]));
         assert_eq!(t["marques"]["version"], 9);
@@ -1524,7 +1572,7 @@ mod essais {
         let reponses = c.pont.recevoir_marques();
         println!("refus : {reponses:?}");
         assert!(reponses.iter().any(|n| matches!(n,
-            NouvelleMarques::Recues { id: Some(999), refus: Some(_), version: 4, marques } if *marques == attendu)));
+            NouvelleMarques::Recues { id: Some(999), refus: Some(_), version: 4, marques, .. } if *marques == attendu)));
         assert_eq!(marques_du_serveur()["version"], 4);
         assert_eq!(marques_du_serveur()["favoris"], json!(["a2", "a1", "m:a4", "i:a5", "b2"]));
         // Une version périmée non vide : union, rien ne se perd.
