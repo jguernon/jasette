@@ -532,7 +532,7 @@ fun MenuConversation(
             )
         }
         HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = P.traitFin)
-        Item(t("Supprimer la conversation"), Icons.Filled.Delete, couleur = P.danger, actif = supprimable) { confirmer = true }
+        Item(t("Supprimer"), Icons.Filled.Delete, couleur = P.danger, actif = supprimable) { confirmer = true }
         HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = P.traitFin)
         Item(t("Rechercher"), Icons.Filled.Search, action = rechercher)
     }
