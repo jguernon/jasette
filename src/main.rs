@@ -816,6 +816,8 @@ struct Jasette {
     echecs: HashSet<String>,
     ouvrir_apres: HashSet<String>,
     avatars: HashMap<String, PathBuf>,
+    /// Les membres d'un groupe sans photo (nom, couleur, photo), pour la mosaïque.
+    mosaiques: HashMap<String, Vec<(String, String, Option<PathBuf>)>>,
     // Réglages
     reglages: Reglages,
     section: Option<Section>,
@@ -1028,6 +1030,7 @@ impl Jasette {
             echecs: HashSet::new(),
             ouvrir_apres: HashSet::new(),
             avatars: HashMap::new(),
+            mosaiques: HashMap::new(),
             reglages: Reglages::charger(),
             section: None,
             ajout_compte: false,
@@ -1237,6 +1240,23 @@ impl Jasette {
                     if v.get("open").and_then(Value::as_bool) == Some(true) {
                         self.vue = Vue::Tout;
                         self.choisir(id);
+                    }
+                }
+            }
+            "avatars_groupe" => {
+                if let (Some(conv), Some(membres)) =
+                    (v.get("conv").and_then(Value::as_str), v.get("members").and_then(Value::as_array))
+                {
+                    let liste = membres
+                        .iter()
+                        .map(|m| {
+                            let champ = |k: &str| m.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
+                            let chemin = champ("path");
+                            (champ("name"), champ("color"), (!chemin.is_empty()).then(|| PathBuf::from(chemin)))
+                        })
+                        .collect::<Vec<_>>();
+                    if !liste.is_empty() {
+                        self.mosaiques.insert(conv.to_string(), liste);
                     }
                 }
             }
@@ -1527,6 +1547,19 @@ impl Jasette {
             }
             Err(e) => self.erreur = Some(format!("Lecture : {e}")),
         }
+    }
+
+    /// L'avatar d'une conversation : sa photo, sinon (groupe) la mosaïque de
+    /// ses membres, sinon les initiales.
+    fn avatar_conv(&self, conv: &Conv, nom: &str, taille: f32) -> AnyElement {
+        let photo = self.avatars.get(&conv.id);
+        if conv.group
+            && photo.is_none()
+            && let Some(membres) = self.mosaiques.get(&conv.id)
+        {
+            return mosaique(membres, taille);
+        }
+        avatar(nom, &conv.color, conv.group, photo, taille)
     }
 
     fn photo_moi(&self) -> Option<PathBuf> {
@@ -1849,7 +1882,7 @@ impl Jasette {
                     .child(icone("message-circle-plus", 20., ton(th().texte_fort, th().icone))),
             )
             .child(div().w(px(32.)).h(px(1.)).my(px(4.)).bg(ton(blanc(0.8), c(0x38383a))))
-            .child(
+            .when(self.etat != Etat::NonAssocie, |d| d.child(
                 Self::bouton_rail("r-gm", !en_reglages && self.vue == Vue::Service(Service::GoogleMessages))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.section = None;
@@ -1859,15 +1892,16 @@ impl Jasette {
                     .child(logo(Service::GoogleMessages, 32.))
                     .when(gm_probleme, |d| d.child(pastille_alerte()))
                     .when(!gm_probleme && non_lus > 0, |d| d.child(pastille_nombre(non_lus, ton(c(DANGER), th().accent)))),
-            )
+            ))
+            // Les services non connectés n'ont pas d'icône : « ••• » mène à l'ajout de compte.
             .child(
-                Self::bouton_rail("r-messenger", false)
-                    .opacity(0.45)
+                Self::bouton_rail("r-plus-services", false)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.section = Some(Section::Comptes);
+                        this.ajout_compte = true;
                         cx.notify();
                     }))
-                    .child(logo(Service::Messenger, 32.)),
+                    .child(icone("ellipsis", 22., ton(th().texte_fort, th().icone))),
             )
             .child(div().flex_1())
             .child(
@@ -2126,7 +2160,7 @@ impl Jasette {
                             .relative()
                             .flex_none()
                             .py(px(10.))
-                            .child(avatar(&nom, &conv.color, conv.group, self.avatars.get(&conv.id), 50.))
+                            .child(self.avatar_conv(conv, &nom, 50.))
                             .when(badge, |d| {
                                 d.child(div().absolute().right(px(-3.)).bottom(px(7.)).child(logo(Service::GoogleMessages, 20.)))
                             }),
@@ -2985,7 +3019,7 @@ impl Jasette {
                             }
                         };
                         d.child(badge_service(
-                            div().relative().child(avatar(&nom, &conv.color, conv.group, self.avatars.get(&conv.id), 38.)),
+                            div().relative().child(self.avatar_conv(&conv, &nom, 38.)),
                         ))
                         .child(
                             div()
@@ -3874,6 +3908,38 @@ fn halo(couleur: u32, opacite: f32, x: f32, y: f32, taille: f32) -> impl IntoEle
 
 /// Le rond d'une conversation : la photo du contact, sinon ses initiales sur
 /// la couleur que Google lui donne.
+/// Les photos des membres d'un groupe assemblées dans le rond de l'avatar :
+/// deux en diagonale, trois en triangle, quatre en grille.
+fn mosaique(membres: &[(String, String, Option<PathBuf>)], taille: f32) -> AnyElement {
+    let n = membres.len().min(4);
+    let (d, places): (f32, Vec<(f32, f32)>) = match n {
+        1 => (taille, vec![(0., 0.)]),
+        2 => {
+            let d = taille * 0.66;
+            (d, vec![(0., 0.), (taille - d, taille - d)])
+        }
+        3 => {
+            let d = taille * 0.54;
+            (d, vec![((taille - d) / 2., 0.), (0., taille - d), (taille - d, taille - d)])
+        }
+        _ => {
+            let d = taille * 0.5;
+            (d, vec![(0., 0.), (taille - d, 0.), (0., taille - d), (taille - d, taille - d)])
+        }
+    };
+    let mut boite = div().relative().flex_none().size(px(taille));
+    for ((nom, couleur, photo), (x, y)) in membres.iter().zip(places) {
+        boite = boite.child(
+            div()
+                .absolute()
+                .left(px(x))
+                .top(px(y))
+                .child(avatar(nom, couleur, false, photo.as_ref(), d)),
+        );
+    }
+    boite.into_any_element()
+}
+
 fn avatar(nom: &str, couleur: &str, groupe: bool, photo: Option<&PathBuf>, taille: f32) -> AnyElement {
     if let Some(photo) = photo {
         return div()

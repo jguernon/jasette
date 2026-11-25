@@ -318,7 +318,6 @@ func (p *Pont) dropCookies() {
 	s := p.sess
 	p.mu.Unlock()
 	if s != nil {
-		s.Cookies = nil
 		b := *s
 		b.Cookies = &cookies.Cookies{Platform: s.Platform}
 		saveSession(&b)
