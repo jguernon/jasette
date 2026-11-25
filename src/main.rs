@@ -1139,6 +1139,8 @@ struct Jasette {
     accueil_autonome: bool,
     /// « Utiliser mon serveur Jasette » choisi, jumelage pas encore fait.
     choix_client: bool,
+    /// La dernière valeur copiée (pour afficher « Copié »).
+    copie: Option<String>,
     code_jumelage: Option<(String, String)>,
     appareils: Vec<String>,
     verif_client: Option<(String, String, pont::Verification)>,
@@ -1420,6 +1422,26 @@ fn regler_demarrage_auto(actif: bool) -> Result<(), String> {
 }
 
 /// Le nom de cette machine (pour le serveur : le nom de l'appareil jumelé).
+/// Les adresses où joindre ce serveur : le nom de la machine, puis ses
+/// adresses IPv4 (réseau local, Tailscale). Lues une fois.
+fn adresses_serveur() -> Vec<String> {
+    static ADRESSES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    ADRESSES
+        .get_or_init(|| {
+            let mut v = vec![nom_machine()];
+            if let Ok(sortie) = std::process::Command::new("hostname").arg("-I").output() {
+                for a in String::from_utf8_lossy(&sortie.stdout).split_whitespace() {
+                    // IPv4 seulement, sans les ponts Docker.
+                    if a.contains('.') && !a.starts_with("172.17.") && !a.starts_with("127.") {
+                        v.push(a.to_string());
+                    }
+                }
+            }
+            v
+        })
+        .clone()
+}
+
 fn nom_machine() -> String {
     std::fs::read_to_string("/etc/hostname").map(|s| s.trim().to_string()).ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "Jasette".into())
 }
@@ -1786,6 +1808,7 @@ impl Jasette {
             accueil_google: false,
             accueil_autonome: false,
             choix_client: false,
+            copie: None,
             code_jumelage: None,
             appareils: Vec::new(),
             verif_client: None,
@@ -5668,15 +5691,60 @@ impl Jasette {
         match mode {
             "serveur" => {
                 let adresse = self.reglages.serveur.as_ref().map(|c| c.adresse.clone()).unwrap_or_default();
-                let mut jumeler = div().flex().flex_col().gap(px(10.)).p(px(16.)).child(
+                // Chaque adresse avec un bouton Copier (le texte de GPUI ne se sélectionne pas).
+                let copie = self.copie.clone();
+                let ligne_copiable = |id: String, valeur: String, taille: f32, gras: bool| {
+                    let fait = copie.as_deref() == Some(valeur.as_str());
+                    let v = valeur.clone();
                     div()
-                        .text_size(px(13.))
-                        .text_color(th().texte)
-                        .child(format!("{} {} · {}", t("Adresse pour les autres appareils :"), nom_machine(), pont::PORT_PAR_DEFAUT)),
-                );
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(
+                            div()
+                                .text_size(px(taille))
+                                .when(gras, |d| d.font_weight(FontWeight::BOLD))
+                                .text_color(th().texte_fort)
+                                .child(valeur),
+                        )
+                        .child(
+                            div()
+                                .id(gpui::ElementId::Name(id.into()))
+                                .flex()
+                                .items_center()
+                                .gap(px(4.))
+                                .px(px(8.))
+                                .py(px(3.))
+                                .rounded(rayon(8.))
+                                .cursor_pointer()
+                                .hover(|s| s.bg(th().survol))
+                                .child(icone(if fait { "check" } else { "copy" }, 14., th().accent))
+                                .child(div().text_size(px(12.)).text_color(th().accent).child(if fait { t("Copié") } else { t("Copier") }))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(v.clone()));
+                                    this.copie = Some(v.clone());
+                                    cx.notify();
+                                })),
+                        )
+                };
+                let mut jumeler = div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .p(px(16.))
+                    .child(div().text_size(px(13.)).text_color(th().texte).child(t("Adresse pour les autres appareils :")));
+                for (i, a) in adresses_serveur().into_iter().enumerate() {
+                    jumeler = jumeler.child(ligne_copiable(format!("copier-adr-{i}"), a, 15., false));
+                }
+                jumeler = jumeler.child(div().text_size(px(12.)).text_color(th().texte_pale).child(format!(
+                    "{} {}",
+                    t("Port (déjà rempli par défaut) :"),
+                    pont::PORT_PAR_DEFAUT
+                )));
                 if let Some((code, verif)) = &self.code_jumelage {
                     jumeler = jumeler
-                        .child(div().text_size(px(28.)).font_weight(FontWeight::BOLD).text_color(th().texte_fort).child(code.clone()))
+                        .child(ligne_copiable("copier-code".into(), code.clone(), 28., true))
                         .child(div().text_size(px(13.)).text_color(th().texte).child(format!(
                             "{} {verif}",
                             t("L'autre appareil doit afficher ce code de vérification :")
@@ -6807,6 +6875,9 @@ fn t(fr: &'static str) -> &'static str {
         "Code de jumelage (6 chiffres)" => "Pairing code (6 digits)",
         "Ne plus l'utiliser" => "Stop using it",
         "Les services se connectent et se déconnectent sur le serveur." => "Services are connected and disconnected on the server.",
+        "Copier" => "Copy",
+        "Copié" => "Copied",
+        "Port (déjà rempli par défaut) :" => "Port (filled in by default):",
         "Créé par" => "Created by",
         "Archiver" => "Archive",
         "Épingler en haut" => "Pin to top",
