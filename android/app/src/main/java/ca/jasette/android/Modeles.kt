@@ -9,8 +9,9 @@ import org.json.JSONObject
  * Instagram, « w: » pour WhatsApp, « s: » pour Signal, « x: » pour X. Le
  * préfixe dit aussi à quel pont envoyer une commande.
  *
- * WhatsApp, Signal et X n'existent qu'en mode client : leurs ponts tournent
- * sur le serveur Jasette, jamais sur le téléphone (voir [serveurSeulement]).
+ * WhatsApp, Signal et X : leurs ponts tournent sur le serveur Jasette, ou
+ * sur le téléphone (mode « Sur cet appareil ») quand l'APK les embarque
+ * (voir [serveurSeulement] et Depot.services).
  */
 enum class Service(val titre: String, val court: String, val prefixe: String, val cle: String) {
     GOOGLE("Google Messages", "Google Messages", "", "google"),
@@ -30,7 +31,10 @@ enum class Service(val titre: String, val court: String, val prefixe: String, va
      */
     val archiveNatif get() = this == GOOGLE || this == WHATSAPP
 
-    /** Servi seulement par le serveur Jasette (aucun pont embarqué sur le téléphone). */
+    /**
+     * WhatsApp, Signal ou X : servi par le serveur Jasette, ou sur cet appareil
+     * seulement si son pont a été compilé dans l'APK (sinon, service absent).
+     */
     val serveurSeulement get() = this == WHATSAPP || this == SIGNAL || this == X
 
     /** « Nouveau message » interroge-t-il ce pont (commande `search`) ? */

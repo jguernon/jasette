@@ -307,4 +307,40 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Aussi pour Messenger et Instagram (par le nom)" to "Also for Messenger and Instagram (by name)",
     "Seulement quand un seul contact porte exactement le nom de la conversation." to
         "Only when exactly one contact has the conversation's exact name.",
+    // Réglages → Apparence → Grille du Head.
+    "Grille du Head" to "Head grid",
+    "Automatique : autant d'avatars que la largeur en permet. Sinon, colonnes × rangées ; les avatars rapetissent au besoin, et ceux en trop sont cachés (pas retirés du Head)." to
+        "Automatic: as many avatars as the width allows. Otherwise, columns × rows; avatars shrink when needed, and extra ones are hidden (not removed from the Head).",
+    // WhatsApp, Signal et X sur cet appareil (Association.kt, Connexion.kt).
+    "Avec un numéro de téléphone" to "With a phone number",
+    "Code QR" to "QR code",
+    "Lier avec un code QR" to "Link with a QR code",
+    "Lier Signal" to "Link Signal",
+    "Associer WhatsApp" to "Link WhatsApp",
+    "Associer plutôt avec un numéro de téléphone" to "Link with a phone number instead",
+    "Afficher plutôt un code QR (pour un autre appareil)" to "Show a QR code instead (for another device)",
+    "Scanne-le avec un autre téléphone qui a Signal (Paramètres → Appareils liés). Les anciens messages ne sont pas récupérés." to
+        "Scan it with another phone that has Signal (Settings → Linked devices). Older messages are not retrieved.",
+    "Scanne-le avec le téléphone qui a WhatsApp : Appareils connectés → Connecter un appareil." to
+        "Scan it with the phone that has WhatsApp: Linked devices → Link a device.",
+    "Le code se renouvelle tout seul." to "The code renews itself.",
+    "Associer avec un numéro de téléphone" to "Link with phone number",
+    "Entre le numéro du compte WhatsApp, avec l'indicatif du pays. WhatsApp te donnera un code à taper sur ce téléphone-là." to
+        "Enter the WhatsApp account's number, with the country code. WhatsApp will give you a code to type on that phone.",
+    "Numéro de téléphone" to "Phone number",
+    "Obtenir le code" to "Get the code",
+    "Réessayer" to "Try again",
+    "Copier" to "Copy",
+    "Dans WhatsApp : Appareils connectés → Connecter un appareil → Associer avec un numéro de téléphone" to
+        "In WhatsApp: Linked devices → Link a device → Link with phone number instead",
+    "Puis tape ce code. Le code expire après quelques minutes." to "Then type this code. It expires after a few minutes.",
+    "Changer de numéro" to "Change number",
+    "Connexion à X" to "Sign in to X",
+    "Code d'accès X Chat" to "X Chat passcode",
+    "X chiffre tes messages privés. Pour que Jasette puisse les lire, entre le code d'accès (4 chiffres) choisi dans X Chat. Jasette ne le garde pas." to
+        "X encrypts your direct messages. For Jasette to read them, enter the 4-digit passcode you chose in X Chat. Jasette does not keep it.",
+    "X verrouille X Chat après quelques codes faux." to "X locks X Chat after a few wrong codes.",
+    "Code d'accès" to "Passcode",
+    "Pas encore de code ? Active d'abord X Chat dans l'application X ou sur x.com/messages." to
+        "No passcode yet? First turn on X Chat in the X app or at x.com/messages.",
 )

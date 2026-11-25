@@ -71,6 +71,31 @@ object Marques {
         prefs?.edit()?.putBoolean("deux_volets", oui)?.apply()
     }
 
+    /**
+     * La grille du Head : « auto » (le défaut, autant d'avatars de 80 dp que la
+     * largeur en permet) ou « CxR » (colonnes × rangées, ex. « 6x2 »). Propre à
+     * l'appareil : jamais envoyé au serveur (pas dans [listes]).
+     */
+    var headGrille by mutableStateOf("auto")
+        private set
+
+    /** Les choix offerts dans Réglages → Apparence (téléphone, puis Fold ouvert). */
+    val GRILLES = listOf("auto", "3x2", "4x1", "4x2", "4x3", "5x2", "5x3", "6x2", "6x3", "7x2", "8x2", "8x3")
+
+    /** (colonnes, rangées) d'une grille « CxR », ou null pour « auto ». */
+    fun dimensions(grille: String): Pair<Int, Int>? {
+        val m = Regex("^(\\d+)x(\\d+)$").find(grille) ?: return null
+        val c = m.groupValues[1].toInt()
+        val r = m.groupValues[2].toInt()
+        return if (c in 1..12 && r in 1..6) c to r else null
+    }
+
+    /** commit() : écrit tout de suite, comme les listes (voir [garder]). */
+    fun choisirHeadGrille(grille: String) {
+        headGrille = if (dimensions(grille) != null) grille else "auto"
+        prefs?.edit()?.putString("head_grille", headGrille)?.commit()
+    }
+
     /** Mon avatar : « google », « messenger », « instagram », « fichier », « initiale » ou vide (pas encore choisi). */
     var avatarSource by mutableStateOf("")
         private set
@@ -101,6 +126,7 @@ object Marques {
         avatarFichier = p.getString("avatar_fichier", null)
         deuxVolets = p.getBoolean("deux_volets", true)
         heureChaqueMessage = p.getBoolean("heure_chaque_message", false)
+        headGrille = p.getString("head_grille", "auto")?.takeIf { dimensions(it) != null } ?: "auto"
         head.clear()
         head.addAll(lire(p, "head"))
         favoris.clear()

@@ -96,8 +96,9 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
                 Depot.emoji?.let { e -> BandeauEmoji(e) }
                 if (Depot.besoinNip) Nip()
             } else {
-                // Sur cet appareil : seulement les ponts embarqués (pas WhatsApp, Signal ni X).
-                for (s in Service.LOCAUX) {
+                // Sur cet appareil : les ponts embarqués dans l'APK (WhatsApp, Signal
+                // et X seulement si leur pont a été compilé, voir Depot.services).
+                for (s in Depot.services) {
                     Carte(s) {
                         val etat = Depot.etat(s)
                         if (etat.associe || etat == Etat.ASSOCIATION) {
@@ -110,7 +111,14 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
                                     OutlinedButton(shape = formeBouton, onClick = { connecter(s, "facebook") }) { Text(t("Avec Facebook")) }
                                 }
                                 Service.INSTAGRAM -> BoutonAccent(t("Se connecter")) { connecter(s, "instagram") }
-                                else -> {}
+                                // WhatsApp : par numéro de téléphone (défaut) ou code QR (Association.kt).
+                                Service.WHATSAPP -> {
+                                    BoutonAccent(t("Avec un numéro de téléphone")) { connecter(s, "telephone") }
+                                    OutlinedButton(shape = formeBouton, onClick = { connecter(s, "qr") }) { Text(t("Code QR")) }
+                                }
+                                Service.SIGNAL -> BoutonAccent(t("Lier avec un code QR")) { connecter(s, "qr") }
+                                // X : la fenêtre web de x.com, puis le code X Chat (Connexion.kt).
+                                Service.X -> BoutonAccent(t("Se connecter")) { connecter(s, "x") }
                             }
                         }
                     }
@@ -140,6 +148,7 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
             Spacer(Modifier.height(12.dp))
             Text(t("Apparence"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             ChoixTheme()
+            ChoixGrilleHead()
             ChoixHeures()
             ChoixContacts()
             ChoixTeinte()
@@ -780,6 +789,71 @@ private fun ChoixTeinte() {
             if (!actif) {
                 Text(t("Choisissez le thème Verre pour changer de teinte."), color = P.textePale, fontSize = 12.sp)
             }
+        }
+    }
+}
+
+/**
+ * Réglages → Apparence → Grille du Head : « Automatique » ou colonnes × rangées,
+ * chaque choix avec son petit schéma. Propre à cet appareil (Marques.headGrille).
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ChoixGrilleHead() {
+    val choisie = ca.jasette.android.Marques.headGrille
+    Text(t("Grille du Head"), color = P.textePale, fontSize = 13.sp)
+    Groupe {
+        FlowRow(
+            Modifier.fillMaxWidth().padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            for (g in ca.jasette.android.Marques.GRILLES) {
+                val actif = g == choisie
+                Column(
+                    Modifier.width(80.dp).clip(forme(12.dp))
+                        .border(if (actif) 2.dp else 1.dp, if (actif) P.accent else P.filet, forme(12.dp))
+                        .clickable { ca.jasette.android.Marques.choisirHeadGrille(g) }
+                        .padding(vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    SchemaGrille(g, if (actif) P.accent else P.textePale)
+                    Spacer(Modifier.height(6.dp))
+                    val dims = ca.jasette.android.Marques.dimensions(g)
+                    Text(
+                        if (dims == null) t("Automatique") else "${dims.first} × ${dims.second}",
+                        color = if (actif) P.texteFort else P.texte, fontSize = 12.sp,
+                        fontWeight = if (actif) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+        Text(
+            t("Automatique : autant d'avatars que la largeur en permet. Sinon, colonnes × rangées ; les avatars rapetissent au besoin, et ceux en trop sont cachés (pas retirés du Head)."),
+            color = P.textePale, fontSize = 12.sp,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+        )
+    }
+}
+
+/** Le schéma d'une grille : un rond par case ; « auto », des ronds qui débordent sur la ligne suivante. */
+@Composable
+private fun SchemaGrille(grille: String, couleur: androidx.compose.ui.graphics.Color) {
+    val dims = ca.jasette.android.Marques.dimensions(grille)
+    androidx.compose.foundation.Canvas(Modifier.size(width = 56.dp, height = 34.dp)) {
+        // « auto » : 5 ronds, puis 2 sur la rangée suivante (la grille s'adapte).
+        val (colonnes, rangees) = dims ?: (5 to 2)
+        val cote = minOf(size.width / colonnes, size.height / rangees)
+        val r = cote * 0.36f
+        val x0 = (size.width - cote * colonnes) / 2
+        val y0 = (size.height - cote * rangees) / 2
+        for (y in 0 until rangees) for (x in 0 until colonnes) {
+            if (dims == null && y == 1 && x >= 2) continue
+            drawCircle(
+                couleur, r,
+                androidx.compose.ui.geometry.Offset(x0 + cote * (x + 0.5f), y0 + cote * (y + 0.5f)),
+            )
         }
     }
 }

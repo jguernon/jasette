@@ -185,7 +185,12 @@ fun App(activite: Activity) {
                     serveur = { aller(Ecran.Serveur) },
                 )
                 Ecran.Serveur -> ServeurJasette(retour = ::retour)
-                is Ecran.Connexion -> Connexion(ecran.service, ecran.plateforme, fini = ::retour)
+                // WhatsApp et Signal : code QR ou code à taper ; les autres : la fenêtre web (X : puis son code).
+                is Ecran.Connexion -> if (ecran.service == Service.WHATSAPP || ecran.service == Service.SIGNAL) {
+                    Association(ecran.service, ecran.plateforme, fini = ::retour)
+                } else {
+                    Connexion(ecran.service, ecran.plateforme, fini = ::retour)
+                }
             }
         }
     }
@@ -730,7 +735,7 @@ private fun Accueil(serveur: () -> Unit, connecter: (Service, String) -> Unit) {
         } else {
             Text(t("Connecte un premier service :"), color = P.texte, fontSize = 14.sp)
             Groupe {
-                for ((i, s) in Service.LOCAUX.withIndex()) {
+                for ((i, s) in Depot.services.withIndex()) {
                     if (i > 0) androidx.compose.material3.HorizontalDivider(color = P.filet)
                     Row(
                         Modifier.fillMaxWidth().clickable { connecter(s, s.cle) }.padding(horizontal = 16.dp, vertical = 12.dp),

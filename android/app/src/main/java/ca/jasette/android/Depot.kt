@@ -86,6 +86,10 @@ object Depot {
         // Comme au bureau : dès qu'une photo existe, on la prend par défaut.
         if (Marques.avatarSource.isEmpty()) Marques.choisirAvatar(service.cle)
     }
+    /** WhatsApp et Signal, pendant l'association : le texte du code QR à afficher (`ev qr`). */
+    val qr = mutableStateMapOf<Service, String>()
+    /** WhatsApp, « Associer avec un numéro de téléphone » : le code à taper (`ev pair_code`). */
+    val codeAssociation = mutableStateMapOf<Service, String>()
     /** L'emoji à toucher sur le téléphone pendant l'association Google. */
     var emoji by mutableStateOf<String?>(null)
     /** Messenger a un historique chiffré à restaurer avec le NIP. */
@@ -136,9 +140,16 @@ object Depot {
         } else {
             Marques.brancher(null, null)
         }
-        services = Service.LOCAUX
-        // WhatsApp, Signal et X attendent que le serveur les annonce (servicesOfferts).
-        Service.LOCAUX.forEach { lancer(it) }
+        if (cfg != null) {
+            services = Service.LOCAUX
+            // WhatsApp, Signal et X attendent que le serveur les annonce (servicesOfferts).
+            Service.LOCAUX.forEach { lancer(it) }
+        } else {
+            // Sur cet appareil : les ponts embarqués, plus WhatsApp, Signal et X
+            // si leur pont a été compilé dans l'APK (sinon, absents sans erreur).
+            services = Service.LOCAUX + Service.entries.filter { it.serveurSeulement && embarque(it) }
+            services.forEach { lancer(it) }
+        }
     }
 
     /**
@@ -209,6 +220,8 @@ object Depot {
         services = Service.LOCAUX
         noms.clear()
         avatarsMoi.clear()
+        qr.clear()
+        codeAssociation.clear()
         emoji = null
         besoinNip = false
         erreurNip = null
@@ -232,13 +245,25 @@ object Depot {
 
     private fun executable(nom: String) = File(appli.applicationInfo.nativeLibraryDir, nom)
 
+    /** Le pont de WhatsApp, Signal ou X embarqué dans l'APK (lib*.so de build-ponts.sh). */
+    private fun executableDe(service: Service): File? = when (service) {
+        Service.WHATSAPP -> executable("libjasette-wa.so")
+        Service.SIGNAL -> executable("libjasette-signal.so")
+        Service.X -> executable("libjasette-x.so")
+        else -> null
+    }
+
+    /** Ce pont a-t-il été compilé dans l'APK ? (le pont Signal demande libsignal, parfois absente) */
+    private fun embarque(service: Service): Boolean = executableDe(service)?.isFile == true
+
     /**
      * Lance le pont d'un service. Le pont Meta sert Messenger ou Instagram selon
      * JASETTE_META_SERVICE, chacun avec son dossier (<données>/messenger ou /instagram).
-     * WhatsApp, Signal et X : seulement sur le serveur, jamais en pont local.
+     * WhatsApp, Signal et X : sur le serveur, ou en pont local s'il est embarqué.
+     * Chaque pont range ses données dans <données>/<service> (whatsapp, signal, x).
      */
     private fun lancer(service: Service) {
-        if (service.serveurSeulement && connexion == null) return
+        if (service.serveurSeulement && connexion == null && !embarque(service)) return
         val g = generation
         // Depuis le fil de lecture : préfixe du service, puis le fil principal.
         val recu: (JSONObject) -> Unit = { v ->
@@ -255,6 +280,7 @@ object Depot {
             ponts[service] = when {
                 cx != null -> PontDistant(service.cle, cx, recu)
                 service == Service.GOOGLE -> PontLocal("google", executable("libjasette-pont.so"), environnement(), recu)
+                service.serveurSeulement -> PontLocal(service.cle, executableDe(service)!!, environnement(), recu)
                 else -> {
                     val env = environnement() + ("JASETTE_META_SERVICE" to service.cle)
                     PontLocal(service.cle, executable("libjasette-meta.so"), env, recu)
@@ -365,8 +391,34 @@ object Depot {
         )
     }
 
-    fun deconnecter(service: Service) =
-        commande(service, JSONObject().put("cmd", if (service == Service.GOOGLE) "unpair" else "logout"))
+    fun deconnecter(service: Service) {
+        qr.remove(service)
+        codeAssociation.remove(service)
+        // Les ponts WhatsApp, Signal et X ne connaissent que « unpair ».
+        val cmd = if (service == Service.GOOGLE || service.serveurSeulement) "unpair" else "logout"
+        commande(service, JSONObject().put("cmd", cmd))
+    }
+
+    /** WhatsApp ou Signal : association par code QR (`pair`, puis des `ev qr`). */
+    fun associerQr(service: Service) {
+        erreur = null
+        codeAssociation.remove(service)
+        commande(service, JSONObject().put("cmd", "pair"))
+    }
+
+    /** WhatsApp : « Associer avec un numéro de téléphone » (`pair_phone`, puis `ev pair_code`). */
+    fun associerTelephone(numero: String) {
+        erreur = null
+        codeAssociation.remove(Service.WHATSAPP)
+        qr.remove(Service.WHATSAPP)
+        commande(Service.WHATSAPP, JSONObject().put("cmd", "pair_phone").put("number", numero))
+    }
+
+    /** X : les cookies de x.com et le code X Chat, en un seul essai (X verrouille après quelques codes faux). */
+    fun connecterX(cookies: Map<String, String>, pin: String) {
+        erreur = null
+        commande(Service.X, JSONObject().put("cmd", "login").put("cookies", JSONObject(cookies)).put("pin", pin))
+    }
 
     /** Le NIP Messenger (6 chiffres) ; une chaîne vide refuse la restauration. */
     fun envoyerNip(nip: String) {
@@ -387,8 +439,26 @@ object Depot {
                     pretPourArchives(service)
                 }
                 if (apres == Etat.NON_ASSOCIE) oublier(service)
+                // Hors association, le QR et le code n'ont plus de sens.
+                if (apres != Etat.ASSOCIATION) {
+                    qr.remove(service)
+                    codeAssociation.remove(service)
+                }
             }
-            "paired" -> etats[service] = Etat.CONNEXION
+            "paired" -> {
+                qr.remove(service)
+                codeAssociation.remove(service)
+                etats[service] = Etat.CONNEXION
+            }
+            // WhatsApp et Signal : un code QR (renouvelé) à scanner.
+            "qr" -> v.chaine("code").ifEmpty { v.chaine("data") }.let { if (it.isNotEmpty()) qr[service] = it }
+            // WhatsApp : le code à taper sur le téléphone ; les QR cessent.
+            "pair_code" -> v.chaine("code").let {
+                if (it.isNotEmpty()) {
+                    codeAssociation[service] = it
+                    qr.remove(service)
+                }
+            }
             "account" -> v.chaine("name").let { if (it.isNotEmpty()) noms[service] = it else noms.remove(service) }
             "avatar_moi" -> monAvatar(service, v.chaine("path"))
             "history_pin" -> when {

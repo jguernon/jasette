@@ -8,6 +8,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -288,46 +289,97 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
     }
 }
 
-/** Le « Head » : la grille des favoris en haut de la boîte de réception. */
-@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
+/**
+ * Le « Head » : la grille des favoris en haut de la boîte de réception.
+ *
+ * Grille « Automatique » (le défaut) : des cases de 80 dp, autant que la
+ * largeur en permet, sur autant de rangées qu'il faut. Grille choisie
+ * (Réglages → Apparence, `Marques.headGrille`) : colonnes × rangées ; les
+ * cases se partagent la largeur et les avatars rapetissent jusqu'à un minimum
+ * lisible (au-delà, la grille défile de côté). Seuls colonnes × rangées Head
+ * sont montrés : les autres restent dans le Head, simplement cachés.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun Head(favoris: List<Conv>, choisie: String?, ouvrir: (String) -> Unit, retiree: (String) -> Unit) {
+    val dims = ca.jasette.android.Marques.dimensions(ca.jasette.android.Marques.headGrille)
     Column {
-        FlowRow(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp)) {
-            for (c in favoris) key(c.id) {
-                var menu by remember { mutableStateOf(false) }
-                val nom = c.name.ifEmpty { t("Sans nom") }
-                val prenom = if (c.group) nom else nom.split(Regex("\\s+")).firstOrNull() ?: nom
-                Box {
-                    Column(
-                        Modifier.width(80.dp).clip(forme(14.dp))
-                            .background(if (c.id == choisie) P.choisi else androidx.compose.ui.graphics.Color.Transparent)
-                            .combinedClickable(onClick = { ouvrir(c.id) }, onLongClick = { menu = true })
-                            .padding(vertical = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Box {
-                            Avatar(c, 54.dp)
-                            if (c.unread) {
-                                Box(
-                                    Modifier.align(Alignment.TopEnd).size(13.dp).clip(formeRonde).background(P.fond)
-                                        .padding(2.dp).clip(formeRonde).background(P.accent),
-                                )
-                            }
+        if (dims == null) {
+            FlowRow(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp)) {
+                for (c in favoris) key(c.id) { CaseHead(c, choisie, 80.dp, 54.dp, 12.sp, ouvrir, retiree) }
+            }
+        } else {
+            val (colonnes, rangees) = dims
+            androidx.compose.foundation.layout.BoxWithConstraints(
+                Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
+            ) {
+                // La case : la largeur partagée, jamais moins que le minimum lisible.
+                val case = maxOf(maxWidth / colonnes, CASE_HEAD_MIN)
+                // L'avatar suit la case (54 dp pour 80 dp), entre 30 et 54 dp.
+                val avatar = (case * (54f / 80f)).coerceIn(30.dp, 54.dp)
+                val police = if (case < 64.dp) 10.sp else if (case < 76.dp) 11.sp else 12.sp
+                val defile = case * colonnes > maxWidth
+                Column(
+                    if (defile) Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()) else Modifier,
+                ) {
+                    for (rangee in favoris.take(colonnes * rangees).chunked(colonnes)) {
+                        Row {
+                            for (c in rangee) key(c.id) { CaseHead(c, choisie, case, avatar, police, ouvrir, retiree) }
                         }
-                        Spacer(Modifier.height(5.dp))
-                        Text(
-                            prenom, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center,
-                            color = if (c.unread) P.texteFort else P.texte,
-                            modifier = Modifier.padding(horizontal = 4.dp),
-                        )
                     }
-                    MenuDeListe(c, menu, fermer = { menu = false }, retiree = retiree, ouvrir = { ouvrir(c.id) })
                 }
             }
         }
         HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), color = P.traitFin)
+    }
+}
+
+/** La plus petite case du Head (avatar de 30 dp et prénom en 10 sp encore lisibles). */
+private val CASE_HEAD_MIN = 46.dp
+
+/** Une case du Head : l'avatar (point si non lu) et le prénom ; appui long, le menu. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun CaseHead(
+    c: Conv,
+    choisie: String?,
+    largeur: androidx.compose.ui.unit.Dp,
+    avatar: androidx.compose.ui.unit.Dp,
+    police: androidx.compose.ui.unit.TextUnit,
+    ouvrir: (String) -> Unit,
+    retiree: (String) -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    val nom = c.name.ifEmpty { t("Sans nom") }
+    val prenom = if (c.group) nom else nom.split(Regex("\\s+")).firstOrNull() ?: nom
+    // Le point des non-lus suit la taille de l'avatar (13 dp pour 54 dp).
+    val point = (avatar * (13f / 54f)).coerceAtLeast(9.dp)
+    Box {
+        Column(
+            Modifier.width(largeur).clip(forme(14.dp))
+                .background(if (c.id == choisie) P.choisi else androidx.compose.ui.graphics.Color.Transparent)
+                .combinedClickable(onClick = { ouvrir(c.id) }, onLongClick = { menu = true })
+                .padding(vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box {
+                Avatar(c, avatar)
+                if (c.unread) {
+                    Box(
+                        Modifier.align(Alignment.TopEnd).size(point).clip(formeRonde).background(P.fond)
+                            .padding(2.dp).clip(formeRonde).background(P.accent),
+                    )
+                }
+            }
+            Spacer(Modifier.height(5.dp))
+            Text(
+                prenom, fontSize = police, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                color = if (c.unread) P.texteFort else P.texte,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+        }
+        MenuDeListe(c, menu, fermer = { menu = false }, retiree = retiree, ouvrir = { ouvrir(c.id) })
     }
 }
 

@@ -66,4 +66,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    // Les codes QR de l'association WhatsApp et Signal (zxing core : l'encodeur seul, sans caméra).
+    implementation("com.google.zxing:core:3.5.3")
 }
