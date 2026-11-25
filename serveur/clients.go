@@ -420,13 +420,38 @@ func (c *Client) commande(svc string, brute json.RawMessage) {
 		return
 	}
 	var tete struct {
-		Cmd  string `json:"cmd"`
-		Path string `json:"path"`
+		Cmd    string          `json:"cmd"`
+		Path   string          `json:"path"`
+		Conv   string          `json:"conv"`
+		Before json.RawMessage `json:"before"`
+		Count  int             `json:"count"`
 	}
 	if json.Unmarshal(brute, &tete) != nil {
 		return
 	}
 	switch tete.Cmd {
+	case "messages":
+		if tete.Conv == "" {
+			break
+		}
+		ancien := len(tete.Before) > 0 && string(tete.Before) != `""` && string(tete.Before) != "null"
+		if !ancien {
+			// Réponse immédiate depuis le cache, à ce client seul, avant
+			// celle du pont (même file : l'ordre est garanti).
+			if t := p.cache.reponse(tete.Conv, tete.Count); t != nil {
+				select {
+				case c.evs <- emballer(svc, t):
+				default:
+				}
+			}
+		}
+		c.srv.mu.Lock()
+		if ancien {
+			p.noterDemande(cleAncien(tete.Conv))
+		} else {
+			p.noterDemande(tete.Conv)
+		}
+		c.srv.mu.Unlock()
 	case "quit":
 		// Le pont appartient au serveur : un client qui part ne l'arrête pas.
 		return

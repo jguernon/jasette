@@ -1634,4 +1634,131 @@ mod essais {
             assert_eq!(mode & 0o777, 0o600);
         }
     }
+
+    /// Le cache du serveur (PROTOCOLE.md, §5.8), contre un serveur de test dont
+    /// le pont Google est un faux pont qui compte ses commandes dans
+    /// FAUX_COMPTES (voir .cache/essai-cache) :
+    /// JASETTE_DATA=… FAUX_COMPTES=… JASETTE_ESSAI_ADRESSE=127.0.0.1:PORT \
+    /// JASETTE_ESSAI_SERVEUR=…/jasette-serveur cargo test essai_cache -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn essai_cache() {
+        let adresse = std::env::var("JASETTE_ESSAI_ADRESSE").expect("JASETTE_ESSAI_ADRESSE");
+        let comptes_f = std::env::var("FAUX_COMPTES").expect("FAUX_COMPTES");
+        let comptes = || -> Value {
+            fs::read_to_string(&comptes_f).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({}))
+        };
+        let n = |c: &Value, k: &str| c.get(k).and_then(Value::as_u64).unwrap_or(0);
+        let cfg = jumeler_essai(&adresse, "cache");
+        let google = PontDistant::brancher(&cfg, "google");
+
+        // 1. Le préchargement : 30 récentes + les marquées c35 (Head) et c38
+        //    (épinglée), une à la fois ; rien n'arrive aux clients, aucun `read`.
+        let mut vus = Vec::new();
+        let fin = Instant::now() + Duration::from_secs(120);
+        while Instant::now() < fin && n(&comptes(), "messages") < 32 {
+            vus.extend(google.recevoir());
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        std::thread::sleep(Duration::from_secs(3));
+        vus.extend(google.recevoir());
+        let c = comptes();
+        println!("commandes reçues par le faux pont : {c}");
+        assert_eq!(n(&c, "messages"), 32, "préchargement");
+        for k in ["messages:c01", "messages:c30", "messages:c35", "messages:c38"] {
+            assert_eq!(n(&c, k), 1, "{k}");
+        }
+        assert_eq!(n(&c, "messages:c31"), 0);
+        assert_eq!(n(&c, "read"), 0, "aucun read");
+        assert!(!vus.iter().any(|v| v["ev"] == "messages" || v["ev"] == "error"), "préchargement diffusé : {vus:?}");
+        let listes: Vec<&Value> = vus.iter().filter(|v| v["ev"] == "conversations").collect();
+        assert!(!listes.is_empty() && listes[0]["items"].as_array().unwrap().len() == 40, "liste");
+
+        // 2. Réponse immédiate : la copie (cache:true, 40 messages), puis le pont (50).
+        let attendre = |p: &PontDistant, conv: &str, nb: usize| -> Vec<Value> {
+            let mut l = Vec::new();
+            let fin = Instant::now() + Duration::from_secs(10);
+            while Instant::now() < fin && l.len() < nb {
+                l.extend(p.recevoir().into_iter().filter(|v| v["ev"] == "messages" && v["conv"] == conv));
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            l
+        };
+        let t0 = Instant::now();
+        google.envoyer(&json!({"cmd": "messages", "conv": "c05", "count": 60}));
+        let mut premiere = None;
+        let mut l = Vec::new();
+        let fin = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < fin && l.len() < 2 {
+            for v in google.recevoir().into_iter().filter(|v| v["ev"] == "messages" && v["conv"] == "c05") {
+                premiere.get_or_insert(t0.elapsed());
+                l.push(v);
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        println!("copie en {:?} ; réponse du pont en {:?}", premiere.unwrap(), t0.elapsed());
+        assert_eq!(l.len(), 2);
+        assert_eq!(l[0]["cache"], true);
+        assert_eq!(l[0]["items"].as_array().unwrap().len(), 40);
+        assert!(l[1].get("cache").is_none());
+        assert_eq!(l[1]["items"].as_array().unwrap().len(), 50);
+        // Fusion comme le bureau : sans doublon, par id.
+        let msgs = |v: &Value| serde_json::from_value::<Vec<crate::Msg>>(v["items"].clone()).unwrap();
+        let f = crate::cache::fusionner_copie(&[], msgs(&l[0]));
+        let f = crate::cache::fusionner_page(&f, msgs(&l[1]));
+        let ids: std::collections::HashSet<_> = f.iter().map(|m| m.id.clone()).collect();
+        assert_eq!(f.len(), 50);
+        assert_eq!(ids.len(), 50);
+
+        // 3. Les événements tiennent le cache à jour : un message, une réaction.
+        google.envoyer(&json!({"cmd": "faux_message", "conv": "c05", "text": "tout neuf"}));
+        google.envoyer(&json!({"cmd": "faux_reaction", "conv": "c05"}));
+        std::thread::sleep(Duration::from_millis(500));
+        let _ = google.recevoir();
+        google.envoyer(&json!({"cmd": "messages", "conv": "c05", "count": 60}));
+        let l = attendre(&google, "c05", 2);
+        assert_eq!(l[0]["cache"], true);
+        let items = l[0]["items"].as_array().unwrap();
+        assert_eq!(items.len(), 51, "nouveau message dans la copie");
+        assert_eq!(items.last().unwrap()["text"], "tout neuf");
+        assert!(items.iter().any(|m| m["id"] == "c05-m50" && m["reactions"][0]["emoji"] == "👍"), "réaction");
+
+        // 4. Une conversation pas en cache : seulement la réponse du pont.
+        google.envoyer(&json!({"cmd": "messages", "conv": "c39", "count": 60}));
+        let l = attendre(&google, "c39", 1);
+        assert_eq!(l.len(), 1);
+        assert!(l[0].get("cache").is_none());
+
+        // 5. Rejeu des listes (boîte, puis archives) à un client qui arrive.
+        google.envoyer(&json!({"cmd": "conversations", "folder": "archive"}));
+        std::thread::sleep(Duration::from_millis(500));
+        let cfg2 = jumeler_essai(&adresse, "cache2");
+        let autre = PontDistant::brancher(&cfg2, "google");
+        let mut r = Vec::new();
+        let fin = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < fin && r.iter().filter(|v: &&Value| v["ev"] == "conversations").count() < 2 {
+            r.extend(autre.recevoir());
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let evs: Vec<&str> = r.iter().filter_map(|v| v["ev"].as_str()).collect();
+        println!("rejeu : {evs:?}");
+        let i = evs.iter().position(|e| *e == "conversations").expect("liste rejouée");
+        assert!(evs[..i].contains(&"state"), "l'état avant les listes");
+        assert!(r[i].get("folder").is_none());
+        assert_eq!(r[i + 1]["folder"], "archive");
+
+        // 6. Toujours aucun read ; le fichier du cache est en 0600.
+        std::thread::sleep(Duration::from_secs(6));
+        assert_eq!(n(&comptes(), "read"), 0);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let d = std::env::var("JASETTE_DATA").unwrap();
+            let f = Path::new(&d).join("serveur/cache-google.json");
+            assert_eq!(fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
+            let v: Value = serde_json::from_str(&fs::read_to_string(&f).unwrap()).unwrap();
+            assert_eq!(v["convs"].as_object().unwrap().len(), 33);
+            assert_eq!(v["convs"]["c05"]["items"].as_array().unwrap().len(), 51);
+        }
+    }
 }

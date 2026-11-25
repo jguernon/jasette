@@ -198,7 +198,9 @@ marques (`{"marques":{…}}`, §5.5), puis, pour chaque service, le dernier
 état connu, dans cet ordre et s'ils existent : `hello`,
 `state`, `account`, `avatar_moi`, `qr` (seulement en cours d'association),
 `pair_code` (WhatsApp, seulement en cours d'association par code),
-`history_pin` (seulement s'il attend un NIP : `{"needed":true}`). Le `qr` et
+`history_pin` (seulement s'il attend un NIP : `{"needed":true}`), puis les
+dernières listes `conversations` gardées (boîte de réception, puis archives :
+§5.8). Le `qr` et
 le `pair_code` gardés sont oubliés dès `paired`, `state` `ready` ou
 `unpaired`, ou si le pont s'arrête ; un `pair_code` remplace le `qr` (le pont
 WhatsApp cesse alors de montrer des QR). Un client
@@ -420,6 +422,86 @@ de jeton ou d'empreinte). Si le serveur n'a jamais répondu depuis le
 lancement : `state: connecting`. Les commandes envoyées pendant la coupure
 peuvent être gardées et envoyées après l'`auth` suivante.
 
+### 5.8 Cache des listes et des messages
+
+Le serveur garde, par service, la dernière liste `conversations` du pont
+(boîte de réception, et archives si un client les a demandées) et les
+derniers messages des conversations récentes. Le but : qu'un client n'ait
+jamais à attendre le pont pour montrer une conversation.
+
+**Rejeu des listes.** Après l'état du service (§5.2), à chaque client qui se
+branche ou qui envoie `{"rejouer":…}`, le serveur renvoie les lignes
+`conversations` gardées, **telles que le pont les a écrites**, dans cet
+ordre : la boîte de réception, puis les archives (celle qui porte
+`"folder":"archive"`) :
+
+```json
+{"svc":"google","ev":{"ev":"conversations","items":[{"id":"123","name":"…","time":1764000000000,…},…]}}
+{"svc":"google","ev":{"ev":"conversations","folder":"archive","items":[…]}}
+```
+
+Rien de nouveau pour le client : ce sont des listes ordinaires. Elles sont
+tenues à jour par les événements `conversation` (ajout, déplacement entre
+boîte et archives) et `deleted` ; le client peut toujours redemander
+`{"cmd":"conversations",…}`, transmis au pont comme avant. Gardées sur le
+disque, elles sont rejouées même avant que le pont relancé ait répondu.
+Oubliées à `state: unpaired`.
+
+**Préchargement.** Quand un service passe à `ready`, puis à chaque nouvelle
+liste de la boîte de réception, le serveur demande lui-même au pont
+`{"cmd":"messages","conv":"<id>","count":40}` pour les **30**
+conversations les plus récentes de la boîte de réception et pour celles du
+Head, des favoris et des épinglées (§5.5) qui sont dans ses listes. Une à la
+fois (il attend la réponse, 45 s au plus), avec 1,5 s de pause entre deux ;
+seulement celles dont la copie manque, date d'avant le lancement du pont, ou
+n'a pas le dernier message annoncé par la liste (`time`). Ces réponses (et
+leurs erreurs `where: "messages"`) ne vont **qu'au cache** : aucun client ne
+les reçoit. Aucun pont ne marque une conversation comme lue sur `messages`
+(seulement sur `read`, que le serveur n'envoie jamais de lui-même).
+
+**Le cache des messages.** Au plus **200** conversations × **60** messages
+par service, dans `<données>/serveur/cache-<service>.json` (0600). Une page
+`messages` du pont (pas `older`) fait foi dans sa plage ; les événements
+`message` (nouveaux messages, réactions, modifications, retraits, accusés :
+même `id`, ou même `tmp_id` pour un envoi confirmé) mettent à jour une
+conversation déjà gardée ; `deleted` l'efface.
+
+**Réponse immédiate.** Quand un client envoie `messages` **sans** `before`
+pour une conversation dont le serveur a une copie à jour (reçue du pont
+depuis son lancement, suivie ensuite par les événements), il lui répond
+**aussitôt, à lui seul**, avec un événement `messages` au format habituel,
+marqué `"cache":true` :
+
+```json
+{"svc":"google","ev":{"ev":"messages","conv":"123","items":[{"id":"…","conv":"123","text":"…","time":1764000000000,…},…],"older":false,"more":true,"cache":true}}
+```
+
+- `items` : les messages gardés, du plus vieux au plus récent, tels que le
+  pont les a écrits (au plus `count` si la commande en donne un) ; `more` :
+  il y en a de plus anciens (au pont).
+- Puis il transmet la commande au pont comme avant ; la réponse du pont
+  arrive ensuite, **sans** `cache`, à tous les clients. La copie passe
+  toujours **avant** cette réponse (même file d'envoi).
+- Pas de copie (conversation inconnue du cache, ou serveur fraîchement
+  relancé) : seulement la réponse du pont, comme avant.
+
+Côté client (référence : `fusionner_copie` et `fusionner_page` de
+`src/cache.rs`), par **id** de message :
+
+- `cache:true` : chaque message remplace celui de même `id` (ou même
+  `tmp_id`) qu'on avait, les autres s'ajoutent, rien n'est retiré ; trier
+  par `time`. Ne pas marquer la conversation comme lue sur la copie : c'est
+  la réponse du pont qui le fait. L'indicateur de chargement peut tomber.
+- la réponse du pont (sans `cache`, pas `older`) fait foi dans sa plage :
+  garder de l'existant les envois locaux pas encore confirmés, les messages
+  plus récents que la page et, si le plus vieux message de la page est déjà
+  là, ceux qui sont plus vieux (les pages déjà remontées) ; le reste est
+  remplacé par la page.
+
+**Anciens clients.** Rien ne change pour eux : un client qui ignore `cache`
+remplace sa liste par la copie, puis par la réponse du pont ; les listes
+rejouées sont des `conversations` ordinaires.
+
 ## 6. Fichiers
 
 Les événements contiennent des chemins de fichiers **du serveur** :
@@ -501,7 +583,8 @@ servis par `get`, §6.1).
 `appareils.json` (noms, SHA-256 des jetons, dates), `jumelage.json` (code en
 cours), `marques.json` (§5.5, avec `archives_depuis` en plus ; écrit par fichier temporaire puis renommage,
 la version précédente dans `marques.json.bak` ; un fichier illisible est mis
-de côté, jamais écrasé) et `depots/`, tous en 0600. Les journaux (sortie d'erreur) ne
+de côté, jamais écrasé), `cache-<service>.json` (listes et messages du §5.8 ;
+un fichier illisible est ignoré) et `depots/`, tous en 0600. Les journaux (sortie d'erreur) ne
 contiennent jamais de jeton, de code ni de cookie.
 
 ## 8. Résumé des trames
@@ -516,6 +599,7 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"erreur":…,"texte":…}` | refus, puis fermeture |
 | C→S | `{"svc":…,"cmd":{…}}` | commande pour un pont |
 | S→C | `{"svc":…,"ev":{…}}` | événement d'un pont |
+| S→C | `{"svc":…,"ev":{"ev":"messages",…,"cache":true}}` | copie du cache, avant la réponse du pont (§5.8) |
 | C→S | `{"rejouer":"<svc>"}` | redemander l'état d'un service |
 | ↔ | `{"ping":n}` / `{"pong":n}` | signes de vie |
 | S→C | `{"marques":{"head","favoris","epingles","archives","version"[,"id","refus"]}}` | rejeu, changement |

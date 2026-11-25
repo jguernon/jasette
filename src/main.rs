@@ -12,6 +12,7 @@
 //! plat à la Beeper (aplats gris, fil noir), le défaut ; et « Verre », le look
 //! liquid glass du skill stageshow (fond pastel à halos, verre translucide).
 
+mod cache;
 mod pont;
 
 use std::cell::RefCell;
@@ -781,7 +782,7 @@ fn degrade_accent() -> gpui::Background {
 
 // ---- Les services ----
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Service {
     GoogleMessages,
     Messenger,
@@ -884,6 +885,23 @@ impl Service {
 /// machine l'est) comme en mode « client », l'interface passe par lui.
 fn serveur_actif(r: &Reglages) -> Option<&pont::ConfigServeur> {
     if r.mode_serveur.is_empty() { None } else { r.serveur.as_ref() }
+}
+
+/// D'où vient le cache local (cache.rs) : les ponts de cette machine, ou un
+/// serveur Jasette. Un cache d'une autre source est ignoré.
+fn source_cache(r: &Reglages) -> String {
+    match serveur_actif(r) {
+        Some(cfg) => format!("serveur:{}", cfg.adresse),
+        None => "local".into(),
+    }
+}
+
+/// Une nouvelle qui change ce que garde le cache local.
+fn touche_cache(v: &Value) -> bool {
+    matches!(
+        v.get("ev").and_then(Value::as_str).unwrap_or_default(),
+        "conversations" | "conversation" | "messages" | "message" | "media" | "avatar" | "deleted" | "state"
+    )
 }
 
 /// Le pont d'un service : un processus ici, ou ce service sur le serveur Jasette.
@@ -1042,7 +1060,7 @@ fn logo(s: Service, taille: f32) -> Div {
 
 // ---- Les données ----
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct Conv {
     id: String,
     name: String,
@@ -1074,7 +1092,7 @@ struct Conv {
     e2ee: bool,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct Piece {
     media_id: String,
     /// La clé de déchiffrement, en base64, renvoyée telle quelle au pont.
@@ -1110,7 +1128,7 @@ impl Piece {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct Msg {
     id: String,
     conv: String,
@@ -1688,6 +1706,12 @@ struct Jasette {
     messages: HashMap<String, Vec<Msg>>,
     plus_anciens: HashMap<String, bool>,
     chargement: Option<String>,
+    /// Les fils reçus du pont depuis que son service est prêt : à jour. Les
+    /// autres (cache local, copie du serveur) sont redemandés à l'ouverture.
+    frais: HashSet<String>,
+    /// Le cache local (cache.rs) est à réécrire ; sa dernière écriture.
+    cache_sale: bool,
+    cache_ecrit: Instant,
     erreur: Option<String>,
     // La liste
     vue: Vue,
@@ -2345,6 +2369,8 @@ impl Jasette {
         .detach();
 
         let reglages = Reglages::charger();
+        // Le cache local : listes, messages et fichiers déjà là, montrés tout de suite.
+        let cache = cache::CacheLocal::charger(&source_cache(&reglages));
         let (pont, erreur) = match lancer_pont(&reglages, Service::GoogleMessages) {
             Ok(p) => (Some(p), None),
             Err(e) => (None, Some(format!("Pont introuvable : {e}"))),
@@ -2370,6 +2396,7 @@ impl Jasette {
                         }
                         let lignes: Vec<Value> = this.pont.as_ref().map(|p| p.recevoir()).unwrap_or_default();
                         for l in lignes {
+                            this.cache_sale |= touche_cache(&l);
                             this.nouvelle(l);
                             change = true;
                         }
@@ -2385,6 +2412,7 @@ impl Jasette {
                             let lignes: Vec<Value> = this.meta(svc).pont.as_ref().map(|p| p.recevoir()).unwrap_or_default();
                             for mut l in lignes {
                                 prefixer_meta(&mut l, svc);
+                                this.cache_sale |= touche_cache(&l);
                                 this.nouvelle_meta(svc, l);
                                 change = true;
                             }
@@ -2422,6 +2450,10 @@ impl Jasette {
                         for n in marques {
                             this.marques_recues(n);
                             change = true;
+                        }
+                        // Le cache local : au plus toutes les 5 secondes, hors du fil de l'interface.
+                        if this.cache_sale && this.cache_ecrit.elapsed() >= Duration::from_secs(5) {
+                            this.garder_cache();
                         }
                         // Le cache des conversations marquées, et leurs fantômes.
                         if change || !this.fantomes_faits {
@@ -2464,7 +2496,7 @@ impl Jasette {
         })
         .detach();
 
-        Self {
+        let mut jasette = Self {
             pont,
             etat: Etat::Demarrage,
             qr: None,
@@ -2482,13 +2514,16 @@ impl Jasette {
             code_x,
             besoin_nip: false,
             nip,
-            convs: Vec::new(),
-            archives: Vec::new(),
+            plus_anciens: cache.fils.iter().map(|(k, f)| (k.clone(), f.more)).collect(),
+            messages: cache.fils.into_iter().map(|(k, f)| (k, f.items)).collect(),
+            convs: cache.convs,
+            archives: cache.archives,
             archives_chargees: false,
             choisie: None,
-            messages: HashMap::new(),
-            plus_anciens: HashMap::new(),
             chargement: None,
+            frais: HashSet::new(),
+            cache_sale: false,
+            cache_ecrit: Instant::now(),
             erreur,
             vue: Vue::Tout,
             non_lus_seulement: false,
@@ -2525,11 +2560,11 @@ impl Jasette {
             ondes_demandees: HashSet::new(),
             pauses: HashMap::new(),
             ondes_pretes: Arc::new(Mutex::new(Vec::new())),
-            medias: HashMap::new(),
+            medias: cache.medias,
             demandes: HashSet::new(),
             echecs: HashSet::new(),
             ouvrir_apres: HashSet::new(),
-            avatars: HashMap::new(),
+            avatars: cache.avatars,
             fantomes: Vec::new(),
             fantomes_faits: false,
             photos_numeros: HashMap::new(),
@@ -2572,7 +2607,13 @@ impl Jasette {
             appui_seq: 0,
             reaction_cible: None,
             focus_page: cx.focus_handle(),
+        };
+        // Le cache local montre déjà une liste : la première conversation s'ouvre
+        // tout de suite (ses messages en cache ; la réponse du pont s'y fusionnera).
+        if let Some(id) = jasette.boite().first().map(|c| c.id.clone()) {
+            jasette.choisir(id);
         }
+        jasette
     }
 
     /// Une commande pour le pont du service de la conversation (ou de la pièce) visée.
@@ -2643,6 +2684,7 @@ impl Jasette {
                     "ready" => {
                         if avant != Etat::Pret {
                             self.commande_svc(svc, json!({"cmd": "conversations", "count": 50}));
+                            self.service_pret(svc);
                         }
                         self.ajout_compte = false;
                         if self.ajout_service == Some(svc) {
@@ -2666,6 +2708,8 @@ impl Jasette {
                 if etat == Etat::NonAssocie {
                     self.convs.retain(|c| service_de(&c.id) != svc);
                     self.archives.retain(|c| service_de(&c.id) != svc);
+                    // Le compte est parti : ses messages aussi (et du cache local).
+                    self.messages.retain(|id, _| service_de(id) != svc);
                 }
             }
             "paired" => {
@@ -3225,6 +3269,7 @@ impl Jasette {
                 // plus tard ne la recevrait jamais (le serveur ne la rejoue pas).
                 if avant != Etat::Pret && self.etat == Etat::Pret {
                     self.commande(json!({"cmd": "conversations", "count": 50}));
+                    self.service_pret(Service::GoogleMessages);
                 }
             }
             "account" => {
@@ -3372,6 +3417,9 @@ impl Jasette {
                 let items = serde_json::from_value::<Vec<Msg>>(v["items"].clone()).unwrap_or_default();
                 let older = v.get("older").and_then(Value::as_bool).unwrap_or(false);
                 let more = v.get("more").and_then(Value::as_bool).unwrap_or(false);
+                // La copie du serveur Jasette (PROTOCOLE.md, §5.8), avant la réponse du pont.
+                let copie = v.get("cache").and_then(Value::as_bool).unwrap_or(false);
+                let frais = self.frais.contains(&conv);
                 self.telecharger_images(&items);
                 let liste = self.messages.entry(conv.clone()).or_default();
                 if older {
@@ -3379,22 +3427,25 @@ impl Jasette {
                         items.into_iter().filter(|m| !liste.iter().any(|x| x.id == m.id)).collect();
                     nouveaux.append(liste);
                     *liste = nouveaux;
+                } else if copie {
+                    // Rien ne se perd ni ne double (par id) ; un fil déjà à jour l'ignore.
+                    if !frais {
+                        *liste = cache::fusionner_copie(liste, items);
+                        self.descendre = true;
+                    }
                 } else {
-                    // Garde les envois locaux pas encore confirmés.
-                    let attente: Vec<Msg> = liste
-                        .iter()
-                        .filter(|m| m.id == m.tmp_id && !items.iter().any(|x| x.tmp_id == m.tmp_id))
-                        .cloned()
-                        .collect();
-                    *liste = items;
-                    liste.extend(attente);
+                    // La page fait foi ; les envois locaux pas encore confirmés restent.
+                    *liste = cache::fusionner_page(liste, items);
                     self.descendre = true;
+                    self.frais.insert(conv.clone());
                 }
-                self.plus_anciens.insert(conv.clone(), more);
+                if !(copie && frais) {
+                    self.plus_anciens.insert(conv.clone(), more);
+                }
                 if self.chargement.as_deref() == Some(conv.as_str()) {
                     self.chargement = None;
                 }
-                if !older && self.choisie.as_deref() == Some(conv.as_str()) && self.active {
+                if !older && !copie && self.choisie.as_deref() == Some(conv.as_str()) && self.active {
                     self.marquer_lu(&conv);
                 }
                 if self.choisie.as_deref() == Some(conv.as_str()) {
@@ -3489,6 +3540,35 @@ impl Jasette {
         }
     }
 
+    /// Écrit le cache local (dans un fil à part).
+    fn garder_cache(&mut self) {
+        self.cache_sale = false;
+        self.cache_ecrit = Instant::now();
+        cache::CacheLocal::faire(
+            &source_cache(&self.reglages),
+            &self.convs,
+            &self.archives,
+            &self.messages,
+            &self.plus_anciens,
+            &self.medias,
+            &self.avatars,
+        )
+        .garder();
+    }
+
+    /// Un service (re)devient prêt : ses fils ne sont plus sûrs d'être à jour
+    /// (coupure, cache) ; celui qui est ouvert (ou en chargement : demandé
+    /// avant que le pont soit prêt) est redemandé.
+    fn service_pret(&mut self, svc: Service) {
+        self.frais.retain(|id| service_de(id) != svc);
+        if let Some(id) = self.choisie.clone()
+            && service_de(&id) == svc
+            && (self.messages.contains_key(&id) || self.chargement.as_deref() == Some(id.as_str()))
+        {
+            self.commande(json!({"cmd": "messages", "conv": id, "count": 60}));
+        }
+    }
+
     fn choisir(&mut self, id: String) {
         // Changer de conversation ferme la galerie et le menu d'options.
         self.galerie = None;
@@ -3509,7 +3589,13 @@ impl Jasette {
         self.barre_reactions = None;
         self.reaction_cible = None;
         if !self.messages.contains_key(&id) {
+            // Rien en cache : l'indicateur de chargement.
             self.chargement = Some(id.clone());
+            self.commande(json!({"cmd": "messages", "conv": id, "count": 60}));
+        } else if !self.frais.contains(&id) {
+            // Le cache s'affiche tout de suite ; la réponse du pont s'y fusionnera
+            // (et c'est elle qui marquera la conversation comme lue).
+            self.descendre = true;
             self.commande(json!({"cmd": "messages", "conv": id, "count": 60}));
         } else {
             self.descendre = true;
@@ -7800,6 +7886,9 @@ impl Jasette {
         self.convs.clear();
         self.archives.clear();
         self.messages.clear();
+        self.frais.clear();
+        // Le cache local d'une autre source ne sert plus (il sera réécrit pour celle-ci).
+        self.cache_sale = true;
         self.choisie = None;
         self.etat = Etat::Demarrage;
         match lancer_pont(&self.reglages, Service::GoogleMessages) {

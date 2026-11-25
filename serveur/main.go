@@ -139,6 +139,7 @@ func lancerServeur(adresse, services, binDir string) error {
 
 	for _, p := range srv.ponts {
 		go p.boucle()
+		go p.prechargeur()
 	}
 	go srv.surveillerRevocations()
 	go srv.nettoyerDepots()

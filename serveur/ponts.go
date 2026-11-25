@@ -3,7 +3,8 @@
 // Chaque ligne de sa sortie standard est un événement JSON, emballé en
 // {"svc":...,"ev":...} et envoyé à tous les clients branchés. On garde le
 // dernier état connu (hello, state, account, avatar_moi, qr, pair_code,
-// history_pin) pour le rejouer aux clients qui arrivent.
+// history_pin) pour le rejouer aux clients qui arrivent, puis les listes de
+// conversations et les derniers messages (cache.go, PROTOCOLE.md §5.8).
 //
 // Les services google, messenger et instagram sont les services de base :
 // sans leur pont, le serveur le signale. Les services whatsapp, signal et x
@@ -34,6 +35,20 @@ type Pont struct {
 
 	// Sous srv.mu : le dernier événement de chaque sorte, déjà emballé.
 	dernier map[string][]byte
+
+	// Le cache des listes et des messages (cache.go), et le préchargement.
+	cache         *Cache
+	pret          bool               // sous srv.mu : dernier état « ready »
+	demandes      map[string]demande // sous srv.mu : réponses `messages` attendues par un client
+	precharge     string             // sous srv.mu : la conversation en préchargement
+	prechargeFini chan struct{}
+	aPrecharger   chan struct{}
+}
+
+// demande : des clients attendent la réponse `messages` d'une conversation.
+type demande struct {
+	n      int
+	depuis time.Time
 }
 
 // Ordre du rejeu : d'abord qui l'on est, ensuite où l'on en est.
@@ -81,7 +96,10 @@ func trouverPont(nom, variable, binDir string) string {
 
 // nouveauPont prépare le pont d'un service, comme src/pont.rs le ferait.
 func nouveauPont(srv *Serveur, svc, binDir string) (*Pont, error) {
-	p := &Pont{svc: svc, srv: srv, dernier: map[string][]byte{}}
+	p := &Pont{
+		svc: svc, srv: srv, dernier: map[string][]byte{}, demandes: map[string]demande{},
+		prechargeFini: make(chan struct{}, 1), aPrecharger: make(chan struct{}, 1),
+	}
 	switch svc {
 	case "google":
 		p.bin = trouverPont("jasette-pont", "JASETTE_PONT", binDir)
@@ -115,6 +133,7 @@ func nouveauPont(srv *Serveur, svc, binDir string) (*Pont, error) {
 	if p.bin == "" {
 		return nil, errors.New("pont introuvable pour " + svc)
 	}
+	p.cache = chargerCache(svc)
 	return p, nil
 }
 
@@ -200,6 +219,10 @@ func (p *Pont) recu(ligne []byte) {
 		Ev     string `json:"ev"`
 		State  string `json:"state"`
 		Needed bool   `json:"needed"`
+		Folder string `json:"folder"`
+		Conv   string `json:"conv"`
+		Older  bool   `json:"older"`
+		Where  string `json:"where"`
 	}
 	if err := json.Unmarshal(ligne, &tete); err != nil {
 		logf("[%s] ligne illisible du pont : %v", p.svc, err)
@@ -224,6 +247,15 @@ func (p *Pont) recu(ligne []byte) {
 			delete(p.dernier, "qr")
 			delete(p.dernier, "pair_code")
 		}
+		avant := p.pret
+		p.pret = tete.State == "ready"
+		if p.pret && !avant {
+			p.declencher()
+		}
+		if tete.State == "unpaired" {
+			// Plus de compte : ses listes et ses messages partent.
+			p.cache.vider()
+		}
 	case "paired":
 		delete(p.dernier, "qr")
 		delete(p.dernier, "pair_code")
@@ -237,6 +269,34 @@ func (p *Pont) recu(ligne []byte) {
 		// Archives de Jasette : un message reçu ramène la conversation dans
 		// l'Inbox (les marques partent avant le message).
 		srv.desarchiverSiRecu(p.svc, ligne)
+		p.cache.message(ligne)
+	case "conversations":
+		archive := tete.Folder == "archive"
+		p.cache.liste(ligne, archive)
+		if !archive && p.pret {
+			p.declencher()
+		}
+	case "conversation":
+		p.cache.majConv(ligne)
+	case "deleted":
+		if tete.Conv != "" {
+			p.cache.oublier(tete.Conv)
+		}
+	case "messages":
+		p.cache.page(ligne)
+		if tete.Older {
+			delete(p.demandes, cleAncien(tete.Conv))
+		} else if !p.pourUnClient(tete.Conv) {
+			// La réponse au préchargement ne va qu'au cache.
+			return
+		}
+	case "error":
+		// L'échec d'un préchargement non plus (la commande n'est pas d'un client).
+		if tete.Where == "messages" && p.precharge != "" && !p.demandesEnCours() {
+			logf("[%s] préchargement : erreur du pont", p.svc)
+			p.finPrecharge()
+			return
+		}
 	}
 	srv.diffuserVerrouille(trame)
 }
@@ -251,16 +311,26 @@ func (p *Pont) signalerArret() {
 	delete(p.dernier, "pair_code")
 	delete(p.dernier, "history_pin")
 	p.dernier["state"] = trame
+	p.pret = false
+	p.demandes = map[string]demande{}
+	if p.precharge != "" {
+		p.finPrecharge()
+	}
+	p.cache.nouvelleSession()
 	p.srv.diffuserVerrouille(trame)
 }
 
-// rejeu : à appeler sous srv.mu.
+// rejeu : à appeler sous srv.mu. L'état, puis les listes gardées
+// (boîte de réception, archives).
 func (p *Pont) rejeu() [][]byte {
 	var r [][]byte
 	for _, s := range sortesRejouees {
 		if t, ok := p.dernier[s]; ok {
 			r = append(r, t)
 		}
+	}
+	for _, l := range p.cache.listesRejeu() {
+		r = append(r, emballer(p.svc, l))
 	}
 	return r
 }
