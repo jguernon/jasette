@@ -213,7 +213,7 @@ func (p *Pont) myAvatarDownload() {
 		log.Debug().Err(err).Msg("mon avatar")
 		return
 	}
-	emit("avatar_moi", map[string]any{"service": "messenger", "path": path})
+	emit("avatar_moi", map[string]any{"service": serviceName(), "path": path})
 }
 
 // ---- Envoi de fichiers ----

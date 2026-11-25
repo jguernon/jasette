@@ -31,6 +31,7 @@ from gi.repository import GLib, Gtk, WebKit  # noqa: E402
 DEBUT = {
     "messenger": "https://www.messenger.com/?no_redirect=true",
     "facebook": "https://www.facebook.com/messages/",
+    "instagram": "https://www.instagram.com/direct/inbox/",
 }
 # Les pages où l'on est connecté (mêmes motifs que mautrix-meta).
 ARRIVEE = {
@@ -40,9 +41,15 @@ ARRIVEE = {
 DOMAINES = {
     "messenger": ["https://www.messenger.com/", "https://messenger.com/", "https://www.facebook.com/"],
     "facebook": ["https://www.facebook.com/", "https://facebook.com/", "https://www.messenger.com/"],
+    "instagram": ["https://www.instagram.com/", "https://instagram.com/"],
 }
-VOULUS = {"c_user", "xs", "datr", "fr", "sb", "wd", "dpr", "presence"}
-REQUIS = {"c_user", "xs", "datr"}
+VOULUS = {"c_user", "xs", "datr", "fr", "sb", "wd", "dpr", "presence",
+          "sessionid", "csrftoken", "ds_user_id", "mid", "ig_did", "rur", "shbid", "shbts"}
+REQUIS_PAR = {
+    "messenger": {"c_user", "xs", "datr"},
+    "facebook": {"c_user", "xs", "datr"},
+    "instagram": {"sessionid", "csrftoken", "ds_user_id"},
+}
 # Le pont parle à Meta comme Chrome : la fenêtre se présente de la même façon.
 AGENT = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
          "Chrome/141.0.0.0 Safari/537.36")
@@ -51,6 +58,8 @@ DONNEES = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "shar
 
 
 def plateforme_de(uri):
+    if uri.startswith("https://www.instagram.com/") or uri.startswith("https://instagram.com/"):
+        return "instagram"
     if uri.startswith("https://www.facebook.com/") or uri.startswith("https://facebook.com/"):
         return "facebook"
     if uri.startswith("https://www.messenger.com/") or uri.startswith("https://messenger.com/"):
@@ -60,7 +69,8 @@ def plateforme_de(uri):
 
 class Connexion(Gtk.ApplicationWindow):
     def __init__(self, app, plateforme):
-        super().__init__(application=app, title="Connexion à Messenger — Jasette")
+        titre = "Instagram" if plateforme == "instagram" else "Messenger"
+        super().__init__(application=app, title=f"Connexion à {titre} — Jasette")
         self.set_default_size(560, 760)
         DONNEES.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(DONNEES, 0o700)
@@ -139,7 +149,7 @@ class Connexion(Gtk.ApplicationWindow):
         suivant()
 
     def terminer(self, trouves, plat):
-        if not REQUIS.issubset(trouves):
+        if not REQUIS_PAR[plat].issubset(trouves):
             # Page d'accueil pas encore connectée : la minuterie revérifie.
             return
         self.fini = True
@@ -151,6 +161,8 @@ def main():
     plateforme = "messenger"
     if "--facebook" in sys.argv[1:]:
         plateforme = "facebook"
+    if "--instagram" in sys.argv[1:]:
+        plateforme = "instagram"
     app = Gtk.Application(application_id="ca.jasette.ConnexionMeta")
     etat = {"fen": None}
 

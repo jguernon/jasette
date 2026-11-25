@@ -651,6 +651,7 @@ fn degrade_accent() -> gpui::Background {
 enum Service {
     GoogleMessages,
     Messenger,
+    Instagram,
 }
 
 impl Service {
@@ -658,7 +659,65 @@ impl Service {
         match self {
             Service::GoogleMessages => "Google Messages",
             Service::Messenger => "Facebook Messenger",
+            Service::Instagram => "Instagram",
         }
+    }
+
+    /// Le nom court, pour les messages d'erreur.
+    fn court(self) -> &'static str {
+        match self {
+            Service::GoogleMessages => "Google Messages",
+            Service::Messenger => "Messenger",
+            Service::Instagram => "Instagram",
+        }
+    }
+
+    /// Le préfixe des ids de ce service dans l'interface (Google n'en a pas).
+    fn prefixe(self) -> &'static str {
+        match self {
+            Service::GoogleMessages => "",
+            Service::Messenger => "m:",
+            Service::Instagram => "i:",
+        }
+    }
+
+    /// Le nom du service dans les réglages et les nouvelles des ponts.
+    fn cle(self) -> &'static str {
+        match self {
+            Service::GoogleMessages => "google",
+            Service::Messenger => "messenger",
+            Service::Instagram => "instagram",
+        }
+    }
+}
+
+/// Les services servis par le pont Meta (une copie du pont par service).
+const SERVICES_META: [Service; 2] = [Service::Messenger, Service::Instagram];
+
+/// Un compte Meta : son pont, son état, sa fenêtre de connexion.
+struct CompteMeta {
+    pont: Option<Pont>,
+    etat: Etat,
+    nom: Option<String>,
+    avatar: Option<PathBuf>,
+    connexion: Arc<Mutex<Option<Result<Value, String>>>>,
+    connexion_ouverte: bool,
+}
+
+impl CompteMeta {
+    fn lancer(s: Service) -> Self {
+        Self {
+            pont: Pont::lancer_meta(s.cle()).map_err(|e| eprintln!("jasette : {e}")).ok(),
+            etat: Etat::Demarrage,
+            nom: None,
+            avatar: None,
+            connexion: Arc::new(Mutex::new(None)),
+            connexion_ouverte: false,
+        }
+    }
+
+    fn associe(&self) -> bool {
+        !matches!(self.etat, Etat::NonAssocie | Etat::Demarrage)
     }
 }
 
@@ -682,6 +741,7 @@ fn image_service(s: Service, taille: f32) -> Arc<gpui::Image> {
     let (cle, liste) = match s {
         Service::GoogleMessages => (0u8, variantes!("google-messages")),
         Service::Messenger => (1u8, variantes!("messenger")),
+        Service::Instagram => (2u8, variantes!("instagram")),
     };
     let voulu = taille * 2.;
     let i = liste.iter().position(|(t, _)| *t >= voulu).unwrap_or(liste.len() - 1);
@@ -1007,13 +1067,9 @@ struct Jasette {
     emoji: Option<String>,
     connexion: Boite<Result<Value, String>>,
     connexion_ouverte: bool,
-    /// Messenger : son pont, son état, sa fenêtre de connexion, son NIP d'historique.
-    pont_meta: Option<Pont>,
-    etat_meta: Etat,
-    nom_meta: Option<String>,
-    avatar_messenger: Option<PathBuf>,
-    connexion_meta: Arc<Mutex<Option<Result<Value, String>>>>,
-    connexion_meta_ouverte: bool,
+    /// Messenger et Instagram : un pont Meta chacun. Le NIP d'historique est à Messenger.
+    messenger: CompteMeta,
+    instagram: CompteMeta,
     besoin_nip: bool,
     nip: Entity<InputState>,
     convs: Vec<Conv>,
@@ -1089,10 +1145,9 @@ struct Jasette {
     a_ouvrir: Boite<String>,
 }
 
-/// Les ids venant de Messenger portent le préfixe « m: » dans l'interface :
-/// ils ne peuvent pas se confondre avec ceux de Google, et ils disent à
-/// quel pont envoyer une commande.
-const PREFIXE_META: &str = "m:";
+// Les ids venant de Messenger portent le préfixe « m: » dans l'interface, ceux
+// d'Instagram « i: » : ils ne peuvent pas se confondre avec ceux de Google, et
+// ils disent à quel pont envoyer une commande (voir Service::prefixe).
 
 /// Un avatar recadré en carré (au centre) : GPUI arrondit l'image selon sa
 /// propre boîte, et une photo en hauteur dépasserait du rond.
@@ -1141,51 +1196,52 @@ fn est_numero(s: &str) -> bool {
 }
 
 fn service_de(id: &str) -> Service {
-    if id.starts_with(PREFIXE_META) { Service::Messenger } else { Service::GoogleMessages }
+    SERVICES_META.into_iter().find(|s| id.starts_with(s.prefixe())).unwrap_or(Service::GoogleMessages)
 }
 
-/// Ajoute le préfixe Messenger aux ids d'une nouvelle du pont Messenger.
-fn prefixer_meta(v: &mut Value) {
-    fn ids(v: &mut Value, dans_item: bool) {
+/// Ajoute le préfixe du service aux ids d'une nouvelle de son pont Meta.
+fn prefixer_meta(v: &mut Value, service: Service) {
+    let prefixe = service.prefixe();
+    fn ids(v: &mut Value, dans_item: bool, prefixe: &str) {
         match v {
             Value::Object(o) => {
                 for (k, x) in o.iter_mut() {
                     let cle = matches!(k.as_str(), "conv" | "media_id") || (dans_item && k == "id");
                     match x {
-                        Value::String(s) if cle && !s.is_empty() && !s.starts_with(PREFIXE_META) => {
-                            *s = format!("{PREFIXE_META}{s}");
+                        Value::String(s) if cle && !s.is_empty() && !s.starts_with(prefixe) => {
+                            *s = format!("{prefixe}{s}");
                         }
-                        _ => ids(x, matches!(k.as_str(), "item" | "items")),
+                        _ => ids(x, matches!(k.as_str(), "item" | "items"), prefixe),
                     }
                 }
             }
             Value::Array(a) => {
                 for x in a {
-                    ids(x, dans_item);
+                    ids(x, dans_item, prefixe);
                 }
             }
             _ => {}
         }
     }
-    ids(v, false);
-    v["_meta"] = Value::Bool(true);
+    ids(v, false, prefixe);
+    v["_service"] = Value::String(service.cle().into());
 }
 
-/// Une commande pour le pont Messenger ? (et on retire alors les préfixes).
-fn deprefixer_meta(v: &mut Value) -> bool {
-    let mut meta = false;
+/// Une commande pour un pont Meta ? Lequel (et on retire alors les préfixes).
+fn deprefixer_meta(v: &mut Value) -> Option<Service> {
+    let mut service = None;
     if let Value::Object(o) = v {
         for (k, x) in o.iter_mut() {
             if matches!(k.as_str(), "conv" | "media_id" | "msg" | "id")
                 && let Value::String(s) = x
-                && let Some(reste) = s.strip_prefix(PREFIXE_META)
+                && let Some(svc) = SERVICES_META.into_iter().find(|svc| s.starts_with(svc.prefixe()))
             {
-                *s = reste.to_string();
-                meta = true;
+                *s = s[svc.prefixe().len()..].to_string();
+                service = Some(svc);
             }
         }
     }
-    meta
+    service
 }
 
 fn script_connexion_meta() -> Option<PathBuf> {
@@ -1287,8 +1343,12 @@ impl Jasette {
                     this.nouveau_texte = texte.clone();
                     this.resultats_meta.clear();
                     // Messenger cherche parmi tes amis et contacts.
-                    if texte.chars().count() >= 2 && this.etat_meta == Etat::Pret && !est_numero(&texte) {
-                        this.commande_meta(json!({"cmd": "search", "text": texte}));
+                    if texte.chars().count() >= 2 && !est_numero(&texte) {
+                        for svc in SERVICES_META {
+                            if this.meta(svc).etat == Etat::Pret {
+                                this.commande_svc(svc, json!({"cmd": "search", "text": texte}));
+                            }
+                        }
                     }
                     cx.notify();
                 }
@@ -1344,25 +1404,27 @@ impl Jasette {
                             this.nouvelle(l);
                             change = true;
                         }
-                        let lignes: Vec<Value> = this.pont_meta.as_ref().map(|p| p.recevoir()).unwrap_or_default();
-                        for mut l in lignes {
-                            prefixer_meta(&mut l);
-                            this.nouvelle_meta(l);
-                            change = true;
-                        }
-                        let retour = this.connexion_meta.lock().ok().and_then(|mut r| r.take());
-                        if let Some(r) = retour {
-                            this.connexion_meta_ouverte = false;
-                            match r {
-                                Ok(v) => {
-                                    this.etat_meta = Etat::Association;
-                                    this.commande_meta(json!({
-                                        "cmd": "login", "cookies": v["cookies"], "platform": v["platform"]
-                                    }));
-                                }
-                                Err(e) => this.erreur = Some(e),
+                        for svc in SERVICES_META {
+                            let lignes: Vec<Value> = this.meta(svc).pont.as_ref().map(|p| p.recevoir()).unwrap_or_default();
+                            for mut l in lignes {
+                                prefixer_meta(&mut l, svc);
+                                this.nouvelle_meta(svc, l);
+                                change = true;
                             }
-                            change = true;
+                            let retour = this.meta(svc).connexion.lock().ok().and_then(|mut r| r.take());
+                            if let Some(r) = retour {
+                                this.meta_mut(svc).connexion_ouverte = false;
+                                match r {
+                                    Ok(v) => {
+                                        this.meta_mut(svc).etat = Etat::Association;
+                                        this.commande_svc(svc, json!({
+                                            "cmd": "login", "cookies": v["cookies"], "platform": v["platform"]
+                                        }));
+                                    }
+                                    Err(e) => this.erreur = Some(e),
+                                }
+                                change = true;
+                            }
                         }
                         let retour = this.connexion.lock().ok().and_then(|mut r| r.take());
                         if let Some(r) = retour {
@@ -1406,12 +1468,8 @@ impl Jasette {
             emoji: None,
             connexion: Arc::new(Mutex::new(None)),
             connexion_ouverte: false,
-            pont_meta: Pont::lancer_meta().map_err(|e| eprintln!("jasette : {e}")).ok(),
-            etat_meta: Etat::Demarrage,
-            nom_meta: None,
-            avatar_messenger: None,
-            connexion_meta: Arc::new(Mutex::new(None)),
-            connexion_meta_ouverte: false,
+            messenger: CompteMeta::lancer(Service::Messenger),
+            instagram: CompteMeta::lancer(Service::Instagram),
             besoin_nip: false,
             nip,
             convs: Vec::new(),
@@ -1473,45 +1531,70 @@ impl Jasette {
 
     /// Une commande pour le pont du service de la conversation (ou de la pièce) visée.
     fn commande(&self, mut v: Value) {
-        if deprefixer_meta(&mut v) {
-            self.commande_meta(v);
+        if let Some(svc) = deprefixer_meta(&mut v) {
+            self.commande_svc(svc, v);
         } else if let Some(p) = &self.pont {
             p.envoyer(&v);
         }
     }
 
-    fn commande_meta(&self, v: Value) {
-        if let Some(p) = &self.pont_meta {
+    /// Une commande pour le pont d'un service précis (ids déjà sans préfixe).
+    fn commande_svc(&self, svc: Service, v: Value) {
+        let pont = if svc == Service::GoogleMessages { self.pont.as_ref() } else { self.meta(svc).pont.as_ref() };
+        if let Some(p) = pont {
             p.envoyer(&v);
         }
     }
 
-    /// Les nouvelles du pont Messenger (ids déjà préfixés).
-    fn nouvelle_meta(&mut self, v: Value) {
+    fn commande_meta(&self, v: Value) {
+        self.commande_svc(Service::Messenger, v);
+    }
+
+    fn meta(&self, svc: Service) -> &CompteMeta {
+        if svc == Service::Instagram { &self.instagram } else { &self.messenger }
+    }
+
+    fn meta_mut(&mut self, svc: Service) -> &mut CompteMeta {
+        if svc == Service::Instagram { &mut self.instagram } else { &mut self.messenger }
+    }
+
+    /// Retire de l'écran tout ce qui vient d'un service (déconnexion).
+    fn oublier_service(&mut self, svc: Service) {
+        self.convs.retain(|c| service_de(&c.id) != svc);
+        self.archives.retain(|c| service_de(&c.id) != svc);
+        if self.choisie.as_deref().is_some_and(|c| service_de(c) == svc) {
+            self.choisie = None;
+        }
+    }
+
+    /// Les nouvelles d'un pont Meta (ids déjà préfixés).
+    fn nouvelle_meta(&mut self, svc: Service, v: Value) {
         match v.get("ev").and_then(Value::as_str).unwrap_or_default() {
             "state" => {
-                self.etat_meta = match v.get("state").and_then(Value::as_str).unwrap_or_default() {
+                let avant = self.meta(svc).etat;
+                let etat = match v.get("state").and_then(Value::as_str).unwrap_or_default() {
                     "unpaired" => Etat::NonAssocie,
                     "pairing" => Etat::Association,
                     "connecting" => Etat::Connexion,
                     "ready" => {
-                        if self.etat_meta != Etat::Pret {
-                            self.commande_meta(json!({"cmd": "conversations", "count": 50}));
+                        if avant != Etat::Pret {
+                            self.commande_svc(svc, json!({"cmd": "conversations", "count": 50}));
                         }
                         self.ajout_compte = false;
                         Etat::Pret
                     }
                     "reconnecting" => Etat::Reconnexion,
-                    _ => self.etat_meta,
+                    _ => avant,
                 };
-                if self.etat_meta == Etat::NonAssocie {
-                    self.convs.retain(|c| service_de(&c.id) != Service::Messenger);
-                    self.archives.retain(|c| service_de(&c.id) != Service::Messenger);
+                self.meta_mut(svc).etat = etat;
+                if etat == Etat::NonAssocie {
+                    self.convs.retain(|c| service_de(&c.id) != svc);
+                    self.archives.retain(|c| service_de(&c.id) != svc);
                 }
             }
-            "paired" => self.etat_meta = Etat::Connexion,
-            "account" => self.nom_meta = v.get("name").and_then(Value::as_str).map(str::to_string),
-            "avatar_moi" => self.avatar_messenger = v.get("path").and_then(Value::as_str).map(|p| carre(PathBuf::from(p))),
+            "paired" => self.meta_mut(svc).etat = Etat::Connexion,
+            "account" => self.meta_mut(svc).nom = v.get("name").and_then(Value::as_str).map(str::to_string),
+            "avatar_moi" => self.meta_mut(svc).avatar = v.get("path").and_then(Value::as_str).map(|p| carre(PathBuf::from(p))),
             "history_pin" => {
                 if v.get("needed").and_then(Value::as_bool) == Some(true) {
                     self.besoin_nip = true;
@@ -1523,31 +1606,28 @@ impl Jasette {
             }
             "search" => {
                 if v.get("query").and_then(Value::as_str) == Some(self.nouveau_texte.as_str()) {
-                    self.resultats_meta = v["items"]
-                        .as_array()
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|x| {
-                                    Some((x.get("id")?.as_str()?.to_string(), x.get("name")?.as_str()?.to_string()))
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                    // Les résultats de chaque service s'ajoutent (ids préfixés).
+                    self.resultats_meta.retain(|(id, _)| service_de(id) != svc);
+                    if let Some(a) = v["items"].as_array() {
+                        self.resultats_meta.extend(a.iter().filter_map(|x| {
+                            Some((x.get("id")?.as_str()?.to_string(), x.get("name")?.as_str()?.to_string()))
+                        }));
+                    }
                 }
             }
             "hello" | "e2ee" | "typing" => {}
             "error" => {
                 if let Some(texte) = v.get("text").and_then(Value::as_str) {
-                    self.erreur = Some(format!("Messenger : {texte}"));
+                    self.erreur = Some(format!("{} : {texte}", svc.court()));
                 }
             }
             _ => self.nouvelle(v),
         }
     }
 
-    /// Ouvre la fenêtre de connexion Messenger ; ses cookies reviennent par `self.connexion_meta`.
-    fn connecter_messenger(&mut self) {
-        if self.connexion_meta_ouverte {
+    /// Ouvre la fenêtre de connexion d'un service Meta ; ses cookies reviennent par `connexion`.
+    fn connecter_meta(&mut self, svc: Service) {
+        if self.meta(svc).connexion_ouverte {
             return;
         }
         let Some(script) = script_connexion_meta() else {
@@ -1555,11 +1635,13 @@ impl Jasette {
             return;
         };
         self.erreur = None;
-        self.connexion_meta_ouverte = true;
-        let retour = self.connexion_meta.clone();
+        self.meta_mut(svc).connexion_ouverte = true;
+        let retour = self.meta(svc).connexion.clone();
+        let option = if svc == Service::Instagram { "--instagram" } else { "--messenger" };
         std::thread::spawn(move || {
             let res = std::process::Command::new("python3")
                 .arg(&script)
+                .arg(option)
                 .stdin(std::process::Stdio::null())
                 .stderr(std::process::Stdio::inherit())
                 .output();
@@ -1747,8 +1829,11 @@ impl Jasette {
                     let mut vues = HashSet::new();
                     let items: Vec<Conv> = items.into_iter().filter(|c| vues.insert(c.id.clone())).collect();
                     // Chaque pont ne remplace que ses propres conversations.
-                    let meta = v.get("_meta").is_some();
-                    let garder = |c: &Conv| (service_de(&c.id) == Service::Messenger) != meta;
+                    let source = SERVICES_META
+                        .into_iter()
+                        .find(|s| v.get("_service").and_then(Value::as_str) == Some(s.cle()))
+                        .unwrap_or(Service::GoogleMessages);
+                    let garder = |c: &Conv| service_de(&c.id) != source;
                     let fusion = |anciennes: &mut Vec<Conv>, items: Vec<Conv>| {
                         anciennes.retain(garder);
                         anciennes.extend(items);
@@ -2320,7 +2405,8 @@ impl Jasette {
     fn photo_moi(&self) -> Option<PathBuf> {
         match self.reglages.avatar_source.as_str() {
             "google" => self.avatar_google.clone(),
-            "messenger" => self.avatar_messenger.clone(),
+            "messenger" => self.messenger.avatar.clone(),
+            "instagram" => self.instagram.avatar.clone(),
             "fichier" => self.reglages.avatar_fichier.clone().filter(|p| p.is_file()),
             _ => None,
         }
@@ -2418,15 +2504,15 @@ impl Jasette {
                     "av-fb",
                     "messenger",
                     t("Avatar de Facebook"),
-                    if self.avatar_messenger.is_some() {
-                        self.nom_meta.clone().unwrap_or_else(|| "Messenger".into())
+                    if self.messenger.avatar.is_some() {
+                        self.messenger.nom.clone().unwrap_or_else(|| "Messenger".into())
                     } else {
                         t("Quand Messenger sera connecté").into()
                     },
-                    avec_badge(avatar("F", "#0084ff", false, self.avatar_messenger.as_ref(), 34.), Service::Messenger),
-                    self.avatar_messenger.is_some(),
+                    avec_badge(avatar("F", "#0084ff", false, self.messenger.avatar.as_ref(), 34.), Service::Messenger),
+                    self.messenger.avatar.is_some(),
                 )
-                .when(self.avatar_messenger.is_some(), |d| {
+                .when(self.messenger.avatar.is_some(), |d| {
                     d.on_click(cx.listener(|this, _, _, cx| {
                         this.reglages.avatar_source = "messenger".into();
                         this.reglages.garder();
@@ -2435,6 +2521,24 @@ impl Jasette {
                     }))
                 }),
             )
+            .when(self.instagram.avatar.is_some(), |d| {
+                d.child(
+                    ligne(
+                        "av-ig",
+                        "instagram",
+                        t("Avatar d'Instagram"),
+                        self.instagram.nom.clone().unwrap_or_else(|| "Instagram".into()),
+                        avec_badge(avatar("I", "#d62976", false, self.instagram.avatar.as_ref(), 34.), Service::Instagram),
+                        true,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.reglages.avatar_source = "instagram".into();
+                        this.reglages.garder();
+                        this.menu_avatar = false;
+                        cx.notify();
+                    })),
+                )
+            })
             .child(
                 ligne(
                     "av-fichier",
@@ -2678,20 +2782,21 @@ impl Jasette {
                     })
                     .when(!gm_probleme && non_lus > 0, |d| d.child(pastille_nombre(non_lus, ton(c(DANGER), th().accent)))),
             ))
-            .when(!matches!(self.etat_meta, Etat::NonAssocie | Etat::Demarrage), |d| d.child(
-                Self::bouton_rail("r-messenger", !en_reglages && self.vue == Vue::Service(Service::Messenger))
-                    .on_click(cx.listener(|this, _, _, cx| {
+            .children(SERVICES_META.into_iter().filter(|s| self.meta(*s).associe()).map(|svc| {
+                let etat = self.meta(svc).etat;
+                Self::bouton_rail(if svc == Service::Instagram { "r-instagram" } else { "r-messenger" }, !en_reglages && self.vue == Vue::Service(svc))
+                    .on_click(cx.listener(move |this, _, _, cx| {
                         this.section = None;
                         this.galerie = None;
-                        this.vue = Vue::Service(Service::Messenger);
+                        this.vue = Vue::Service(svc);
                         cx.notify();
                     }))
-                    .child(logo(Service::Messenger, 32.))
-                    .when(matches!(self.etat_meta, Etat::Association | Etat::Connexion | Etat::Reconnexion), |d| {
-                        d.child(pastille_chargement("chargement-messenger"))
+                    .child(logo(svc, 32.))
+                    .when(matches!(etat, Etat::Association | Etat::Connexion | Etat::Reconnexion), |d| {
+                        d.child(pastille_chargement(if svc == Service::Instagram { "chargement-instagram" } else { "chargement-messenger" }))
                     })
-                    .when(matches!(self.etat_meta, Etat::TelephoneHorsLigne), |d| d.child(pastille_alerte())),
-            ))
+                    .when(matches!(etat, Etat::TelephoneHorsLigne), |d| d.child(pastille_alerte()))
+            }))
             // Les services non connectés n'ont pas d'icône : « ••• » mène à l'ajout de compte.
             .child(
                 Self::bouton_rail("r-plus-services", false)
@@ -3019,11 +3124,13 @@ impl Jasette {
             if self.conv(id).is_some() {
                 continue;
             }
-            let fbid = id.trim_start_matches(PREFIXE_META).to_string();
+            let svc = service_de(id);
+            let fbid = id[svc.prefixe().len()..].to_string();
+            let detail = if svc == Service::Instagram { t("Nouvelle conversation Instagram") } else { t("Nouvelle conversation Messenger") };
             boite = boite.child(
-                ligne(SharedString::from(format!("sugg-{id}")), nom.clone(), t("Nouvelle conversation Messenger").into(), Service::Messenger, None)
+                ligne(SharedString::from(format!("sugg-{id}")), nom.clone(), detail.into(), svc, None)
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.commande_meta(json!({"cmd": "new", "number": fbid}));
+                        this.commande_svc(svc, json!({"cmd": "new", "number": fbid}));
                         this.nouveau_ouvert = false;
                         this.numero.update(cx, |s, cx| s.set_value("", window, cx));
                         cx.notify();
@@ -4849,89 +4956,11 @@ impl Jasette {
                     }))
                     .into_any_element()
             });
-        let meta_associe = !matches!(self.etat_meta, Etat::NonAssocie | Etat::Demarrage);
-        let detail_meta = if self.pont_meta.is_none() {
-            t("Pont Messenger introuvable").to_string()
-        } else if self.connexion_meta_ouverte {
-            t("Connectez-vous dans la fenêtre Facebook…").to_string()
-        } else if meta_associe {
-            format!("{} · {}", self.nom_meta.clone().unwrap_or_else(|| "Messenger".into()), self.etat_meta.texte())
-        } else {
-            t("Non connecté").to_string()
-        };
-        let messenger = div()
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(14.))
-                    .px(px(16.))
-                    .py(px(13.))
-                    .child(logo(Service::Messenger, 40.))
-                    .child(
-                        div()
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap(px(2.))
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_row()
-                                    .items_center()
-                                    .gap(px(8.))
-                                    .when(meta_associe, |d| {
-                                        d.child(div().size(px(8.)).rounded(px(8.)).bg(c(self.etat_meta.couleur())))
-                                    })
-                                    .child(div().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child("Facebook Messenger")),
-                            )
-                            .child(div().text_size(px(12.)).text_color(th().texte_pale).child(detail_meta)),
-                    )
-                    .when(self.pont_meta.is_some(), |d| {
-                        d.child(if meta_associe {
-                            bouton_texte("fb-deco", t("Déconnecter"), DANGER)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.commande_meta(json!({"cmd": "unpair"}));
-                                    this.convs.retain(|c| service_de(&c.id) != Service::Messenger);
-                                    this.archives.retain(|c| service_de(&c.id) != Service::Messenger);
-                                    if this.choisie.as_deref().is_some_and(|c| service_de(c) == Service::Messenger) {
-                                        this.choisie = None;
-                                    }
-                                    cx.notify();
-                                }))
-                                .into_any_element()
-                        } else {
-                            bouton_texte("fb-co", t("Connecter"), ACCENT)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.connecter_messenger();
-                                    cx.notify();
-                                }))
-                                .into_any_element()
-                        })
-                    }),
-            )
-            // L'historique chiffré de Messenger demande le NIP choisi dans l'app Messenger.
-            .when(self.besoin_nip, |d| {
-                d.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(6.))
-                        .px(px(16.))
-                        .pb(px(13.))
-                        .child(div().text_size(px(12.)).text_color(th().texte).child(t(
-                            "Pour voir l'historique chiffré, entrez le NIP de Messenger (celui choisi dans l'app).",
-                        )))
-                        .child(verre(0.8, 999.).pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.nip).appearance(false))),
-                )
-            });
-
+        let messenger = self.ligne_compte_meta(Service::Messenger, cx);
+        let instagram = self.ligne_compte_meta(Service::Instagram, cx);
 
         carte_section(t("Comptes"))
-            .child(groupe().child(gm).child(separateur()).child(messenger))
+            .child(groupe().child(gm).child(separateur()).child(messenger).child(separateur()).child(instagram))
             .child(
                 div()
                     .id("ajouter-compte")
@@ -4948,13 +4977,97 @@ impl Jasette {
                         if !this.etat.associe() {
                             this.ajout_compte = true;
                         } else {
-                            this.erreur = Some(t("Messenger arrive bientôt ; Google Messages est déjà connecté.").into());
+                            this.erreur = Some(t("Google Messages est déjà connecté : connectez Messenger ou Instagram ci-dessus.").into());
                         }
                         cx.notify();
                     }))
                     .child(icone("circle-plus", 17., th().accent))
                     .child(t("Ajouter un compte")),
             )
+    }
+
+    /// La rangée d'un compte Meta (Messenger ou Instagram) dans « Comptes ».
+    fn ligne_compte_meta(&self, svc: Service, cx: &mut Context<Self>) -> Div {
+        let compte = self.meta(svc);
+        let meta_associe = compte.associe();
+        let detail_meta = if compte.pont.is_none() {
+            format!("{} ({})", t("Pont introuvable"), svc.court())
+        } else if compte.connexion_ouverte {
+            if svc == Service::Instagram {
+                t("Connectez-vous dans la fenêtre Instagram…").to_string()
+            } else {
+                t("Connectez-vous dans la fenêtre Facebook…").to_string()
+            }
+        } else if meta_associe {
+            format!("{} · {}", compte.nom.clone().unwrap_or_else(|| svc.court().into()), compte.etat.texte())
+        } else {
+            t("Non connecté").to_string()
+        };
+        div()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(14.))
+                    .px(px(16.))
+                    .py(px(13.))
+                    .child(logo(svc, 40.))
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .items_center()
+                                    .gap(px(8.))
+                                    .when(meta_associe, |d| {
+                                        d.child(div().size(px(8.)).rounded(px(8.)).bg(c(compte.etat.couleur())))
+                                    })
+                                    .child(div().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(svc.nom())),
+                            )
+                            .child(div().text_size(px(12.)).text_color(th().texte_pale).child(detail_meta)),
+                    )
+                    .when(compte.pont.is_some(), |d| {
+                        d.child(if meta_associe {
+                            bouton_texte(SharedString::from(format!("deco-{}", svc.cle())), t("Déconnecter"), DANGER)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.commande_svc(svc, json!({"cmd": "unpair"}));
+                                    this.oublier_service(svc);
+                                    cx.notify();
+                                }))
+                                .into_any_element()
+                        } else {
+                            bouton_texte(SharedString::from(format!("co-{}", svc.cle())), t("Connecter"), ACCENT)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.connecter_meta(svc);
+                                    cx.notify();
+                                }))
+                                .into_any_element()
+                        })
+                    }),
+            )
+            // L'historique chiffré de Messenger demande le NIP choisi dans l'app Messenger.
+            .when(svc == Service::Messenger && self.besoin_nip, |d| {
+                d.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(6.))
+                        .px(px(16.))
+                        .pb(px(13.))
+                        .child(div().text_size(px(12.)).text_color(th().texte).child(t(
+                            "Pour voir l'historique chiffré, entrez le NIP de Messenger (celui choisi dans l'app).",
+                        )))
+                        .child(verre(0.8, 999.).pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.nip).appearance(false))),
+                )
+            })
     }
 
     fn bouton_principal(id: &'static str, texte: &'static str) -> gpui::Stateful<Div> {
@@ -5355,7 +5468,7 @@ fn groupe() -> Div {
         .overflow_hidden()
 }
 
-fn bouton_texte(id: &'static str, texte: &'static str, couleur: u32) -> gpui::Stateful<Div> {
+fn bouton_texte(id: impl Into<gpui::ElementId>, texte: &'static str, couleur: u32) -> gpui::Stateful<Div> {
     div()
         .id(id)
         .px(px(14.))
@@ -5681,6 +5794,11 @@ fn t(fr: &'static str) -> &'static str {
         "Pont Messenger introuvable" => "Messenger bridge not found",
         "Connectez-vous dans la fenêtre Facebook…" => "Sign in in the Facebook window…",
         "Pour voir l'historique chiffré, entrez le NIP de Messenger (celui choisi dans l'app)." => "To see your encrypted history, enter your Messenger PIN (the one set in the app).",
+        "Nouvelle conversation Instagram" => "New Instagram chat",
+        "Avatar d'Instagram" => "Instagram avatar",
+        "Pont introuvable" => "Bridge not found",
+        "Connectez-vous dans la fenêtre Instagram…" => "Sign in in the Instagram window…",
+        "Google Messages est déjà connecté : connectez Messenger ou Instagram ci-dessus." => "Google Messages is already connected: connect Messenger or Instagram above.",
         "Créé par" => "Created by",
         "Archiver" => "Archive",
         "Épingler en haut" => "Pin to top",

@@ -54,6 +54,10 @@ func emitE2EE(state, text string) {
 
 // Enregistre (la première fois) puis connecte l'appareil chiffré.
 func (p *Pont) connectE2EE() {
+	// Instagram n'a pas (ici) de canal chiffré : seulement le socket normal.
+	if serviceName() == "instagram" {
+		return
+	}
 	p.mu.Lock()
 	cli, s, me := p.cli, p.sess, p.me
 	if cli == nil || s == nil || me == 0 || p.e2ee != nil {

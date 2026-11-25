@@ -145,9 +145,19 @@ func dataDir() string {
 	return filepath.Join(base, "jasette")
 }
 
-// Tout ce qui est propre à Messenger : <données>/messenger (700).
+// Le service servi par ce pont : « messenger » (défaut) ou « instagram »
+// (JASETTE_META_SERVICE). Le même programme sert les deux, chacun avec son
+// propre dossier de données.
+func serviceName() string {
+	if os.Getenv("JASETTE_META_SERVICE") == "instagram" {
+		return "instagram"
+	}
+	return "messenger"
+}
+
+// Tout ce qui est propre au service : <données>/messenger ou /instagram (700).
 func metaDir() string {
-	d := filepath.Join(dataDir(), "messenger")
+	d := filepath.Join(dataDir(), serviceName())
 	_ = os.MkdirAll(d, 0o700)
 	_ = os.Chmod(d, 0o700)
 	return d
@@ -215,7 +225,7 @@ func main() {
 	ctx, cancel := context.WithCancel(log.WithContext(context.Background()))
 	defer cancel()
 	p := newPont(ctx)
-	emit("hello", map[string]any{"version": 1, "service": "messenger"})
+	emit("hello", map[string]any{"version": 1, "service": serviceName()})
 	if err := p.openStore(); err != nil {
 		log.Err(err).Msg("base de données")
 		emitErr("store", fmt.Errorf("base de données Messenger illisible : %w", err))

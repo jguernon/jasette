@@ -38,17 +38,21 @@ fn chemin(nom: &str, var: &str) -> Option<PathBuf> {
 impl Pont {
     /// Le pont Google Messages.
     pub fn lancer() -> Result<Self, String> {
-        Self::lancer_nomme("jasette-pont", "JASETTE_PONT")
+        Self::lancer_nomme("jasette-pont", "JASETTE_PONT", None)
     }
 
-    /// Le pont Messenger.
-    pub fn lancer_meta() -> Result<Self, String> {
-        Self::lancer_nomme("jasette-meta", "JASETTE_META")
+    /// Le pont Meta, pour « messenger » ou « instagram » : le même programme,
+    /// une copie par service, chacune avec son dossier de données.
+    pub fn lancer_meta(service: &str) -> Result<Self, String> {
+        Self::lancer_nomme("jasette-meta", "JASETTE_META", Some(service))
     }
 
-    fn lancer_nomme(nom: &str, var: &str) -> Result<Self, String> {
+    fn lancer_nomme(nom: &str, var: &str, service: Option<&str>) -> Result<Self, String> {
         let chemin = chemin(nom, var).ok_or_else(|| format!("{nom} introuvable"))?;
         let mut cmd = Command::new(&chemin);
+        if let Some(s) = service {
+            cmd.env("JASETTE_META_SERVICE", s);
+        }
         // En développement, les photos téléchargées restent dans .cache du projet.
         if std::env::var_os("JASETTE_MEDIA").is_none() {
             let projet = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".cache");

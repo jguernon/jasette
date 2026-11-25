@@ -124,6 +124,8 @@ func platformFrom(name string) types.Platform {
 	switch strings.ToLower(name) {
 	case "facebook", "facebook.com", "fb":
 		return types.Facebook
+	case "instagram", "instagram.com", "ig":
+		return types.Instagram
 	default:
 		return types.Messenger
 	}
@@ -301,7 +303,7 @@ func (p *Pont) connect(s *Session, cli *messagix.Client, pre *loaded) {
 	s.Name = cmp.Or(pre.user.GetName(), s.Name)
 	p.mu.Unlock()
 	saveSession(s)
-	emit("account", map[string]any{"service": "messenger", "name": s.Name, "id": idStr(p.me), "email": ""})
+	emit("account", map[string]any{"service": serviceName(), "name": s.Name, "id": idStr(p.me), "email": ""})
 
 	p.handleTable(pre.tbl, true)
 	if err := cli.Connect(ctx); err != nil {
