@@ -5913,7 +5913,8 @@ impl Jasette {
                 if m.from_me && echec {
                     pied = format!("{pied} · {}", t("Échec"));
                 }
-                if !m.kind.is_empty() {
+                // Le genre (SMS, RCS, MMS) ; « e2ee » (Messenger chiffré) est interne.
+                if !m.kind.is_empty() && !m.kind.eq_ignore_ascii_case("e2ee") {
                     pied = format!("{pied} · {}", m.kind.to_uppercase());
                 }
                 let couleur = if flou {
