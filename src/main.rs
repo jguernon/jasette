@@ -1137,6 +1137,8 @@ struct Jasette {
     accueil_google: bool,
     /// L'accueil : « Autonome » choisi (on passe au choix du service).
     accueil_autonome: bool,
+    /// « Utiliser mon serveur Jasette » choisi, jumelage pas encore fait.
+    choix_client: bool,
     code_jumelage: Option<(String, String)>,
     appareils: Vec<String>,
     verif_client: Option<(String, String, pont::Verification)>,
@@ -1783,6 +1785,7 @@ impl Jasette {
             serveur_occupe: false,
             accueil_google: false,
             accueil_autonome: false,
+            choix_client: false,
             code_jumelage: None,
             appareils: Vec::new(),
             verif_client: None,
@@ -5559,6 +5562,7 @@ impl Jasette {
             |this, cfg, _| {
                 this.reglages.serveur = Some(cfg);
                 this.reglages.mode_serveur = "client".into();
+                this.choix_client = false;
                 this.reglages.garder();
                 this.rebrancher();
             },
@@ -5606,11 +5610,15 @@ impl Jasette {
                         "laptop",
                         "Sur cet appareil",
                         "Jasette se connecte elle-même à chaque service.",
-                        mode.is_empty(),
+                        mode.is_empty() && !self.choix_client,
                     )
-                    .when(!mode.is_empty() && !occupe, |d| {
+                    .when(!occupe, |d| {
                         d.on_click(cx.listener(|this, _, _, cx| {
-                            this.utiliser_cet_appareil(cx);
+                            this.choix_client = false;
+                            this.verif_client = None;
+                            if !this.reglages.mode_serveur.is_empty() {
+                                this.utiliser_cet_appareil(cx);
+                            }
                             cx.notify();
                         }))
                     }),
@@ -5626,6 +5634,7 @@ impl Jasette {
                     )
                     .when(mode != "serveur" && !occupe, |d| {
                         d.on_click(cx.listener(|this, _, _, cx| {
+                            this.choix_client = false;
                             this.devenir_serveur(cx);
                             cx.notify();
                         }))
@@ -5638,8 +5647,15 @@ impl Jasette {
                         "monitor",
                         "Utiliser mon serveur Jasette",
                         "Tous les services passent par votre serveur : rien à connecter ici.",
-                        mode == "client",
-                    ),
+                        mode == "client" || (mode.is_empty() && self.choix_client),
+                    )
+                    .when(mode != "client" && !occupe, |d| {
+                        d.on_click(cx.listener(|this, _, window, cx| {
+                            this.choix_client = true;
+                            this.adresse_serveur.update(cx, |s, cx| s.focus(window, cx));
+                            cx.notify();
+                        }))
+                    }),
                 ),
         );
         if occupe {
@@ -5736,7 +5752,7 @@ impl Jasette {
                     ),
                 );
             }
-            _ => {
+            _ if self.choix_client => {
                 let mut boite = div().flex().flex_col().gap(px(10.)).p(px(16.));
                 if let Some((adresse, _, v)) = &self.verif_client {
                     boite = boite
@@ -5779,6 +5795,7 @@ impl Jasette {
                 }
                 carte = carte.child(titre("Utiliser mon serveur Jasette")).child(groupe().child(boite));
             }
+            _ => {}
         }
         if let Some(e) = &self.erreur {
             carte = carte.child(div().pt(px(12.)).text_size(px(13.)).text_color(c(DANGER)).child(e.clone()));
@@ -6015,6 +6032,7 @@ impl Jasette {
                 .child(
                     mode("mode-client", "monitor", "Client", "Se brancher à votre serveur Jasette : rien à connecter ici.").on_click(
                         cx.listener(|this, _, _, cx| {
+                            this.choix_client = true;
                             this.section = Some(Section::Serveur);
                             cx.notify();
                         }),
