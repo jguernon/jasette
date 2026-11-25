@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1133,10 +1134,40 @@ func (p *Pont) createWhatsAppDM(ctx context.Context, cli *messagix.Client, id in
 
 // Recherche de personnes : « search{items:[{id,name,avatar}]} ».
 func (p *Pont) search(q string) {
+	type item struct {
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		Avatar string `json:"avatar,omitempty"`
+	}
+	// D'abord les contacts déjà connus (cache local), sans accents ni majuscules :
+	// une personne sans conversation récente se trouve même si la recherche de
+	// Meta ne la renvoie pas. Envoyés tout de suite, sans attendre le réseau.
+	items := []item{}
+	vus := map[int64]bool{}
+	p.mu.Lock()
+	moi := p.me
+	p.mu.Unlock()
+	if pq := plier(q); pq != "" {
+		p.tableMu.Lock()
+		for id, c := range p.contacts {
+			if c != nil && c.Name != "" && strings.Contains(plier(c.Name), pq) && id != moi {
+				vus[id] = true
+				items = append(items, item{ID: idStr(id), Name: c.Name})
+			}
+		}
+		p.tableMu.Unlock()
+		sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+		if len(items) > 20 {
+			items = items[:20]
+		}
+	}
 	cli := p.client()
 	if cli == nil || q == "" {
-		emit("search", map[string]any{"query": q, "items": []any{}})
+		emit("search", map[string]any{"query": q, "items": items})
 		return
+	}
+	if len(items) > 0 {
+		emit("search", map[string]any{"query": q, "items": items})
 	}
 	task := &socket.SearchUserTask{
 		Query: q,
@@ -1150,19 +1181,21 @@ func (p *Pont) search(q string) {
 	resp, err := cli.ExecuteTasks(ctx, task)
 	if err != nil {
 		emitErr("search", fmt.Errorf("recherche : %w", explain(err)))
-		emit("search", map[string]any{"query": q, "items": []any{}})
+		emit("search", map[string]any{"query": q, "items": items})
 		return
 	}
-	type item struct {
-		ID     string `json:"id"`
-		Name   string `json:"name"`
-		Avatar string `json:"avatar,omitempty"`
-	}
-	items := []item{}
-	vus := map[int64]bool{}
 	for _, r := range resp.LSInsertSearchResult {
 		id := r.GetFBID()
-		if id == 0 || vus[id] || !r.ThreadType.IsOneToOne() {
+		if id == 0 || !r.ThreadType.IsOneToOne() {
+			continue
+		}
+		if vus[id] {
+			// Déjà trouvé dans le cache : on garde la photo de Meta.
+			for i := range items {
+				if items[i].ID == idStr(id) && items[i].Avatar == "" {
+					items[i].Avatar = r.ProfilePicUrl
+				}
+			}
 			continue
 		}
 		vus[id] = true
