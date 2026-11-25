@@ -823,14 +823,19 @@ private fun ChoixTailleMessages() {
                 Text("A", color = P.textePale, fontSize = 20.sp)
             }
             Column(
-                Modifier.fillMaxWidth().clip(forme(14.dp)).background(P.fil).padding(12.dp),
+                // Le fond du fil ; en Verre, la teinte du verre (le fil est un voile blanc,
+                // la bulle reçue ne s'y verrait pas sur la carte blanche).
+                Modifier.fillMaxWidth().clip(forme(14.dp)).background(if (P.clair && !P.ega) P.filet else P.fil).padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 val taille = (15f * actuelle).sp
                 val ligne = (20f * actuelle).sp
                 Text(
                     t("On se voit au chalet vendredi ?"), color = P.texteFort, fontSize = taille, lineHeight = ligne,
-                    modifier = Modifier.clip(forme(18.dp)).background(P.surface).padding(horizontal = 13.dp, vertical = 8.dp),
+                    // Comme dans le fil : le liseré de la bulle reçue (Verre, EGA).
+                    modifier = Modifier.clip(forme(18.dp)).background(P.surface)
+                        .let { if (P.bordBulle.alpha > 0f) it.border(1.dp, P.bordBulle, forme(18.dp)) else it }
+                        .padding(horizontal = 13.dp, vertical = 8.dp),
                 )
                 Text(
                     t("Oui ! J'apporte les guimauves."), color = P.surAccent, fontSize = taille, lineHeight = ligne,
