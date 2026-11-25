@@ -96,6 +96,7 @@ type Cmd struct {
 	Folder  string            `json:"folder"`
 	Key     []byte            `json:"key"`
 	Mime    string            `json:"mime"`
+	Archive bool              `json:"archived"`
 }
 
 var (
@@ -1011,6 +1012,45 @@ func (p *Pont) markRead(cmd Cmd) {
 	}
 }
 
+// archive range une conversation dans les archives (ou l'en sort).
+func (p *Pont) archive(cmd Cmd) {
+	cli := p.client()
+	if cli == nil || cmd.Conv == "" {
+		return
+	}
+	statut := gmproto.ConversationStatus_ACTIVE
+	if cmd.Archive {
+		statut = gmproto.ConversationStatus_ARCHIVED
+	}
+	ctx, annule := context.WithTimeout(p.ctx, 20*time.Second)
+	defer annule()
+	_, err := cli.UpdateConversation(ctx, &gmproto.UpdateConversationRequest{
+		ConversationID: cmd.Conv,
+		Data: &gmproto.UpdateConversationRequest_UpdateData{
+			UpdateData: &gmproto.UpdateConversationData{
+				ConversationID: cmd.Conv,
+				Data:           &gmproto.UpdateConversationData_Status{Status: statut},
+			},
+		},
+	})
+	if err != nil {
+		emitErr("archive", fmt.Errorf("archivage : %w", err))
+	}
+}
+
+// deleteConv supprime une conversation (sur le téléphone aussi).
+func (p *Pont) deleteConv(cmd Cmd) {
+	cli := p.client()
+	if cli == nil || cmd.Conv == "" {
+		return
+	}
+	ctx, annule := context.WithTimeout(p.ctx, 20*time.Second)
+	defer annule()
+	if err := cli.DeleteConversation(ctx, cmd.Conv, ""); err != nil {
+		emitErr("delete", fmt.Errorf("suppression : %w", err))
+	}
+}
+
 func (p *Pont) unpair() {
 	if cli := p.client(); cli != nil {
 		_ = cli.Unpair(p.ctx)
@@ -1063,6 +1103,10 @@ func main() {
 			go p.send(cmd)
 		case "read":
 			go p.markRead(cmd)
+		case "archive":
+			go p.archive(cmd)
+		case "delete":
+			go p.deleteConv(cmd)
 		case "download":
 			go p.download(cmd)
 		case "send_media":

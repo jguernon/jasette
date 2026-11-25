@@ -1027,6 +1027,9 @@ struct Jasette {
     emojis_ouverts: bool,
     /// Le choix de l'avatar « Moi » est ouvert ; la photo que Google Messages connaît.
     menu_avatar: bool,
+    /// Le menu « … » de la conversation ouverte, et la confirmation de suppression.
+    menu_conv: bool,
+    confirmer_suppression: bool,
     /// Le champ « nouveau message » et les personnes que Messenger propose (id préfixé, nom, photo).
     nouveau_texte: String,
     resultats_meta: Vec<(String, String)>,
@@ -1417,6 +1420,8 @@ impl Jasette {
             envoi_seq: 0,
             emojis_ouverts: false,
             menu_avatar: false,
+            menu_conv: false,
+            confirmer_suppression: false,
             nouveau_texte: String::new(),
             resultats_meta: Vec::new(),
             details_heures: false,
@@ -1916,6 +1921,10 @@ impl Jasette {
     }
 
     fn choisir(&mut self, id: String) {
+        // Changer de conversation ferme la galerie et le menu d'options.
+        self.galerie = None;
+        self.menu_conv = false;
+        self.confirmer_suppression = false;
         self.emojis_ouverts = false;
         if !self.messages.contains_key(&id) {
             self.chargement = Some(id.clone());
@@ -3844,6 +3853,23 @@ impl Jasette {
             }))
             .child(icone("info", 17., if details { th().accent } else { th().texte_pale }));
         let service = self.choisie.as_deref().map(service_de).unwrap_or(Service::GoogleMessages);
+        let menu_ouvert = self.menu_conv;
+        let bouton_options = div()
+            .id("options-conv")
+            .size(px(28.))
+            .rounded(rayon(999.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .when(menu_ouvert, |d| d.bg(th().survol))
+            .hover(|s| s.bg(th().survol))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.menu_conv = !this.menu_conv;
+                this.confirmer_suppression = false;
+                cx.notify();
+            }))
+            .child(icone("ellipsis", 17., th().texte_pale));
         let conv_medias = self.choisie.clone();
         let bouton_medias = div()
             .id("medias-conv")
@@ -3970,6 +3996,7 @@ impl Jasette {
                         )
                         .child(bouton_medias)
                         .child(bouton_info)
+                        .child(bouton_options)
                         .child(
                             div()
                                 .px(px(10.))
@@ -4025,6 +4052,110 @@ impl Jasette {
             .when(self.emojis_ouverts, |d| {
                 d.child(div().absolute().right(px(70.)).bottom(px(HAUT_COMPOSEUR + 4.)).child(self.panneau_emojis(cx)))
             })
+            .when(self.menu_conv && choisie.is_some(), |d| {
+                d.child(div().absolute().right(px(16.)).top(px(HAUT_ENTETE - 4.)).child(self.menu_conversation(cx)))
+            })
+    }
+
+    /// Le menu « … » : médias, archiver, supprimer.
+    fn menu_conversation(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(id) = self.choisie.clone() else { return div() };
+        let google = service_de(&id) == Service::GoogleMessages;
+        let archivee = self.archives.iter().any(|c| c.id == id);
+        let item = |cle: &'static str, ic: &'static str, texte: String, couleur: Hsla, actif: bool| {
+            div()
+                .id(cle)
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(10.))
+                .px(px(12.))
+                .py(px(9.))
+                .rounded(rayon(10.))
+                .text_size(px(14.))
+                .text_color(couleur)
+                .when(actif, |d| d.cursor_pointer().hover(|s| s.bg(th().survol)))
+                .when(!actif, |d| d.opacity(0.45))
+                .child(icone(ic, 16., couleur))
+                .child(texte)
+        };
+        let id_m = id.clone();
+        let id_a = id.clone();
+        let mut menu = verre(0.96, 16.)
+            .shadow(ombre_verre())
+            .w(px(240.))
+            .p(px(6.))
+            .flex()
+            .flex_col()
+            .child(item("menu-medias", "images", t("Médias").into(), th().texte_fort, true).on_click(cx.listener(
+                move |this, _, _, cx| {
+                    this.menu_conv = false;
+                    this.ouvrir_galerie(Some(id_m.clone()));
+                    cx.notify();
+                },
+            )))
+            .child(
+                item(
+                    "menu-archiver",
+                    "archive",
+                    if archivee { t("Désarchiver") } else { t("Archiver") }.into(),
+                    th().texte_fort,
+                    google,
+                )
+                .when(google, |d| {
+                    d.on_click(cx.listener(move |this, _, _, cx| {
+                        this.menu_conv = false;
+                        this.commande(json!({"cmd": "archive", "conv": id_a, "archived": !archivee}));
+                        // Tout de suite à l'écran ; le téléphone confirmera.
+                        if archivee {
+                            if let Some(i) = this.archives.iter().position(|c| c.id == id_a) {
+                                let mut c = this.archives.remove(i);
+                                c.archived = false;
+                                this.convs.push(c);
+                                this.convs.sort_by(|a, b| b.time.cmp(&a.time));
+                            }
+                        } else if let Some(i) = this.convs.iter().position(|c| c.id == id_a) {
+                            let mut c = this.convs.remove(i);
+                            c.archived = true;
+                            this.archives.insert(0, c);
+                            this.choisie = None;
+                        }
+                        cx.notify();
+                    }))
+                }),
+            );
+        if !google {
+            menu = menu.child(
+                div().px(px(12.)).py(px(6.)).text_size(px(12.)).text_color(th().texte_pale).child(t("Archiver et supprimer : bientôt pour Messenger.")),
+            );
+        }
+        let id_s = id.clone();
+        menu.child(div().h(px(1.)).mx(px(8.)).my(px(4.)).bg(th().survol)).child(
+            item(
+                "menu-supprimer",
+                "trash",
+                if self.confirmer_suppression { t("Confirmer la suppression") } else { t("Supprimer la conversation") }.into(),
+                th().danger,
+                google,
+            )
+            .when(self.confirmer_suppression, |d| d.bg(alpha(th().danger, 0.12)))
+            .when(google, |d| {
+                d.on_click(cx.listener(move |this, _, _, cx| {
+                    if !this.confirmer_suppression {
+                        this.confirmer_suppression = true;
+                    } else {
+                        this.commande(json!({"cmd": "delete", "conv": id_s}));
+                        this.convs.retain(|c| c.id != id_s);
+                        this.archives.retain(|c| c.id != id_s);
+                        this.messages.remove(&id_s);
+                        this.choisie = None;
+                        this.menu_conv = false;
+                        this.confirmer_suppression = false;
+                    }
+                    cx.notify();
+                }))
+            }),
+        )
     }
 
     // ---- Dessin : les réglages ----
@@ -4254,7 +4385,8 @@ impl Jasette {
                     .flex()
                     .flex_col()
                     .gap(px(4.))
-                    .child(div().h(px(8.)).bg(c(EGA_BLEU)))
+                    // Arrondie comme la tuile (14 px, moins le trait) : GPUI ne découpe pas les enfants.
+                    .child(div().h(px(9.)).rounded_t(rayon(13.)).bg(c(EGA_BLEU)))
                     .child(div().flex().flex_col().gap(px(4.)).px(px(5.)).pt(px(1.))
                         .child(ligne_ega(28., EGA_JAUNE))
                         .child(ligne_ega(38., EGA_GRIS_CLAIR))
@@ -5340,6 +5472,11 @@ fn t(fr: &'static str) -> &'static str {
         "Connectez-vous dans la fenêtre Facebook…" => "Sign in in the Facebook window…",
         "Pour voir l'historique chiffré, entrez le NIP de Messenger (celui choisi dans l'app)." => "To see your encrypted history, enter your Messenger PIN (the one set in the app).",
         "Créé par" => "Created by",
+        "Archiver" => "Archive",
+        "Désarchiver" => "Unarchive",
+        "Supprimer la conversation" => "Delete conversation",
+        "Confirmer la suppression" => "Confirm delete",
+        "Archiver et supprimer : bientôt pour Messenger." => "Archive and delete: coming soon for Messenger.",
         "Nom ou numéro de téléphone" => "Name or phone number",
         "Nouvelle conversation Messenger" => "New Messenger chat",
         "Nouveau message par Google Messages" => "New message via Google Messages",
