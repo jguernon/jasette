@@ -1,7 +1,7 @@
 # Jasette
 
 Toutes tes messageries dans une seule app : Google Messages (SMS/RCS), Messenger,
-Instagram, WhatsApp, Signal, X et Telegram. Pour Linux et Android.
+Instagram, WhatsApp, Signal, X, Telegram et Bluesky. Pour Linux et Android.
 
 Page de présentation et téléchargements : https://jonathanguernon.net/jasette/
 
@@ -12,7 +12,8 @@ Page de présentation et téléchargements : https://jonathanguernon.net/jasette
   protocole du service au nom de ton compte. Ils reposent sur les bibliothèques
   de [mautrix](https://github.com/mautrix) (gmessages, meta, whatsmeow,
   signalmeow), sur [libsignal](https://github.com/signalapp/libsignal) et, pour
-  Telegram, sur [gotd/td](https://github.com/gotd/td).
+  Telegram, sur [gotd/td](https://github.com/gotd/td). Le pont Bluesky
+  (messages privés) parle directement l'API XRPC d'AT Protocol.
 - **Serveur Jasette** (`serveur/`) : facultatif. Il garde les sessions sur une
   machine toujours allumée, et tes autres appareils (bureau, Android) s'y
   branchent, par un lien TLS épinglé et un jumelage à code. Protocole :
@@ -56,6 +57,12 @@ Réglages > Comptes > Telegram (ou dans `JASETTE_TELEGRAM_API_ID` et
 `JASETTE_TELEGRAM_API_HASH`). Jasette n'en fournit aucun par défaut et
 n'emprunte pas ceux d'une autre application (Telegram Desktop, par exemple) :
 le pont les garde dans `<données>/telegram/api.json` (0600).
+
+Bluesky (messages privés seulement) demande un **mot de passe d'app** avec
+l'accès aux messages : dans Bluesky, Réglages > Confidentialité et sécurité >
+Mots de passe d'app > Ajouter, en cochant « Autoriser l'accès à vos messages
+privés ». Jasette ne garde que les jetons de session
+(`<données>/bluesky/session.json`, 0600), jamais le mot de passe.
 
 ## Vie privée
 

@@ -122,6 +122,8 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
                                 Service.X -> BoutonAccent(t("Se connecter")) { connecter(s, "x") }
                                 // Telegram : numéro et code, ou code QR (Telegram.kt).
                                 Service.TELEGRAM -> BoutonAccent(t("Se connecter")) { connecter(s, "") }
+                                // Bluesky : identifiant et mot de passe d'app (Bluesky.kt).
+                                Service.BLUESKY -> BoutonAccent(t("Se connecter")) { connecter(s, "") }
                             }
                         }
                     }

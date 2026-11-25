@@ -791,6 +791,7 @@ enum Service {
     Signal,
     X,
     Telegram,
+    Bluesky,
 }
 
 impl Service {
@@ -803,6 +804,7 @@ impl Service {
             Service::Signal => "Signal",
             Service::X => "X",
             Service::Telegram => "Telegram",
+            Service::Bluesky => "Bluesky",
         }
     }
 
@@ -816,6 +818,7 @@ impl Service {
             Service::Signal => "Signal",
             Service::X => "X",
             Service::Telegram => "Telegram",
+            Service::Bluesky => "Bluesky",
         }
     }
 
@@ -829,6 +832,7 @@ impl Service {
             Service::Signal => "s:",
             Service::X => "x:",
             Service::Telegram => "t:",
+            Service::Bluesky => "b:",
         }
     }
 
@@ -854,13 +858,14 @@ impl Service {
             Service::Signal => "signal",
             Service::X => "x",
             Service::Telegram => "telegram",
+            Service::Bluesky => "bluesky",
         }
     }
 
     /// Un service facultatif : son pont n'existe que si son binaire est là
     /// (ou si le serveur Jasette l'offre) ; sinon il est absent de l'interface.
     fn facultatif(self) -> bool {
-        matches!(self, Service::WhatsApp | Service::Signal | Service::X | Service::Telegram)
+        matches!(self, Service::WhatsApp | Service::Signal | Service::X | Service::Telegram | Service::Bluesky)
     }
 
     /// Les ids d'éléments propres à ce service (barre latérale, pastilles).
@@ -873,6 +878,7 @@ impl Service {
             Service::Signal => "r-signal",
             Service::X => "r-x",
             Service::Telegram => "r-telegram",
+            Service::Bluesky => "r-bluesky",
         }
     }
 
@@ -885,6 +891,7 @@ impl Service {
             Service::Signal => "chargement-signal",
             Service::X => "chargement-x",
             Service::Telegram => "chargement-telegram",
+            Service::Bluesky => "chargement-bluesky",
         }
     }
 }
@@ -924,8 +931,15 @@ fn lancer_pont(r: &Reglages, svc: Service) -> Result<Pont, String> {
 /// Les services autres que Google, tous gérés comme un compte Meta : le pont
 /// Meta (une copie par service) pour Messenger et Instagram, un pont chacun
 /// (même protocole) pour WhatsApp, Signal et X.
-const SERVICES_META: [Service; 6] =
-    [Service::Messenger, Service::Instagram, Service::WhatsApp, Service::Signal, Service::X, Service::Telegram];
+const SERVICES_META: [Service; 7] = [
+    Service::Messenger,
+    Service::Instagram,
+    Service::WhatsApp,
+    Service::Signal,
+    Service::X,
+    Service::Telegram,
+    Service::Bluesky,
+];
 
 /// Un compte Meta : son pont, son état, sa fenêtre de connexion.
 struct CompteMeta {
@@ -1015,6 +1029,7 @@ fn image_service(s: Service, taille: f32) -> Arc<gpui::Image> {
         Service::WhatsApp => (3u8, variantes!("whatsapp")),
         Service::Signal => (4u8, variantes!("signal")),
         Service::Telegram => (6u8, variantes!("telegram")),
+        Service::Bluesky => (7u8, variantes!("bluesky")),
         Service::X => return image_service_svg(s, taille),
     };
     let voulu = taille * 2.;
@@ -1712,6 +1727,7 @@ struct Jasette {
     signal: CompteMeta,
     x: CompteMeta,
     telegram: CompteMeta,
+    bluesky: CompteMeta,
     /// L'écran d'association ouvert (WhatsApp, Signal ou X), dans Comptes.
     ajout_service: Option<Service>,
     /// WhatsApp : le numéro pour « Associer avec un numéro de téléphone ».
@@ -1731,6 +1747,9 @@ struct Jasette {
     mdp_tg: Entity<InputState>,
     api_id_tg: Entity<InputState>,
     api_hash_tg: Entity<InputState>,
+    /// Bluesky : l'identifiant (nom ou courriel) et le mot de passe d'app.
+    ident_bs: Entity<InputState>,
+    mdp_bs: Entity<InputState>,
     besoin_nip: bool,
     nip: Entity<InputState>,
     convs: Vec<Conv>,
@@ -2227,7 +2246,7 @@ fn adresse_appel(conv: &Conv) -> Option<String> {
         Service::Messenger => Some(format!("https://www.messenger.com/t/{id}")),
         Service::Instagram => Some(format!("https://www.instagram.com/direct/t/{id}/")),
         // Pas d'appel par le web pour ceux-là : l'app du téléphone.
-        Service::WhatsApp | Service::Signal | Service::X | Service::Telegram => None,
+        Service::WhatsApp | Service::Signal | Service::X | Service::Telegram | Service::Bluesky => None,
     }
 }
 
@@ -2394,6 +2413,16 @@ impl Jasette {
         cx.subscribe_in(&api_hash_tg, window, |this, _state, ev: &InputEvent, window, cx| {
             if let InputEvent::PressEnter { .. } = ev {
                 this.tg_enregistrer_api(window, cx);
+                cx.notify();
+            }
+        })
+        .detach();
+        // Bluesky : identifiant et mot de passe d'app.
+        let ident_bs = cx.new(|cx| InputState::new(window, cx).placeholder(t("nom.bsky.social ou courriel")));
+        let mdp_bs = cx.new(|cx| InputState::new(window, cx).placeholder(t("Mot de passe d'app (xxxx-xxxx-xxxx-xxxx)")).masked(true));
+        cx.subscribe_in(&mdp_bs, window, |this, _state, ev: &InputEvent, window, cx| {
+            if let InputEvent::PressEnter { .. } = ev {
+                this.bs_connecter(window, cx);
                 cx.notify();
             }
         })
@@ -2584,6 +2613,7 @@ impl Jasette {
             signal: CompteMeta::lancer(Service::Signal, &reglages),
             x: CompteMeta::lancer(Service::X, &reglages),
             telegram: CompteMeta::lancer(Service::Telegram, &reglages),
+            bluesky: CompteMeta::lancer(Service::Bluesky, &reglages),
             ajout_service: None,
             telephone_wa,
             cookies_x: None,
@@ -2596,6 +2626,8 @@ impl Jasette {
             mdp_tg,
             api_id_tg,
             api_hash_tg,
+            ident_bs,
+            mdp_bs,
             besoin_nip: false,
             nip,
             plus_anciens: cache.fils.iter().map(|(k, f)| (k.clone(), f.more)).collect(),
@@ -2733,6 +2765,7 @@ impl Jasette {
             Service::Signal => &self.signal,
             Service::X => &self.x,
             Service::Telegram => &self.telegram,
+            Service::Bluesky => &self.bluesky,
             Service::Messenger | Service::GoogleMessages => &self.messenger,
         }
     }
@@ -2744,6 +2777,7 @@ impl Jasette {
             Service::Signal => &mut self.signal,
             Service::X => &mut self.x,
             Service::Telegram => &mut self.telegram,
+            Service::Bluesky => &mut self.bluesky,
             Service::Messenger | Service::GoogleMessages => &mut self.messenger,
         }
     }
@@ -2943,8 +2977,9 @@ impl Jasette {
     /// dont les cookies reviennent par `connexion`. WhatsApp et Signal :
     /// l'écran d'association, avec les QR du pont (ou du rejeu du serveur).
     fn connecter_meta(&mut self, svc: Service) {
-        // Telegram : son écran (numéro et code, ou code QR) ; rien n'est envoyé encore.
-        if svc == Service::Telegram {
+        // Telegram et Bluesky : leur écran (numéro et code, code QR, ou
+        // identifiant et mot de passe d'app) ; rien n'est envoyé encore.
+        if matches!(svc, Service::Telegram | Service::Bluesky) {
             self.erreur = None;
             self.ajout_service = Some(svc);
             self.section = Some(Section::Comptes);
@@ -3019,6 +3054,21 @@ impl Jasette {
         self.erreur = None;
         self.whatsapp.code = None;
         self.commande_svc(Service::WhatsApp, json!({"cmd": "pair_phone", "number": format!("+{chiffres}")}));
+    }
+
+    /// Bluesky : l'identifiant et le mot de passe d'app. Le pont ne garde
+    /// que les jetons de session (session.json, 0600), jamais le mot de passe.
+    fn bs_connecter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ident = self.ident_bs.read(cx).value().trim().to_string();
+        let mdp = self.mdp_bs.read(cx).value().trim().to_string();
+        if ident.is_empty() || mdp.is_empty() {
+            self.erreur = Some(t("Entrez votre identifiant Bluesky et un mot de passe d'app.").into());
+            return;
+        }
+        self.erreur = None;
+        self.mdp_bs.update(cx, |s, cx| s.set_value("", window, cx));
+        self.bluesky.etat = Etat::Association;
+        self.commande_svc(Service::Bluesky, json!({"cmd": "login", "number": ident, "password": mdp}));
     }
 
     /// Telegram : le numéro → Telegram envoie un code dans l'app (ou par SMS).
@@ -4629,11 +4679,12 @@ impl Jasette {
                 )
             })
             // WhatsApp, Signal et X : seulement s'ils ont donné une photo.
-            .children([Service::WhatsApp, Service::Signal, Service::X, Service::Telegram].into_iter().filter(|s| self.meta(*s).avatar.is_some()).map(|svc| {
+            .children([Service::WhatsApp, Service::Signal, Service::X, Service::Telegram, Service::Bluesky].into_iter().filter(|s| self.meta(*s).avatar.is_some()).map(|svc| {
                 let (id, titre, initiale, couleur) = match svc {
                     Service::WhatsApp => ("av-wa", t("Avatar de WhatsApp"), "W", "#25d366"),
                     Service::Signal => ("av-signal", t("Avatar de Signal"), "S", "#3a76f0"),
                     Service::Telegram => ("av-telegram", t("Avatar de Telegram"), "T", "#2aabee"),
+                    Service::Bluesky => ("av-bluesky", t("Avatar de Bluesky"), "B", "#1185fe"),
                     _ => ("av-x", t("Avatar de X"), "X", "#000000"),
                 };
                 let compte = self.meta(svc);
@@ -5302,6 +5353,7 @@ impl Jasette {
                 Service::Signal => t("Nouvelle conversation Signal").to_string(),
                 Service::X => t("Nouvelle conversation X").to_string(),
                 Service::Telegram => t("Nouvelle conversation Telegram").to_string(),
+                Service::Bluesky => t("Nouvelle conversation Bluesky").to_string(),
                 Service::Messenger => t("Nouvelle conversation Messenger").to_string(),
             };
             // Un contact du téléphone : sa photo, s'il en a une.
@@ -9002,6 +9054,7 @@ impl Jasette {
                 Service::WhatsApp => "choix-whatsapp",
                 Service::Signal => "choix-signal",
                 Service::Telegram => "choix-telegram",
+                Service::Bluesky => "choix-bluesky",
                 _ => "choix-x",
             };
             carte = carte.child(
@@ -9147,6 +9200,36 @@ impl Jasette {
                         .text_color(th().texte_pale)
                         .child(t("Les anciens messages ne sont pas récupérés : seuls ceux reçus après la liaison s'affichent.")),
                 );
+            }
+            Service::Bluesky => {
+                let champ = |e: &Entity<InputState>| verre(0.8, 999.).w_full().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
+                if matches!(compte.etat, Etat::Association | Etat::Connexion) {
+                    carte = carte.child(attente("Connexion…"));
+                } else {
+                    carte = carte
+                        .child(texte(t("Jasette lit et envoie vos messages privés Bluesky. Il lui faut un mot de passe d'app qui a accès aux messages : dans Bluesky, Réglages → Confidentialité et sécurité → Mots de passe d'app → Ajouter, en cochant « Autoriser l'accès à vos messages privés ». Votre vrai mot de passe n'est jamais demandé.").into()))
+                        .child(
+                            div()
+                                .id("bs-motsdepasse")
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap(px(4.))
+                                .text_size(px(13.))
+                                .text_color(th().accent)
+                                .cursor_pointer()
+                                .hover(|s| s.opacity(0.7))
+                                .child(icone("external-link", 14., th().accent))
+                                .child(t("Ouvrir les mots de passe d'app"))
+                                .on_click(|_, _, _| ouvrir_adresse("https://bsky.app/settings/app-passwords")),
+                        )
+                        .child(champ(&self.ident_bs))
+                        .child(champ(&self.mdp_bs))
+                        .child(Self::bouton_principal("bs-connecter", t("Se connecter")).on_click(cx.listener(|this, _, window, cx| {
+                            this.bs_connecter(window, cx);
+                            cx.notify();
+                        })));
+                }
             }
             Service::Telegram => {
                 let champ = |e: &Entity<InputState>| verre(0.8, 999.).flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
@@ -9301,7 +9384,7 @@ impl Jasette {
                 div()
                     .text_center()
                     .text_color(th().texte)
-                    .child(t("Google Messages, Messenger, Instagram, WhatsApp, Signal, X et Telegram au même endroit.")),
+                    .child(t("Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram et Bluesky au même endroit.")),
             );
 
         if let Some(emoji) = &self.emoji {
@@ -9454,6 +9537,7 @@ impl Jasette {
                         Service::WhatsApp => "accueil-whatsapp",
                         Service::Signal => "accueil-signal",
                         Service::Telegram => "accueil-telegram",
+                        Service::Bluesky => "accueil-bluesky",
                         _ => "accueil-x",
                     };
                     service(id, svc).on_click(cx.listener(move |this, _, _, cx| {
@@ -10217,8 +10301,8 @@ fn t(fr: &'static str) -> &'static str {
         "Jasette s'ouvre toute seule à l'ouverture de session : les messages arrivent dès le départ." => "Jasette opens by itself when you log in, so messages arrive right away.",
         "Icône de l'app" => "App icon",
         "Blanche" => "White",
-        "Google Messages, Messenger, Instagram, WhatsApp, Signal, X et Telegram au même endroit." => {
-            "Google Messages, Messenger, Instagram, WhatsApp, Signal, X and Telegram in one place."
+        "Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram et Bluesky au même endroit." => {
+            "Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram and Bluesky in one place."
         }
         "Connectez un premier service :" => "Connect a first service:",
         "← Autres services" => "← Other services",
@@ -10349,6 +10433,16 @@ fn t(fr: &'static str) -> &'static str {
         "Avatar de WhatsApp" => "WhatsApp avatar",
         "Avatar de Signal" => "Signal avatar",
         "Avatar de Telegram" => "Telegram avatar",
+        "Avatar de Bluesky" => "Bluesky avatar",
+        "Nouvelle conversation Bluesky" => "New Bluesky chat",
+        "nom.bsky.social ou courriel" => "name.bsky.social or email",
+        "Mot de passe d'app (xxxx-xxxx-xxxx-xxxx)" => "App password (xxxx-xxxx-xxxx-xxxx)",
+        "Entrez votre identifiant Bluesky et un mot de passe d'app." => "Enter your Bluesky handle and an app password.",
+        "Jasette lit et envoie vos messages privés Bluesky. Il lui faut un mot de passe d'app qui a accès aux messages : dans Bluesky, Réglages → Confidentialité et sécurité → Mots de passe d'app → Ajouter, en cochant « Autoriser l'accès à vos messages privés ». Votre vrai mot de passe n'est jamais demandé." => {
+            "Jasette reads and sends your Bluesky direct messages. It needs an app password with access to messages: in Bluesky, Settings → Privacy and security → App passwords → Add, checking “Allow access to your direct messages”. Your real password is never asked for."
+        }
+        "Ouvrir les mots de passe d'app" => "Open app passwords",
+        "Se connecter" => "Sign in",
         "Nouvelle conversation Telegram" => "New Telegram chat",
         "Code reçu dans Telegram" => "Code received in Telegram",
         "Mot de passe Telegram" => "Telegram password",

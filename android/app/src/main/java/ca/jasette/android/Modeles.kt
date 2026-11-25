@@ -7,10 +7,10 @@ import org.json.JSONObject
  * Les services. Les ids des services autres que Google portent un préfixe dans
  * l'interface, comme sur le bureau : « m: » pour Messenger, « i: » pour
  * Instagram, « w: » pour WhatsApp, « s: » pour Signal, « x: » pour X, « t: »
- * pour Telegram. Le
+ * pour Telegram, « b: » pour Bluesky. Le
  * préfixe dit aussi à quel pont envoyer une commande.
  *
- * WhatsApp, Signal, X et Telegram : leurs ponts tournent sur le serveur Jasette, ou
+ * WhatsApp, Signal, X, Telegram et Bluesky : leurs ponts tournent sur le serveur Jasette, ou
  * sur le téléphone (mode « Sur cet appareil ») quand l'APK les embarque
  * (voir [serveurSeulement] et Depot.services).
  */
@@ -21,7 +21,8 @@ enum class Service(val titre: String, val court: String, val prefixe: String, va
     WHATSAPP("WhatsApp", "WhatsApp", "w:", "whatsapp"),
     SIGNAL("Signal", "Signal", "s:", "signal"),
     X("X", "X", "x:", "x"),
-    TELEGRAM("Telegram", "Telegram", "t:", "telegram");
+    TELEGRAM("Telegram", "Telegram", "t:", "telegram"),
+    BLUESKY("Bluesky", "Bluesky", "b:", "bluesky");
 
     /** Un service préfixé (tous sauf Google) : ses nouvelles passent par `nouvelleMeta`. */
     val meta get() = this != GOOGLE
@@ -34,13 +35,13 @@ enum class Service(val titre: String, val court: String, val prefixe: String, va
     val archiveNatif get() = this == GOOGLE || this == WHATSAPP || this == TELEGRAM
 
     /**
-     * WhatsApp, Signal, X ou Telegram : servi par le serveur Jasette, ou sur cet appareil
+     * WhatsApp, Signal, X, Telegram ou Bluesky : servi par le serveur Jasette, ou sur cet appareil
      * seulement si son pont a été compilé dans l'APK (sinon, service absent).
      */
-    val serveurSeulement get() = this == WHATSAPP || this == SIGNAL || this == X || this == TELEGRAM
+    val serveurSeulement get() = this == WHATSAPP || this == SIGNAL || this == X || this == TELEGRAM || this == BLUESKY
 
     /** « Nouveau message » interroge-t-il ce pont (commande `search`) ? */
-    val cherchePersonnes get() = this == MESSENGER || this == INSTAGRAM || this == WHATSAPP || this == SIGNAL || this == TELEGRAM
+    val cherchePersonnes get() = this == MESSENGER || this == INSTAGRAM || this == WHATSAPP || this == SIGNAL || this == TELEGRAM || this == BLUESKY
 
     /** Un numéro tapé se cherche-t-il aussi dans ce pont ? (pas chez Meta) */
     val chercheNumeros get() = this == GOOGLE || this == WHATSAPP || this == SIGNAL

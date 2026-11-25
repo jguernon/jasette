@@ -319,7 +319,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 
 // Le préfixe des ids d'un service, tels que les clients les voient.
 var prefixeService = map[string]string{
-	"google": "", "messenger": "m:", "instagram": "i:", "whatsapp": "w:", "signal": "s:", "x": "x:", "telegram": "t:",
+	"google": "", "messenger": "m:", "instagram": "i:", "whatsapp": "w:", "signal": "s:", "x": "x:", "telegram": "t:", "bluesky": "b:",
 }
 
 // desarchiverSiRecu : un événement `message` d'un pont. Un message reçu (pas

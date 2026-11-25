@@ -277,6 +277,14 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Nouvelle conversation WhatsApp" to "New WhatsApp chat",
     "Nouvelle conversation Signal" to "New Signal chat",
     "Nouvelle conversation Telegram" to "New Telegram chat",
+    "Nouvelle conversation Bluesky" to "New Bluesky chat",
+    // Bluesky (Bluesky.kt).
+    "Connecter Bluesky" to "Connect Bluesky",
+    "Jasette lit et envoie tes messages privés Bluesky. Il lui faut un mot de passe d'app qui a accès aux messages : dans Bluesky, Réglages → Confidentialité et sécurité → Mots de passe d'app → Ajouter, en cochant « Autoriser l'accès à vos messages privés ». Ton vrai mot de passe n'est jamais demandé." to
+        "Jasette reads and sends your Bluesky direct messages. It needs an app password with access to messages: in Bluesky, Settings → Privacy and security → App passwords → Add, checking “Allow access to your direct messages”. Your real password is never asked for.",
+    "Ouvrir les mots de passe d'app" to "Open app passwords",
+    "Nom d'utilisateur ou courriel" to "Handle or email",
+    "Mot de passe d'app" to "App password",
     // Telegram (Telegram.kt).
     "Connecter Telegram" to "Connect Telegram",
     "Application Telegram" to "Telegram app",

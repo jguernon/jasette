@@ -334,6 +334,7 @@ object Depot {
         Service.SIGNAL -> executable("libjasette-signal.so")
         Service.X -> executable("libjasette-x.so")
         Service.TELEGRAM -> executable("libjasette-telegram.so")
+        Service.BLUESKY -> executable("libjasette-bluesky.so")
         else -> null
     }
 
@@ -563,6 +564,16 @@ object Depot {
         erreur = null
         etapeTelegram = "attente"
         commande(Service.TELEGRAM, JSONObject().put("cmd", "login_password").put("password", mdp))
+    }
+
+    /**
+     * Bluesky : l'identifiant et un mot de passe d'app (avec l'accès aux
+     * messages privés). Le pont ne garde que les jetons de session.
+     */
+    fun blueskyConnexion(identifiant: String, motDePasse: String) {
+        erreur = null
+        etats[Service.BLUESKY] = Etat.ASSOCIATION
+        commande(Service.BLUESKY, JSONObject().put("cmd", "login").put("number", identifiant).put("password", motDePasse))
     }
 
     /** X : les cookies de x.com et le code X Chat, en un seul essai (X verrouille après quelques codes faux). */

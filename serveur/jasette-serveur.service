@@ -3,9 +3,9 @@
 # Installation (exemple) :
 #   install -Dm755 .cache/bin/jasette-serveur .cache/bin/jasette-pont .cache/bin/jasette-meta \
 #       .cache/bin/jasette-ig -t ~/.local/bin/
-#   # Facultatifs (WhatsApp, Signal, X, Telegram : services omis sans leur binaire) :
+#   # Facultatifs (WhatsApp, Signal, X, Telegram, Bluesky : services omis sans leur binaire) :
 #   install -Dm755 .cache/bin/jasette-wa .cache/bin/jasette-signal .cache/bin/jasette-x \
-#       .cache/bin/jasette-telegram -t ~/.local/bin/
+#       .cache/bin/jasette-telegram .cache/bin/jasette-bluesky -t ~/.local/bin/
 #   install -Dm644 serveur/jasette-serveur.service -t ~/.config/systemd/user/
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now jasette-serveur
@@ -15,7 +15,7 @@
 # Journaux :              journalctl --user -u jasette-serveur -f
 
 [Unit]
-Description=Jasette, serveur de messagerie (Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram)
+Description=Jasette, serveur de messagerie (Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram, Bluesky)
 After=network-online.target
 Wants=network-online.target
 

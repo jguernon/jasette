@@ -151,10 +151,10 @@ Réponses :
 ```
 
 `services` : ceux que ce serveur fait tourner (`--services`), dans l'ordre
-`google`, `messenger`, `instagram`, `whatsapp`, `signal`, `x`, `telegram`. Les
-quatre derniers sont **facultatifs** : le serveur ne les lance que si leur
+`google`, `messenger`, `instagram`, `whatsapp`, `signal`, `x`, `telegram`,
+`bluesky`. Les cinq derniers sont **facultatifs** : le serveur ne les lance que si leur
 binaire est présent (`jasette-wa`, `jasette-signal`, `jasette-x`,
-`jasette-telegram`, voir §5.4) ; sinon
+`jasette-telegram`, `jasette-bluesky`, voir §5.4) ; sinon
 ils sont simplement absents de la liste. Le client n'affiche que les
 services de cette liste. Après `ok`, la connexion passe au régime du §5,
 sans limite de durée.
@@ -171,10 +171,11 @@ Révocation : `jasette-serveur --appareils` liste les appareils,
 {"svc":"google","cmd":{"cmd":"messages","conv":"123","count":30}}
 ```
 
-`svc` : `google`, `messenger`, `instagram`, `whatsapp`, `signal`, `x` ou `telegram`.
+`svc` : `google`, `messenger`, `instagram`, `whatsapp`, `signal`, `x`, `telegram` ou `bluesky`.
 `cmd` : exactement la commande qu'on écrirait sur l'entrée standard du pont
 (voir l'en-tête de `pont/main.go`, `pont-meta/main.go`, `pont-wa/main.go`,
-`pont-signal/main.go`, `pont-x/main.go` et `pont-telegram/main.go`). Particularités :
+`pont-signal/main.go`, `pont-x/main.go`, `pont-telegram/main.go` et
+`pont-bluesky/main.go`). Particularités :
 
 - `{"cmd":"quit"}` est **ignoré** : le pont appartient au serveur.
 - `{"cmd":"delete","conv":"<id>"}` : supprime la conversation (§5.6).
@@ -228,9 +229,9 @@ envoie ensuite `hello` puis son état. Le client ne voit jamais `pont_ferme`.
 - Un client trop lent (8192 événements en attente) est coupé ; il se
   reconnecte et reçoit le rejeu.
 
-### 5.4 Connexion des services WhatsApp, Signal, X et Telegram
+### 5.4 Connexion des services WhatsApp, Signal, X, Telegram et Bluesky
 
-Ces quatre ponts parlent le même protocole que les autres (mêmes commandes
+Ces cinq ponts parlent le même protocole que les autres (mêmes commandes
 `conversations`, `messages`, `send`, `send_media`, `react`, `read`,
 `download`, `new`, `search`, `search_messages`, `unpair`…, mêmes
 événements `hello`, `state`, `account`, `avatar`, `avatar_moi`,
@@ -244,6 +245,7 @@ l'association diffère. États : `connecting`, `pairing`, `ready`,
 | `signal` | `jasette-signal` (ou `JASETTE_SIGNAL`) | `<données>/signal/` | QR (appareil lié) |
 | `x` | `jasette-x` (ou `JASETTE_X`) | `<données>/x/` | cookies de x.com + code X Chat |
 | `telegram` | `jasette-telegram` (ou `JASETTE_TELEGRAM`) | `<données>/telegram/` | numéro + code (+ mot de passe), ou QR |
+| `bluesky` | `jasette-bluesky` (ou `JASETTE_BLUESKY`) | `<données>/bluesky/` | identifiant + mot de passe d'app |
 
 Les binaires sont cherchés comme les autres : variable d'environnement,
 `--bin`, à côté de `jasette-serveur`, puis le `PATH`. Le serveur crée le
@@ -329,19 +331,41 @@ sont réglés (rejoué).
 - Le mot de passe et le code ne passent que dans la commande ; le serveur ne
   les écrit jamais dans ses journaux.
 
+**Bluesky** (messages privés seulement, `chat.bsky.convo.*` par le PDS du
+compte et le relais `did:web:api.bsky.chat`) :
+
+```json
+{"svc":"bluesky","cmd":{"cmd":"login","number":"nom.bsky.social","password":"xxxx-xxxx-xxxx-xxxx"}}
+```
+
+- `number` : le nom d'utilisateur (ou le courriel, ou le DID) ; `password` :
+  un **mot de passe d'app** avec l'accès aux messages privés (Bluesky :
+  Réglages > Confidentialité et sécurité > Mots de passe d'app, case
+  « Autoriser l'accès à vos messages privés »). Un mot de passe d'app sans
+  cet accès est refusé avec une erreur qui l'explique.
+- Réussite : `paired`, `account`, `state: ready`. Échec : `error`
+  (`where` : `login`) et `state: unpaired`.
+- Le pont ne garde que les jetons (`accessJwt`, `refreshJwt`) dans
+  `<données>/bluesky/session.json` (0600) et les renouvelle ; jamais le mot
+  de passe. Les nouvelles : `chat.bsky.convo.getLog` toutes les 5 secondes.
+- Pas de pièces jointes (`send_media` répond par une erreur), pas
+  d'archives chez Bluesky (celles de Jasette, §5.5). Les ids : celui de la
+  conversation Bluesky ; un message : `<conversation>/<id>`. Les résultats de
+  `search` ont le DID de la personne pour id (à passer à `new`).
+
 ### 5.5 Marques (Head, favoris, épinglées, archives)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont quatre listes **ordonnées** d'ids de
 conversations, tels que l'interface les voit (« m: » pour Messenger,
 « i: » pour Instagram, « w: » pour WhatsApp, « s: » pour Signal, « x: »
-pour X, « t: » pour Telegram, sans préfixe pour Google) :
+pour X, « t: » pour Telegram, « b: » pour Bluesky, sans préfixe pour Google) :
 
 - `head` : la grille en tête de la boîte de réception ;
 - `favoris` : la vue de l'étoile (`etoiles` dans les réglages du bureau) ;
 - `epingles` : les conversations épinglées en haut de la liste ;
 - `archives` : l'**archivage propre à Jasette**, pour les services qui ne
-  savent pas archiver (Messenger, Instagram, Signal, X). Google, WhatsApp et
+  savent pas archiver (Messenger, Instagram, Signal, X, Bluesky). Google, WhatsApp et
   Telegram archivent pour de vrai (commande `archive` de leur pont) et n'y
   vont pas.
 
@@ -616,7 +640,7 @@ Le serveur ne sert que des fichiers réguliers :
 `<données>` = `JASETTE_DATA`, sinon `$XDG_DATA_HOME/jasette`, sinon
 `~/.local/share/jasette` (le même dossier que les ponts).
 Chaque pont a son dossier, en 0700 : `<données>/whatsapp/`,
-`<données>/signal/`, `<données>/x/`, `<données>/telegram/` (bases SQLite et session : jamais
+`<données>/signal/`, `<données>/x/`, `<données>/telegram/`, `<données>/bluesky/` (bases SQLite et session : jamais
 servis par `get`, §6.1).
 `<données>/serveur/` (0700) contient `cert.pem`, `cle.pem`,
 `appareils.json` (noms, SHA-256 des jetons, dates), `jumelage.json` (code en
