@@ -80,7 +80,11 @@ class Connexion(Gtk.ApplicationWindow):
 
         self.vue = WebKit.WebView(network_session=session)
         reglages = self.vue.get_settings()
-        reglages.set_user_agent(AGENT)
+        # Pas d'agent maquillé : X détecte un moteur WebKit qui se dit Chrome
+        # et refuse la connexion après le mot de passe (« Something went
+        # wrong »). On garde l'agent propre de WebKit, cohérent avec le moteur.
+        if os.environ.get("JASETTE_X_AGENT"):
+            reglages.set_user_agent(os.environ["JASETTE_X_AGENT"])
         reglages.set_enable_developer_extras(False)
         self.vue.connect("load-changed", self.charge)
         # « Continuer avec Google / Apple » ouvre une fenêtre surgissante :
