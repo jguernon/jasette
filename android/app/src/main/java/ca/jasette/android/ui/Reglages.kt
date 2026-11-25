@@ -182,18 +182,59 @@ private fun CarteServeur(adresse: String) {
                 )
             }
         }
+        // Écran étroit (Fold plié) : le service sur une ligne, l'état et le compte sur la suivante.
+        val etroit = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 600
         for (s in Service.entries) {
             val etat = Depot.etat(s)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                androidx.compose.foundation.layout.Box(Modifier.size(8.dp).clip(CircleShape).background(couleurEtat(etat)))
+            Row(verticalAlignment = if (etroit) Alignment.Top else Alignment.CenterVertically) {
+                androidx.compose.foundation.layout.Box(
+                    Modifier.padding(top = if (etroit) 6.dp else 0.dp).size(8.dp).clip(CircleShape).background(couleurEtat(etat)),
+                )
                 Spacer(Modifier.width(8.dp))
-                val nom = Depot.noms[s]?.takeIf { etat.associe }?.let { " · $it" } ?: ""
-                Text("${s.court}${t(" : ")}${etat.texte}$nom", color = P.texte, fontSize = 13.sp)
+                val nom = Depot.noms[s]?.takeIf { etat.associe }
+                if (etroit) {
+                    Column {
+                        Text(s.court, color = P.texteFort, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(listOfNotNull(etat.texte, nom).joinToString(" · "), color = P.texte, fontSize = 13.sp)
+                    }
+                } else {
+                    Text("${s.court}${t(" : ")}${etat.texte}${nom?.let { " · $it" } ?: ""}", color = P.texte, fontSize = 13.sp)
+                }
             }
         }
         Text(t("Les services se connectent et se déconnectent sur le serveur."), color = P.textePale, fontSize = 12.sp)
-        OutlinedButton(onClick = { Depot.utiliserCetAppareil() }) { Text(t("Ne plus l'utiliser"), color = P.danger) }
+        BoutonQuitterServeur()
     }
+}
+
+/** « Ne plus l'utiliser », avec confirmation : on ne quitte pas son serveur par accident. */
+@Composable
+private fun BoutonQuitterServeur() {
+    var confirmer by remember { mutableStateOf(false) }
+    OutlinedButton(onClick = { confirmer = true }) { Text(t("Ne plus l'utiliser"), color = P.danger) }
+    if (confirmer) ConfirmerQuitterServeur { confirmer = false }
+}
+
+@Composable
+private fun ConfirmerQuitterServeur(fermer: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = fermer,
+        containerColor = P.surface,
+        title = { Text(t("Ne plus utiliser ce serveur ?"), color = P.texteFort) },
+        text = {
+            Text(
+                t("Cet appareil se débranchera du serveur Jasette. Tes services restent connectés sur le serveur ; pour revenir, il faudra jumeler de nouveau avec un nouveau code."),
+                color = P.texte,
+            )
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = {
+                fermer()
+                Depot.utiliserCetAppareil()
+            }) { Text(t("Ne plus l'utiliser"), color = P.danger) }
+        },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = fermer) { Text(t("Annuler"), color = P.texteFort) } },
+    )
 }
 
 /** Un groupe de rangées sur fond de carte. */
@@ -318,6 +359,7 @@ fun ServeurJasette(retour: () -> Unit) {
             )
         },
     ) { marges ->
+        var confirmerQuitter by remember { mutableStateOf(false) }
         Column(
             Modifier.fillMaxSize().padding(marges).verticalScroll(rememberScrollState()).navigationBarsPadding()
                 .imePadding().padding(16.dp),
@@ -330,7 +372,8 @@ fun ServeurJasette(retour: () -> Unit) {
                     detail = t("Jasette se connecte elle-même à chaque service."),
                     actif = cfg == null && !Depot.choixClient,
                     enabled = !occupe,
-                ) { Depot.utiliserCetAppareil() }
+                ) { if (cfg != null) confirmerQuitter = true else Depot.utiliserCetAppareil() }
+                if (confirmerQuitter) ConfirmerQuitterServeur { confirmerQuitter = false }
                 androidx.compose.material3.HorizontalDivider(color = P.fond)
                 ChoixRangee(
                     icone = Icons.Filled.Home,
@@ -356,7 +399,7 @@ fun ServeurJasette(retour: () -> Unit) {
                             )
                         }
                     }
-                    OutlinedButton(onClick = { Depot.utiliserCetAppareil() }) { Text(t("Ne plus l'utiliser"), color = P.danger) }
+                    BoutonQuitterServeur()
                 }
                 Depot.choixClient -> FormulaireClient(occupe)
             }

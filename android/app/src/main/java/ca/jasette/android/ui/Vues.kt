@@ -113,8 +113,8 @@ private fun AvecPastille(n: Int, contenu: @Composable () -> Unit) {
 }
 
 @Composable
-private fun LogoService(s: Service, taille: androidx.compose.ui.unit.Dp) {
-    Image(painterResource(iconeService(s)), s.court, Modifier.size(taille).clip(formeLogo(taille)))
+fun LogoService(s: Service, taille: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
+    Image(painterResource(iconeService(s)), s.court, modifier.size(taille).clip(formeLogo(taille)))
 }
 
 /**
@@ -159,6 +159,8 @@ fun Rail(vue: Vue, enReglages: Boolean, choisir: (Vue) -> Unit, reglages: () -> 
             icon = { Icon(Icons.Filled.Settings, t("Réglages")) },
             colors = couleurs,
         )
+        // Mon avatar, en bas à gauche comme au bureau.
+        BoutonAvatarMoi(36.dp)
         Spacer(Modifier.height(8.dp))
     }
 }
@@ -204,6 +206,16 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
             label = { Text(duService?.service?.court ?: t("Services"), maxLines = 1, overflow = TextOverflow.Ellipsis) },
             colors = couleurs,
         )
+        // Mon avatar, en bas à droite.
+        var menuAvatar by remember { mutableStateOf(false) }
+        NavigationBarItem(
+            selected = false,
+            onClick = { menuAvatar = true },
+            icon = { AvatarMoi(26.dp) },
+            label = { Text(t("Moi"), maxLines = 1) },
+            colors = couleurs,
+        )
+        if (menuAvatar) MenuAvatar { menuAvatar = false }
     }
     if (choixService) {
         ModalBottomSheet(onDismissRequest = { choixService = false }, containerColor = P.surface) {

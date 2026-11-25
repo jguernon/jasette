@@ -68,6 +68,15 @@ object Depot {
     val etats = mutableStateMapOf<Service, Etat>().apply { Service.entries.forEach { put(it, Etat.DEMARRAGE) } }
     /** Le nom du compte : courriel Google, nom Messenger ou Instagram. */
     val noms = mutableStateMapOf<Service, String>()
+    /** Ma photo dans chaque service (`avatar_moi`). */
+    val avatarsMoi = mutableStateMapOf<Service, String>()
+
+    private fun monAvatar(service: Service, chemin: String) {
+        if (chemin.isEmpty()) return
+        avatarsMoi[service] = chemin
+        // Comme au bureau : dès qu'une photo existe, on la prend par défaut.
+        if (Marques.avatarSource.isEmpty()) Marques.choisirAvatar(service.cle)
+    }
     /** L'emoji à toucher sur le téléphone pendant l'association Google. */
     var emoji by mutableStateOf<String?>(null)
     /** Messenger a un historique chiffré à restaurer avec le NIP. */
@@ -328,7 +337,7 @@ object Depot {
             }
             "paired" -> etats[service] = Etat.CONNEXION
             "account" -> v.chaine("name").let { if (it.isNotEmpty()) noms[service] = it else noms.remove(service) }
-            "avatar_moi" -> {}
+            "avatar_moi" -> monAvatar(service, v.chaine("path"))
             "history_pin" -> when {
                 v.optBoolean("needed") -> besoinNip = true
                 v.optBoolean("ok") -> {
@@ -430,7 +439,7 @@ object Depot {
                     }
                 }
             }
-            "avatar_moi" -> {}
+            "avatar_moi" -> monAvatar(Service.GOOGLE, v.chaine("path"))
             "media" -> {
                 val id = v.chaine("media_id")
                 demandes.remove(id)

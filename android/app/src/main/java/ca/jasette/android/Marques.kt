@@ -49,9 +49,24 @@ object Marques {
         prefs?.edit()?.putBoolean("deux_volets", oui)?.apply()
     }
 
+    /** Mon avatar : « google », « messenger », « instagram », « fichier », « initiale » ou vide (pas encore choisi). */
+    var avatarSource by mutableStateOf("")
+        private set
+    /** L'image choisie sur le téléphone (copiée dans les fichiers privés de l'app). */
+    var avatarFichier by mutableStateOf<String?>(null)
+        private set
+
+    fun choisirAvatar(source: String, fichier: String? = null) {
+        avatarSource = source
+        if (fichier != null) avatarFichier = fichier
+        prefs?.edit()?.putString("avatar_source", source)?.putString("avatar_fichier", avatarFichier)?.apply()
+    }
+
     fun charger(ctx: Context) {
         val p = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs = p
+        avatarSource = p.getString("avatar_source", "") ?: ""
+        avatarFichier = p.getString("avatar_fichier", null)
         deuxVolets = p.getBoolean("deux_volets", true)
         heureChaqueMessage = p.getBoolean("heure_chaque_message", false)
         head.clear()
