@@ -79,6 +79,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -124,6 +126,12 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit, volet: Boolean = fal
     val liste = Depot.messages[id].orEmpty()
     var plein by remember { mutableStateOf<String?>(null) }
     var menu by remember { mutableStateOf(false) }
+    // La barre de réactions : le message et sa bulle, dessinée par-dessus le fil
+    // (pas de Popup : sa position dérivait sur le Fold).
+    var reaction by remember { mutableStateOf<Pair<ca.jasette.android.Msg, androidx.compose.ui.layout.LayoutCoordinates>?>(null) }
+    var grilleMsg by remember { mutableStateOf<ca.jasette.android.Msg?>(null) }
+    var conteneur by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    val pressePapiers = LocalClipboardManager.current
     var galerie by remember { mutableStateOf(false) }
     // La recherche dans les messages chargés : la requête et le message courant.
     var recherche by remember { mutableStateOf(false) }
@@ -257,8 +265,9 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit, volet: Boolean = fal
         // Le plus récent en bas : la liste est inversée.
         val inverse = liste.asReversed()
         LaunchedEffect(liste.lastOrNull()?.id) { if (liste.isNotEmpty()) etat.animateScrollToItem(0) }
+        Box(Modifier.fillMaxSize().padding(marges).onGloballyPositioned { conteneur = it }) {
         LazyColumn(
-            Modifier.fillMaxSize().padding(marges).background(P.fil),
+            Modifier.fillMaxSize().background(P.fil),
             state = etat,
             reverseLayout = true,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 8.dp),
@@ -274,6 +283,7 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit, volet: Boolean = fal
                     Message(
                         m, groupe = conv?.group == true, premier = premier, dernier = dernier,
                         surligne = if (recherche) q else "", courant = m.id == courant,
+                        reagir = { coords -> reaction = m to coords },
                     ) { plein = it }
                 }
             }
@@ -286,6 +296,65 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit, volet: Boolean = fal
                     }
                 }
             }
+        }
+        reaction?.let { (m, bulle) ->
+            val base = conteneur
+            if (base == null || !bulle.isAttached || !base.isAttached) {
+                reaction = null
+                return@let
+            }
+            // Un voile transparent : toucher ailleurs ferme la barre.
+            Box(
+                Modifier.fillMaxSize().clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                ) { reaction = null },
+            )
+            val haut = base.localPositionOf(bulle, androidx.compose.ui.geometry.Offset.Zero)
+            val ecart = with(LocalDensity.current) { 6.dp.roundToPx() }
+            Box(
+                Modifier.fillMaxSize().layout { mesurable, contraintes ->
+                    val p = mesurable.measure(contraintes.copy(minWidth = 0, minHeight = 0))
+                    val gauche = haut.x.toInt()
+                    val droite = gauche + bulle.size.width
+                    val x = if (m.fromMe) droite - p.width else gauche
+                    var y = haut.y.toInt() - p.height - ecart
+                    if (y < 0) y = haut.y.toInt() + bulle.size.height + ecart
+                    layout(contraintes.maxWidth, contraintes.maxHeight) {
+                        p.place(
+                            x.coerceIn(0, maxOf(0, contraintes.maxWidth - p.width)),
+                            y.coerceIn(0, maxOf(0, contraintes.maxHeight - p.height)),
+                        )
+                    }
+                },
+            ) {
+                BarreReactions(
+                    m,
+                    choisir = { e ->
+                        reaction = null
+                        Depot.reagir(m.conv, m.id, e)
+                    },
+                    plus = {
+                        reaction = null
+                        grilleMsg = m
+                    },
+                    copier = if (m.text.isNotEmpty()) {
+                        {
+                            reaction = null
+                            pressePapiers.setText(AnnotatedString(m.text))
+                        }
+                    } else {
+                        null
+                    },
+                )
+            }
+        }
+        }
+    }
+    grilleMsg?.let { m ->
+        GrilleEmojis(fermer = { grilleMsg = null }) { e ->
+            grilleMsg = null
+            Depot.reagir(m.conv, m.id, e)
         }
     }
 
@@ -350,6 +419,7 @@ private fun Message(
     dernier: Boolean,
     surligne: String,
     courant: Boolean,
+    reagir: (androidx.compose.ui.layout.LayoutCoordinates) -> Unit,
     agrandir: (String) -> Unit,
 ) {
     // « Afficher l'heure de chaque message » : l'heure (et la date) sur chaque bulle.
@@ -359,15 +429,13 @@ private fun Message(
     val c = coche(m)
     val echec = c == Coche.ECHEC
     val haptique = LocalHapticFeedback.current
-    val presse = LocalClipboardManager.current
-    var barre by remember { mutableStateOf(false) }
-    var grille by remember { mutableStateOf(false) }
     var qui by remember { mutableStateOf(false) }
+    var bulle by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
     // L'appui long : la barre des réactions (pas sur un envoi pas encore confirmé).
     val appuiLong = {
         if (!m.local) {
             haptique.performHapticFeedback(HapticFeedbackType.LongPress)
-            barre = true
+            bulle?.let(reagir)
         }
     }
     val reessayer = { Depot.reessayer(m.conv, m.tmpId) }
@@ -385,7 +453,11 @@ private fun Message(
         }
         // Le corps (pièces et bulle), avec la pastille des réactions à cheval sur son bord inférieur.
         Box {
-            Column(horizontalAlignment = alignement, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Column(
+                Modifier.onGloballyPositioned { bulle = it },
+                horizontalAlignment = alignement,
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
                 for (p in m.attachments) {
                     if (p.estImage || Depot.vignettes.containsKey(p.mediaId)) {
                         PieceImage(p, envoi = c == Coche.ENVOI && m.local, appuiLong = appuiLong, agrandir = agrandir)
@@ -426,28 +498,6 @@ private fun Message(
                         .offset(x = if (m.fromMe) (-10).dp else 10.dp, y = 12.dp),
                 ) { qui = true }
             }
-            if (barre) {
-                BarreReactions(
-                    m,
-                    fermer = { barre = false },
-                    choisir = { e ->
-                        barre = false
-                        Depot.reagir(m.conv, m.id, e)
-                    },
-                    plus = {
-                        barre = false
-                        grille = true
-                    },
-                    copier = if (m.text.isNotEmpty()) {
-                        {
-                            barre = false
-                            presse.setText(AnnotatedString(m.text))
-                        }
-                    } else {
-                        null
-                    },
-                )
-            }
         }
         // Sous les pièces seules : l'heure et la coche (toujours pour mes messages).
         if (m.text.isEmpty() && (dernier || details || m.fromMe)) {
@@ -468,10 +518,6 @@ private fun Message(
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
-    }
-    if (grille) GrilleEmojis(fermer = { grille = false }) { e ->
-        grille = false
-        Depot.reagir(m.conv, m.id, e)
     }
     if (qui) QuiAReagi(m) { qui = false }
 }
@@ -497,17 +543,9 @@ private fun IconeCoche(c: Coche, surBulle: Boolean) {
 
 /** La barre flottante des réactions, au-dessus de la bulle. */
 @Composable
-private fun BarreReactions(m: Msg, fermer: () -> Unit, choisir: (String) -> Unit, plus: () -> Unit, copier: (() -> Unit)?) {
+private fun BarreReactions(m: Msg, choisir: (String) -> Unit, plus: () -> Unit, copier: (() -> Unit)?) {
     val mienne = m.reactions.firstOrNull { it.fromMe }?.emoji
-    val ecart = with(LocalDensity.current) { 6.dp.roundToPx() }
-    // Placée d'après les bornes réelles de la bulle : juste au-dessus d'elle
-    // (en dessous s'il n'y a pas la place), alignée du côté de l'expéditeur.
-    val position = remember(m.fromMe, ecart) { PositionAuDessus(m.fromMe, ecart) }
-    Popup(
-        popupPositionProvider = position,
-        onDismissRequest = fermer,
-        properties = PopupProperties(focusable = true),
-    ) {
+    run {
         Row(
             Modifier.shadow(8.dp, RoundedCornerShape(26.dp)).clip(RoundedCornerShape(26.dp)).background(P.menu)
                 .padding(horizontal = 6.dp, vertical = 4.dp),
@@ -952,24 +990,5 @@ private fun Galerie(liste: List<Msg>, fermer: () -> Unit, agrandir: (String) -> 
                 }
             }
         }
-    }
-}
-
-/** Pose un popup au-dessus de son ancre (la bulle), sans sortir de la fenêtre. */
-private class PositionAuDessus(private val aDroite: Boolean, private val ecart: Int) :
-    androidx.compose.ui.window.PopupPositionProvider {
-    override fun calculatePosition(
-        anchorBounds: androidx.compose.ui.unit.IntRect,
-        windowSize: androidx.compose.ui.unit.IntSize,
-        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
-        popupContentSize: androidx.compose.ui.unit.IntSize,
-    ): IntOffset {
-        val x = if (aDroite) anchorBounds.right - popupContentSize.width else anchorBounds.left
-        var y = anchorBounds.top - popupContentSize.height - ecart
-        if (y < 0) y = anchorBounds.bottom + ecart
-        return IntOffset(
-            x.coerceIn(0, maxOf(0, windowSize.width - popupContentSize.width)),
-            y.coerceIn(0, maxOf(0, windowSize.height - popupContentSize.height)),
-        )
     }
 }
