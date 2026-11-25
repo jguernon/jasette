@@ -744,6 +744,9 @@ enum Service {
     GoogleMessages,
     Messenger,
     Instagram,
+    WhatsApp,
+    Signal,
+    X,
 }
 
 impl Service {
@@ -752,6 +755,9 @@ impl Service {
             Service::GoogleMessages => "Google Messages",
             Service::Messenger => "Facebook Messenger",
             Service::Instagram => "Instagram",
+            Service::WhatsApp => "WhatsApp",
+            Service::Signal => "Signal",
+            Service::X => "X",
         }
     }
 
@@ -761,6 +767,9 @@ impl Service {
             Service::GoogleMessages => "Google Messages",
             Service::Messenger => "Messenger",
             Service::Instagram => "Instagram",
+            Service::WhatsApp => "WhatsApp",
+            Service::Signal => "Signal",
+            Service::X => "X",
         }
     }
 
@@ -770,6 +779,9 @@ impl Service {
             Service::GoogleMessages => "",
             Service::Messenger => "m:",
             Service::Instagram => "i:",
+            Service::WhatsApp => "w:",
+            Service::Signal => "s:",
+            Service::X => "x:",
         }
     }
 
@@ -779,6 +791,38 @@ impl Service {
             Service::GoogleMessages => "google",
             Service::Messenger => "messenger",
             Service::Instagram => "instagram",
+            Service::WhatsApp => "whatsapp",
+            Service::Signal => "signal",
+            Service::X => "x",
+        }
+    }
+
+    /// Un service facultatif : son pont n'existe que si son binaire est là
+    /// (ou si le serveur Jasette l'offre) ; sinon il est absent de l'interface.
+    fn facultatif(self) -> bool {
+        matches!(self, Service::WhatsApp | Service::Signal | Service::X)
+    }
+
+    /// Les ids d'éléments propres à ce service (barre latérale, pastilles).
+    fn id_rail(self) -> &'static str {
+        match self {
+            Service::GoogleMessages => "r-gm",
+            Service::Messenger => "r-messenger",
+            Service::Instagram => "r-instagram",
+            Service::WhatsApp => "r-whatsapp",
+            Service::Signal => "r-signal",
+            Service::X => "r-x",
+        }
+    }
+
+    fn id_chargement(self) -> &'static str {
+        match self {
+            Service::GoogleMessages => "chargement-google",
+            Service::Messenger => "chargement-messenger",
+            Service::Instagram => "chargement-instagram",
+            Service::WhatsApp => "chargement-whatsapp",
+            Service::Signal => "chargement-signal",
+            Service::X => "chargement-x",
         }
     }
 }
@@ -798,8 +842,10 @@ fn lancer_pont(r: &Reglages, svc: Service) -> Result<Pont, String> {
     }
 }
 
-/// Les services servis par le pont Meta (une copie du pont par service).
-const SERVICES_META: [Service; 2] = [Service::Messenger, Service::Instagram];
+/// Les services autres que Google, tous gérés comme un compte Meta : le pont
+/// Meta (une copie par service) pour Messenger et Instagram, un pont chacun
+/// (même protocole) pour WhatsApp, Signal et X.
+const SERVICES_META: [Service; 5] = [Service::Messenger, Service::Instagram, Service::WhatsApp, Service::Signal, Service::X];
 
 /// Un compte Meta : son pont, son état, sa fenêtre de connexion.
 struct CompteMeta {
@@ -809,18 +855,55 @@ struct CompteMeta {
     avatar: Option<PathBuf>,
     connexion: Arc<Mutex<Option<Result<Value, String>>>>,
     connexion_ouverte: bool,
+    /// Service facultatif sans pont (binaire absent, ou non offert par le
+    /// serveur Jasette) : rien à l'écran, pas même dans Comptes.
+    absent: bool,
+    /// L'association en cours (WhatsApp, Signal) : le dernier code QR, et le
+    /// code à taper sur le téléphone (WhatsApp, « Associer avec un numéro »).
+    qr: Option<qrcode::QrCode>,
+    code: Option<String>,
 }
 
 impl CompteMeta {
     fn lancer(s: Service, r: &Reglages) -> Self {
+        let pont = lancer_pont(r, s).map_err(|e| eprintln!("jasette : {e}")).ok();
         Self {
-            pont: lancer_pont(r, s).map_err(|e| eprintln!("jasette : {e}")).ok(),
+            absent: s.facultatif() && pont.is_none(),
+            pont,
             etat: Etat::Demarrage,
             nom: None,
             avatar: None,
             connexion: Arc::new(Mutex::new(None)),
             connexion_ouverte: false,
+            qr: None,
+            code: None,
         }
+    }
+
+    /// Relance le pont (changement de mode : ici, ou par le serveur).
+    fn relancer(&mut self, s: Service, r: &Reglages) {
+        // L'ancien s'arrête d'abord : deux ponts sur une même session se la voleraient.
+        self.pont = None;
+        let neuf = Self::lancer(s, r);
+        self.pont = neuf.pont;
+        self.absent = neuf.absent;
+        self.etat = Etat::Demarrage;
+        self.nom = None;
+        self.qr = None;
+        self.code = None;
+    }
+
+    /// Le service est-il vraiment connecté (pas seulement en association) ?
+    fn connecte(&self) -> bool {
+        self.etat.associe()
+    }
+
+    /// Ce compte compte-t-il comme connecté à l'écran (barre latérale,
+    /// erreurs) ? Messenger et Instagram : dès l'envoi des cookies.
+    /// WhatsApp, Signal et X : seulement une fois associés (un QR affiché
+    /// n'est pas encore un compte).
+    fn deja_connu(&self, s: Service) -> bool {
+        if s.facultatif() { self.connecte() } else { self.associe() }
     }
 
     fn associe(&self) -> bool {
@@ -849,6 +932,7 @@ fn image_service(s: Service, taille: f32) -> Arc<gpui::Image> {
         Service::GoogleMessages => (0u8, variantes!("google-messages")),
         Service::Messenger => (1u8, variantes!("messenger")),
         Service::Instagram => (2u8, variantes!("instagram")),
+        Service::WhatsApp | Service::Signal | Service::X => return image_service_svg(s, taille),
     };
     let voulu = taille * 2.;
     let i = liste.iter().position(|(t, _)| *t >= voulu).unwrap_or(liste.len() - 1);
@@ -856,6 +940,32 @@ fn image_service(s: Service, taille: f32) -> Arc<gpui::Image> {
     cache
         .entry((cle, i))
         .or_insert_with(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, liste[i].1.to_vec())))
+        .clone()
+}
+
+/// Les logos de WhatsApp, Signal et X : des SVG simples dessinés pour Jasette.
+/// GPUI dessine un SVG à sa taille propre (×2) : chaque taille d'affichage a
+/// donc sa copie, avec `width` et `height` à cette taille. X est noir, blanc
+/// en thème sombre (sa couleur est remplacée dans le texte du SVG).
+fn image_service_svg(s: Service, taille: f32) -> Arc<gpui::Image> {
+    static CACHE: std::sync::OnceLock<Mutex<HashMap<(u8, u32, bool), Arc<gpui::Image>>>> = std::sync::OnceLock::new();
+    let (cle, source) = match s {
+        Service::WhatsApp => (0u8, include_str!("../assets/services/whatsapp.svg")),
+        Service::Signal => (1u8, include_str!("../assets/services/signal.svg")),
+        _ => (2u8, include_str!("../assets/services/x.svg")),
+    };
+    let blanc = s == Service::X && th().sombre;
+    let cote = taille.ceil().max(1.) as u32;
+    let mut cache = CACHE.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    cache
+        .entry((cle, cote, blanc))
+        .or_insert_with(|| {
+            let mut texte = source.replacen("<svg ", &format!("<svg width=\"{cote}\" height=\"{cote}\" "), 1);
+            if blanc {
+                texte = texte.replace("#000000", "#ffffff");
+            }
+            Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, texte.into_bytes()))
+        })
         .clone()
 }
 
@@ -1106,7 +1216,7 @@ struct Reglages {
     /// « Utiliser les photos de mes contacts » (les contacts du téléphone, par Google Messages).
     #[serde(default = "vrai")]
     photos_contacts: bool,
-    /// « Aussi pour Messenger et Instagram (par le nom) ».
+    /// « Aussi pour les autres services (par le nom) ».
     #[serde(default)]
     photos_contacts_meta: bool,
     /// Serveur Jasette : la dernière version des marques (Head, favoris,
@@ -1428,6 +1538,18 @@ struct Jasette {
     /// Messenger et Instagram : un pont Meta chacun. Le NIP d'historique est à Messenger.
     messenger: CompteMeta,
     instagram: CompteMeta,
+    /// WhatsApp, Signal et X : un pont chacun, gérés comme les comptes Meta.
+    whatsapp: CompteMeta,
+    signal: CompteMeta,
+    x: CompteMeta,
+    /// L'écran d'association ouvert (WhatsApp, Signal ou X), dans Comptes.
+    ajout_service: Option<Service>,
+    /// WhatsApp : le numéro pour « Associer avec un numéro de téléphone ».
+    telephone_wa: Entity<InputState>,
+    /// X : les cookies de x.com (fenêtre de connexion), en attente du code
+    /// X Chat, et le champ de ce code.
+    cookies_x: Option<Value>,
+    code_x: Entity<InputState>,
     besoin_nip: bool,
     nip: Entity<InputState>,
     convs: Vec<Conv>,
@@ -1722,14 +1844,16 @@ fn deprefixer_meta(v: &mut Value) -> Option<Service> {
     service
 }
 
-fn script_connexion_meta() -> Option<PathBuf> {
+/// Une fenêtre de connexion (`jasette-connexion-meta.py`, `jasette-connexion-x.py`) :
+/// à côté de l'exécutable, sinon dans `connexion/` du projet.
+fn script_connexion_nomme(nom: &str) -> Option<PathBuf> {
     let mut essais = Vec::new();
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
     {
-        essais.push(dir.join("jasette-connexion-meta.py"));
+        essais.push(dir.join(nom));
     }
-    essais.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("connexion/jasette-connexion-meta.py"));
+    essais.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("connexion").join(nom));
     essais.into_iter().find(|p| p.is_file())
 }
 
@@ -1903,6 +2027,8 @@ fn adresse_appel(conv: &Conv) -> Option<String> {
         Service::Messenger if conv.e2ee => Some(format!("https://www.messenger.com/e2ee/t/{id}")),
         Service::Messenger => Some(format!("https://www.messenger.com/t/{id}")),
         Service::Instagram => Some(format!("https://www.instagram.com/direct/t/{id}/")),
+        // Pas d'appel par le web pour ceux-là : l'app du téléphone.
+        Service::WhatsApp | Service::Signal | Service::X => None,
     }
 }
 
@@ -2021,6 +2147,24 @@ impl Jasette {
         })
         .detach();
         let numero = cx.new(|cx| InputState::new(window, cx).placeholder(t("Nom ou numéro de téléphone")));
+        // WhatsApp : « Associer avec un numéro de téléphone » (Entrée envoie).
+        let telephone_wa = cx.new(|cx| InputState::new(window, cx).placeholder(t("Numéro, ex. : +1 514 555 1234")));
+        cx.subscribe_in(&telephone_wa, window, |this, _state, ev: &InputEvent, _window, cx| {
+            if let InputEvent::PressEnter { .. } = ev {
+                this.associer_par_numero(cx);
+                cx.notify();
+            }
+        })
+        .detach();
+        // X : le code d'accès X Chat (4 chiffres). Un seul essai par envoi.
+        let code_x = cx.new(|cx| InputState::new(window, cx).placeholder(t("Code X Chat (4 chiffres)")).masked(true));
+        cx.subscribe_in(&code_x, window, |this, _state, ev: &InputEvent, window, cx| {
+            if let InputEvent::PressEnter { .. } = ev {
+                this.envoyer_code_x(window, cx);
+                cx.notify();
+            }
+        })
+        .detach();
         let adresse_serveur = cx.new(|cx| InputState::new(window, cx).placeholder(t("Adresse du serveur (ex. : thinkcentretc)")));
         let code_serveur = cx.new(|cx| InputState::new(window, cx).placeholder(t("Code de jumelage (6 chiffres)")));
         cx.subscribe_in(&numero, window, |this, state, ev: &InputEvent, window, cx| {
@@ -2114,6 +2258,15 @@ impl Jasette {
                             if let Some(r) = retour {
                                 this.meta_mut(svc).connexion_ouverte = false;
                                 match r {
+                                    // X : les cookies attendent le code X Chat, demandé à l'écran.
+                                    Ok(mut v) if svc == Service::X => {
+                                        if let Some(o) = v["cookies"].as_object_mut() {
+                                            o.remove("jasette_pin");
+                                        }
+                                        this.cookies_x = Some(v["cookies"].take());
+                                        this.ajout_service = Some(Service::X);
+                                        this.section = Some(Section::Comptes);
+                                    }
                                     Ok(v) => {
                                         this.meta_mut(svc).etat = Etat::Association;
                                         this.commande_svc(svc, json!({
@@ -2180,6 +2333,13 @@ impl Jasette {
             connexion_ouverte: false,
             messenger: CompteMeta::lancer(Service::Messenger, &reglages),
             instagram: CompteMeta::lancer(Service::Instagram, &reglages),
+            whatsapp: CompteMeta::lancer(Service::WhatsApp, &reglages),
+            signal: CompteMeta::lancer(Service::Signal, &reglages),
+            x: CompteMeta::lancer(Service::X, &reglages),
+            ajout_service: None,
+            telephone_wa,
+            cookies_x: None,
+            code_x,
             besoin_nip: false,
             nip,
             convs: Vec::new(),
@@ -2294,12 +2454,30 @@ impl Jasette {
         self.commande_svc(Service::Messenger, v);
     }
 
+    /// Le compte d'un service autre que Google (Google : celui de Messenger, jamais demandé).
     fn meta(&self, svc: Service) -> &CompteMeta {
-        if svc == Service::Instagram { &self.instagram } else { &self.messenger }
+        match svc {
+            Service::Instagram => &self.instagram,
+            Service::WhatsApp => &self.whatsapp,
+            Service::Signal => &self.signal,
+            Service::X => &self.x,
+            Service::Messenger | Service::GoogleMessages => &self.messenger,
+        }
     }
 
     fn meta_mut(&mut self, svc: Service) -> &mut CompteMeta {
-        if svc == Service::Instagram { &mut self.instagram } else { &mut self.messenger }
+        match svc {
+            Service::Instagram => &mut self.instagram,
+            Service::WhatsApp => &mut self.whatsapp,
+            Service::Signal => &mut self.signal,
+            Service::X => &mut self.x,
+            Service::Messenger | Service::GoogleMessages => &mut self.messenger,
+        }
+    }
+
+    /// Les services autres que Google qui existent ici (pont présent, ou offert par le serveur).
+    fn services_presents(&self) -> Vec<Service> {
+        SERVICES_META.into_iter().filter(|s| !self.meta(*s).absent).collect()
     }
 
     /// Retire de l'écran tout ce qui vient d'un service (déconnexion).
@@ -2325,18 +2503,51 @@ impl Jasette {
                             self.commande_svc(svc, json!({"cmd": "conversations", "count": 50}));
                         }
                         self.ajout_compte = false;
+                        if self.ajout_service == Some(svc) {
+                            self.ajout_service = None;
+                        }
+                        if svc == Service::X {
+                            self.cookies_x = None;
+                        }
                         Etat::Pret
                     }
                     "reconnecting" => Etat::Reconnexion,
                     _ => avant,
                 };
-                self.meta_mut(svc).etat = etat;
+                let m = self.meta_mut(svc);
+                m.etat = etat;
+                // Le code d'association ne sert plus une fois connecté ou abandonné.
+                if matches!(etat, Etat::Pret | Etat::NonAssocie) {
+                    m.qr = None;
+                    m.code = None;
+                }
                 if etat == Etat::NonAssocie {
                     self.convs.retain(|c| service_de(&c.id) != svc);
                     self.archives.retain(|c| service_de(&c.id) != svc);
                 }
             }
-            "paired" => self.meta_mut(svc).etat = Etat::Connexion,
+            "paired" => {
+                let m = self.meta_mut(svc);
+                m.etat = Etat::Connexion;
+                m.qr = None;
+                m.code = None;
+            }
+            // L'association de WhatsApp et de Signal : un QR renouvelé, ou
+            // (WhatsApp) le code à taper sur le téléphone, qui remplace les QR.
+            "qr" => {
+                if let Some(data) = v.get("data").or(v.get("code")).and_then(Value::as_str) {
+                    let m = self.meta_mut(svc);
+                    m.qr = qrcode::QrCode::new(data.as_bytes()).ok();
+                    m.code = None;
+                }
+            }
+            "pair_code" => {
+                if let Some(code) = v.get("code").and_then(Value::as_str) {
+                    let m = self.meta_mut(svc);
+                    m.code = Some(code.to_string());
+                    m.qr = None;
+                }
+            }
             "account" => self.meta_mut(svc).nom = v.get("name").and_then(Value::as_str).map(str::to_string),
             "avatar_moi" => self.meta_mut(svc).avatar = v.get("path").and_then(Value::as_str).map(|p| carre(PathBuf::from(p))),
             "history_pin" => {
@@ -2387,35 +2598,84 @@ impl Jasette {
             "hello" | "e2ee" | "typing" => {}
             // Un pont d'avant la recherche globale : il ne la connaît pas, ce n'est pas une panne.
             "error" if v.get("text").and_then(Value::as_str).is_some_and(|t| t.contains("search_messages")) => {}
+            // Le serveur Jasette n'offre pas ce service : il est absent, sans erreur.
+            "error"
+                if svc.facultatif()
+                    && v.get("where").and_then(Value::as_str) == Some("serveur")
+                    && v.get("text").and_then(Value::as_str).is_some_and(|t| t.contains("n'offre pas") || t.contains("non offert")) =>
+            {
+                let m = self.meta_mut(svc);
+                m.absent = true;
+                m.etat = Etat::NonAssocie;
+                if self.ajout_service == Some(svc) {
+                    self.ajout_service = None;
+                }
+            }
             "error" => {
                 if let Some(texte) = v.get("text").and_then(Value::as_str) {
-                    self.erreur = Some(format!("{} : {texte}", svc.court()));
+                    // Pas d'erreur rouge pour un service jamais connecté, sauf
+                    // pendant qu'on l'associe (écran d'ajout ou fenêtre ouverte).
+                    let m = self.meta(svc);
+                    if m.deja_connu(svc) || m.connexion_ouverte || self.ajout_service == Some(svc) {
+                        self.erreur = Some(format!("{} : {texte}", svc.court()));
+                    } else {
+                        eprintln!("jasette : {} : {texte}", svc.court());
+                    }
                 }
             }
             // Le pont de ce service s'est arrêté : ne pas rester « en association ».
             "pont_ferme" => {
                 let m = self.meta_mut(svc);
+                let connu = m.deja_connu(svc);
                 m.pont = None;
                 m.etat = Etat::NonAssocie;
-                self.erreur = Some(format!("{} : {}", svc.court(), t("le pont s'est arrêté. Relancez Jasette pour réessayer.")));
+                m.qr = None;
+                m.code = None;
+                if connu || self.ajout_service == Some(svc) {
+                    self.erreur = Some(format!("{} : {}", svc.court(), t("le pont s'est arrêté. Relancez Jasette pour réessayer.")));
+                } else {
+                    eprintln!("jasette : {} : le pont s'est arrêté", svc.court());
+                }
             }
             _ => self.nouvelle(v),
         }
     }
 
-    /// Ouvre la fenêtre de connexion d'un service Meta ; ses cookies reviennent par `connexion`.
+    /// Connecte un service autre que Google. Messenger, Instagram et X : la
+    /// fenêtre de connexion (sur cette machine, même par un serveur Jasette),
+    /// dont les cookies reviennent par `connexion`. WhatsApp et Signal :
+    /// l'écran d'association, avec les QR du pont (ou du rejeu du serveur).
     fn connecter_meta(&mut self, svc: Service) {
+        if matches!(svc, Service::WhatsApp | Service::Signal) {
+            self.erreur = None;
+            self.ajout_service = Some(svc);
+            self.section = Some(Section::Comptes);
+            let m = self.meta_mut(svc);
+            m.qr = None;
+            m.code = None;
+            self.commande_svc(svc, json!({"cmd": "pair"}));
+            return;
+        }
+        if svc == Service::X {
+            self.ajout_service = Some(Service::X);
+            self.section = Some(Section::Comptes);
+            self.cookies_x = None;
+        }
         if self.meta(svc).connexion_ouverte {
             return;
         }
-        let Some(script) = script_connexion_meta() else {
-            self.erreur = Some("jasette-connexion-meta.py introuvable".into());
+        let (nom, option) = match svc {
+            Service::Instagram => ("jasette-connexion-meta.py", "--instagram"),
+            Service::X => ("jasette-connexion-x.py", "--sans-code"),
+            _ => ("jasette-connexion-meta.py", "--messenger"),
+        };
+        let Some(script) = script_connexion_nomme(nom) else {
+            self.erreur = Some(format!("{nom} introuvable"));
             return;
         };
         self.erreur = None;
         self.meta_mut(svc).connexion_ouverte = true;
         let retour = self.meta(svc).connexion.clone();
-        let option = if svc == Service::Instagram { "--instagram" } else { "--messenger" };
         std::thread::spawn(move || {
             let res = std::process::Command::new("python3")
                 .arg(&script)
@@ -2437,6 +2697,33 @@ impl Jasette {
                 *slot = Some(r);
             }
         });
+    }
+
+    /// WhatsApp : « Associer avec un numéro de téléphone » → un code à taper sur le téléphone.
+    fn associer_par_numero(&mut self, cx: &mut Context<Self>) {
+        let brut = self.telephone_wa.read(cx).value().trim().to_string();
+        let chiffres: String = brut.chars().filter(char::is_ascii_digit).collect();
+        if chiffres.len() < 8 || !est_numero(&brut) {
+            self.erreur = Some(t("Entrez le numéro complet, avec l'indicatif du pays (ex. : +1 514 555 1234).").into());
+            return;
+        }
+        self.erreur = None;
+        self.whatsapp.code = None;
+        self.commande_svc(Service::WhatsApp, json!({"cmd": "pair_phone", "number": format!("+{chiffres}")}));
+    }
+
+    /// X : envoie les cookies de x.com et le code X Chat au pont (un seul essai).
+    fn envoyer_code_x(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let code = self.code_x.read(cx).value().trim().to_string();
+        if code.len() != 4 || !code.chars().all(|c| c.is_ascii_digit()) {
+            self.erreur = Some(t("Le code X Chat est fait de 4 chiffres.").into());
+            return;
+        }
+        let Some(cookies) = self.cookies_x.take() else { return };
+        self.erreur = None;
+        self.code_x.update(cx, |s, cx| s.set_value("", window, cx));
+        self.x.etat = Etat::Association;
+        self.commande_svc(Service::X, json!({"cmd": "login", "cookies": cookies, "pin": code}));
     }
 
     fn conv(&self, id: &str) -> Option<&Conv> {
@@ -3519,10 +3806,8 @@ impl Jasette {
     fn photo_moi(&self) -> Option<PathBuf> {
         match self.reglages.avatar_source.as_str() {
             "google" => self.avatar_google.clone(),
-            "messenger" => self.messenger.avatar.clone(),
-            "instagram" => self.instagram.avatar.clone(),
             "fichier" => self.reglages.avatar_fichier.clone().filter(|p| p.is_file()),
-            _ => None,
+            cle => SERVICES_META.into_iter().find(|s| s.cle() == cle).and_then(|s| self.meta(s).avatar.clone()),
         }
     }
 
@@ -3653,6 +3938,29 @@ impl Jasette {
                     })),
                 )
             })
+            // WhatsApp, Signal et X : seulement s'ils ont donné une photo.
+            .children([Service::WhatsApp, Service::Signal, Service::X].into_iter().filter(|s| self.meta(*s).avatar.is_some()).map(|svc| {
+                let (id, titre, initiale, couleur) = match svc {
+                    Service::WhatsApp => ("av-wa", t("Avatar de WhatsApp"), "W", "#25d366"),
+                    Service::Signal => ("av-signal", t("Avatar de Signal"), "S", "#3a76f0"),
+                    _ => ("av-x", t("Avatar de X"), "X", "#000000"),
+                };
+                let compte = self.meta(svc);
+                ligne(
+                    id,
+                    svc.cle(),
+                    titre,
+                    compte.nom.clone().unwrap_or_else(|| svc.court().into()),
+                    avec_badge(avatar(initiale, couleur, false, compte.avatar.as_ref(), 34.), svc),
+                    true,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.reglages.avatar_source = svc.cle().into();
+                    this.reglages.garder();
+                    this.menu_avatar = false;
+                    cx.notify();
+                }))
+            }))
             .child(
                 ligne(
                     "av-fichier",
@@ -3897,9 +4205,9 @@ impl Jasette {
                     })
                     .when(!gm_probleme && non_lus > 0, |d| d.child(pastille_nombre(non_lus, ton(c(DANGER), th().accent)))),
             ))
-            .children(SERVICES_META.into_iter().filter(|s| self.meta(*s).associe()).map(|svc| {
+            .children(SERVICES_META.into_iter().filter(|s| self.meta(*s).deja_connu(*s)).map(|svc| {
                 let etat = self.meta(svc).etat;
-                Self::bouton_rail(if svc == Service::Instagram { "r-instagram" } else { "r-messenger" }, !en_reglages && self.vue == Vue::Service(svc))
+                Self::bouton_rail(svc.id_rail(), !en_reglages && self.vue == Vue::Service(svc))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.section = None;
                         this.galerie = None;
@@ -3908,7 +4216,7 @@ impl Jasette {
                     }))
                     .child(logo(svc, 32.))
                     .when(matches!(etat, Etat::Association | Etat::Connexion | Etat::Reconnexion), |d| {
-                        d.child(pastille_chargement(if svc == Service::Instagram { "chargement-instagram" } else { "chargement-messenger" }))
+                        d.child(pastille_chargement(svc.id_chargement()))
                     })
                     .when(matches!(etat, Etat::TelephoneHorsLigne), |d| d.child(pastille_alerte()))
             }))
@@ -4286,7 +4594,10 @@ impl Jasette {
             let detail = match svc {
                 Service::Instagram => t("Nouvelle conversation Instagram").to_string(),
                 Service::GoogleMessages => format!("{} · {id}", t("Contact")),
-                _ => t("Nouvelle conversation Messenger").to_string(),
+                Service::WhatsApp => t("Nouvelle conversation WhatsApp").to_string(),
+                Service::Signal => t("Nouvelle conversation Signal").to_string(),
+                Service::X => t("Nouvelle conversation X").to_string(),
+                Service::Messenger => t("Nouvelle conversation Messenger").to_string(),
             };
             // Un contact du téléphone : sa photo, s'il en a une.
             let photo = if svc == Service::GoogleMessages { cle_numero(id).and_then(|k| self.photos_numeros.get(&k)) } else { None };
@@ -4318,6 +4629,29 @@ impl Jasette {
                     })),
             );
             n += 1;
+        }
+        // Un numéro (avec l'indicatif) : WhatsApp et Signal savent aussi l'ouvrir.
+        if est_numero(&self.nouveau_texte) {
+            for svc in [Service::WhatsApp, Service::Signal] {
+                if self.meta(svc).etat != Etat::Pret {
+                    continue;
+                }
+                let numero = self.nouveau_texte.clone();
+                let (id, texte) = if svc == Service::WhatsApp {
+                    ("sugg-wa", t("Nouveau message par WhatsApp"))
+                } else {
+                    ("sugg-signal", t("Nouveau message par Signal"))
+                };
+                boite = boite.child(ligne(id.into(), numero.clone(), texte.into(), svc, None).on_click(cx.listener(
+                    move |this, _, window, cx| {
+                        this.commande_svc(svc, json!({"cmd": "new", "number": numero}));
+                        this.nouveau_ouvert = false;
+                        this.numero.update(cx, |s, cx| s.set_value("", window, cx));
+                        cx.notify();
+                    },
+                )));
+                n += 1;
+            }
         }
         (boite, n)
     }
@@ -6047,6 +6381,8 @@ impl Jasette {
     fn menu_conversation(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(id) = self.choisie.clone() else { return div() };
         let google = service_de(&id) == Service::GoogleMessages;
+        // WhatsApp sait archiver (commande « archive ») ; supprimer : Google seulement.
+        let archivable = google || service_de(&id) == Service::WhatsApp;
         let archivee = self.archives.iter().any(|c| c.id == id);
         let item = |cle: &'static str, ic: &'static str, texte: String, couleur: Hsla, actif: bool| {
             div()
@@ -6158,9 +6494,9 @@ impl Jasette {
                     "archive",
                     if archivee { t("Désarchiver") } else { t("Archiver") }.into(),
                     th().texte_fort,
-                    google,
+                    archivable,
                 )
-                .when(google, |d| {
+                .when(archivable, |d| {
                     d.on_click(cx.listener(move |this, _, _, cx| {
                         this.menu_conv = false;
                         this.commande(json!({"cmd": "archive", "conv": id_a, "archived": !archivee}));
@@ -6183,9 +6519,8 @@ impl Jasette {
                 }),
             );
         if !google {
-            menu = menu.child(
-                div().px(px(12.)).py(px(6.)).text_size(px(12.)).text_color(th().texte_pale).child(t("Archiver et supprimer : bientôt pour Messenger.")),
-            );
+            let note = if archivable { t("Supprimer : bientôt pour WhatsApp.") } else { t("Archiver et supprimer : bientôt pour Messenger.") };
+            menu = menu.child(div().px(px(12.)).py(px(6.)).text_size(px(12.)).text_color(th().texte_pale).child(note));
         }
         let id_s = id.clone();
         menu.child(div().h(px(1.)).mx(px(8.)).my(px(4.)).bg(th().survol)).child(
@@ -6373,13 +6708,16 @@ impl Jasette {
 
         let contenu: AnyElement = match section {
             // L'écran de connexion Google seulement si Google n'est pas connecté ;
-            // sinon « Ajouter un compte » montre la liste (Messenger s'y connecte).
+            // sinon « Ajouter un compte » montre la liste des autres services.
+            // WhatsApp, Signal et X : leur écran d'association, d'abord.
+            Section::Comptes if self.ajout_service.is_some() => self.ecran_ajout_service(cx),
             Section::Comptes
                 if (self.ajout_compte && !self.etat.associe())
                     || (self.etat == Etat::NonAssocie && self.connexion_ouverte) =>
             {
                 self.ecran_connexion(cx).into_any_element()
             }
+            Section::Comptes if self.ajout_compte => self.ecran_choix_service(cx),
             Section::Comptes => self.comptes(cx).into_any_element(),
             Section::Serveur => self.serveur_vue(cx),
             Section::Notifications => carte_section("Notifications")
@@ -6587,7 +6925,7 @@ impl Jasette {
                             .child(
                                 div().when(!self.reglages.photos_contacts, |d| d.opacity(0.45)).child(ligne_interrupteur(
                                     "a-photos-meta",
-                                    t("Aussi pour Messenger et Instagram (par le nom)"),
+                                    t("Aussi pour les autres services (par le nom)"),
                                     t("Seulement quand un seul contact porte exactement le nom de la conversation."),
                                     self.reglages.photos_contacts && self.reglages.photos_contacts_meta,
                                     cx.listener(|this, _, _, cx| {
@@ -6718,6 +7056,14 @@ impl Jasette {
                         .child(separateur())
                         .child(ligne_info("Messenger", "messagix (mautrix-meta)".into()))
                         .child(separateur())
+                        .children(self.services_presents().into_iter().filter(|s| s.facultatif()).flat_map(|svc| {
+                            let (nom, bibli) = match svc {
+                                Service::WhatsApp => ("WhatsApp", "whatsmeow (mautrix-whatsapp)"),
+                                Service::Signal => ("Signal", "signalmeow (mautrix-signal)"),
+                                _ => ("X", "twittermeow (mautrix-twitter)"),
+                            };
+                            [ligne_info(nom, bibli.into()).into_any_element(), separateur().into_any_element()]
+                        }))
                         .child(ligne_info("Interface", "GPUI · gpui-component".into()))
                         .child(separateur())
                         .child(ligne_info(t("Données"), dossier_donnees().display().to_string()))
@@ -6751,13 +7097,23 @@ impl Jasette {
         // Par un serveur Jasette : les services se gèrent sur le serveur.
         if self.reglages.mode_serveur == "client" {
             let adresse = self.reglages.serveur.as_ref().map(|c| c.adresse.clone()).unwrap_or_default();
-            let etats: Vec<String> = [Service::GoogleMessages, Service::Messenger, Service::Instagram]
-                .into_iter()
+            let etats: Vec<String> = std::iter::once(Service::GoogleMessages)
+                .chain(self.services_presents())
                 .map(|s| {
                     let e = if s == Service::GoogleMessages { self.etat } else { self.meta(s).etat };
                     format!("{} : {}", s.court(), e.texte())
                 })
                 .collect();
+            // Les services autres que Google se connectent d'ici, par le serveur :
+            // les commandes passent par lui, les QR reviennent par son rejeu, et
+            // les fenêtres de connexion (Messenger, Instagram, X) s'ouvrent ici.
+            let mut lignes = groupe();
+            for (i, svc) in self.services_presents().into_iter().enumerate() {
+                if i > 0 {
+                    lignes = lignes.child(separateur());
+                }
+                lignes = lignes.child(self.ligne_compte_meta(svc, cx));
+            }
             return carte_section(t("Comptes"))
                 .child(
                     groupe().child(
@@ -6794,6 +7150,7 @@ impl Jasette {
                 .child(div().pt(px(12.)).text_size(px(12.)).text_color(th().texte_pale).child(t(
                     "Les services se connectent et se déconnectent sur le serveur.",
                 )))
+                .child(div().mt(px(14.)).child(lignes))
                 .into_any_element();
         }
         let associe = self.etat.associe();
@@ -6862,11 +7219,14 @@ impl Jasette {
                     }))
                     .into_any_element()
             });
-        let messenger = self.ligne_compte_meta(Service::Messenger, cx);
-        let instagram = self.ligne_compte_meta(Service::Instagram, cx);
+        // Messenger, Instagram, puis WhatsApp, Signal et X s'ils sont là.
+        let mut lignes = groupe().child(gm);
+        for svc in self.services_presents() {
+            lignes = lignes.child(separateur()).child(self.ligne_compte_meta(svc, cx));
+        }
 
         carte_section(t("Comptes"))
-            .child(groupe().child(gm).child(separateur()).child(messenger).child(separateur()).child(instagram))
+            .child(lignes)
             .child(
                 div()
                     .id("ajouter-compte")
@@ -6880,11 +7240,9 @@ impl Jasette {
                     .text_color(th().accent)
                     .hover(|s| s.opacity(0.7))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        if !this.etat.associe() {
-                            this.ajout_compte = true;
-                        } else {
-                            this.erreur = Some(t("Google Messages est déjà connecté : connectez Messenger ou Instagram ci-dessus.").into());
-                        }
+                        // Google pas encore connecté : l'accueil ; sinon, le choix des autres services.
+                        this.erreur = None;
+                        this.ajout_compte = true;
                         cx.notify();
                     }))
                     .child(icone("circle-plus", 17., th().accent))
@@ -6902,8 +7260,7 @@ impl Jasette {
     fn rebrancher(&mut self) {
         self.suivi_marques.reinitialiser();
         self.pont = None;
-        self.messenger.pont = None;
-        self.instagram.pont = None;
+        self.arreter_ponts_meta();
         self.convs.clear();
         self.archives.clear();
         self.messages.clear();
@@ -6913,12 +7270,18 @@ impl Jasette {
             Ok(p) => self.pont = Some(p),
             Err(e) => self.erreur = Some(format!("Pont introuvable : {e}")),
         }
+        self.ajout_service = None;
+        self.cookies_x = None;
+        let reglages = self.reglages.clone();
         for svc in SERVICES_META {
-            let r = lancer_pont(&self.reglages, svc).map_err(|e| eprintln!("jasette : {e}")).ok();
-            let m = self.meta_mut(svc);
-            m.pont = r;
-            m.etat = Etat::Demarrage;
-            m.nom = None;
+            self.meta_mut(svc).relancer(svc, &reglages);
+        }
+    }
+
+    /// Arrête les ponts des services autres que Google.
+    fn arreter_ponts_meta(&mut self) {
+        for svc in SERVICES_META {
+            self.meta_mut(svc).pont = None;
         }
     }
 
@@ -6951,8 +7314,7 @@ impl Jasette {
         // Les ponts locaux s'arrêtent avant que le serveur lance les siens.
         self.reglages.mode_serveur = String::new();
         self.pont = None;
-        self.messenger.pont = None;
-        self.instagram.pont = None;
+        self.arreter_ponts_meta();
         self.tache_serveur(cx, installer_serveur, |this, cfg, _cx| {
             this.reglages.serveur = Some(cfg);
             this.reglages.mode_serveur = "serveur".into();
@@ -6971,8 +7333,7 @@ impl Jasette {
         self.code_jumelage = None;
         self.verif_client = None;
         self.pont = None;
-        self.messenger.pont = None;
-        self.instagram.pont = None;
+        self.arreter_ponts_meta();
         if etait_serveur {
             self.tache_serveur(
                 cx,
@@ -7350,15 +7711,18 @@ impl Jasette {
     /// La rangée d'un compte Meta (Messenger ou Instagram) dans « Comptes ».
     fn ligne_compte_meta(&self, svc: Service, cx: &mut Context<Self>) -> Div {
         let compte = self.meta(svc);
-        let meta_associe = compte.associe();
+        // WhatsApp, Signal et X en cours d'association ne sont pas encore « connectés ».
+        let meta_associe = compte.deja_connu(svc);
         let detail_meta = if compte.pont.is_none() {
             format!("{} ({})", t("Pont introuvable"), svc.court())
         } else if compte.connexion_ouverte {
-            if svc == Service::Instagram {
-                t("Connectez-vous dans la fenêtre Instagram…").to_string()
-            } else {
-                t("Connectez-vous dans la fenêtre Facebook…").to_string()
+            match svc {
+                Service::Instagram => t("Connectez-vous dans la fenêtre Instagram…").to_string(),
+                Service::X => t("Connectez-vous dans la fenêtre x.com…").to_string(),
+                _ => t("Connectez-vous dans la fenêtre Facebook…").to_string(),
             }
+        } else if svc.facultatif() && compte.etat == Etat::Association {
+            t("Association en cours…").to_string()
         } else if meta_associe {
             format!("{} · {}", compte.nom.clone().unwrap_or_else(|| svc.court().into()), compte.etat.texte())
         } else {
@@ -7449,6 +7813,261 @@ impl Jasette {
             .child(texte)
     }
 
+    /// La carte des écrans d'ajout (même allure que l'accueil), défilante si
+    /// la fenêtre est basse.
+    fn carte_ajout(id: &'static str, carte: Div) -> AnyElement {
+        div()
+            .id(id)
+            .size_full()
+            .overflow_y_scroll()
+            .child(div().flex().flex_col().items_center().py(px(24.)).child(carte))
+            .into_any_element()
+    }
+
+    fn carte_ajout_vide() -> Div {
+        verre(0.62, 28.)
+            .when(th().sombre, |d| d.bg(th().liste).rounded(rayon(16.)))
+            .shadow(ombre_verre())
+            .w(px(460.))
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(14.))
+            .px(px(40.))
+            .py(px(34.))
+    }
+
+    /// « Ajouter un compte » quand Google est déjà connecté : les autres
+    /// services pas encore connectés.
+    fn ecran_choix_service(&self, cx: &mut Context<Self>) -> AnyElement {
+        let mut carte = Self::carte_ajout_vide()
+            .child(div().text_size(px(22.)).font_weight(FontWeight::BOLD).text_color(th().texte_fort).child(t("Ajouter un compte")));
+        let libres: Vec<Service> = self.services_presents().into_iter().filter(|s| !self.meta(*s).deja_connu(*s)).collect();
+        if libres.is_empty() {
+            carte = carte.child(div().text_center().text_color(th().texte).child(t("Tous vos services sont déjà connectés.")));
+        }
+        for svc in libres {
+            let id = match svc {
+                Service::Messenger => "choix-messenger",
+                Service::Instagram => "choix-instagram",
+                Service::WhatsApp => "choix-whatsapp",
+                Service::Signal => "choix-signal",
+                _ => "choix-x",
+            };
+            carte = carte.child(
+                div()
+                    .id(id)
+                    .w_full()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(14.))
+                    .px(px(14.))
+                    .py(px(10.))
+                    .rounded(rayon(14.))
+                    .bg(ton(blanc(0.55), th().surface))
+                    .cursor_pointer()
+                    .hover(|s| s.bg(th().survol))
+                    .child(logo(svc, 34.))
+                    .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(svc.nom()))
+                    .child(icone("chevron-right", 18., th().texte_pale))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.ajout_compte = false;
+                        this.connecter_meta(svc);
+                        cx.notify();
+                    })),
+            );
+        }
+        carte = carte.child(lien_retour("choix-retour").on_click(cx.listener(|this, _, _, cx| {
+            this.ajout_compte = false;
+            this.erreur = None;
+            cx.notify();
+        })));
+        if let Some(e) = &self.erreur {
+            carte = carte.child(boite_erreur(e.clone()));
+        }
+        Self::carte_ajout("choix-defile", carte)
+    }
+
+    /// L'association de WhatsApp (QR, ou code par numéro), de Signal (QR) ou
+    /// de X (fenêtre x.com, puis code X Chat).
+    fn ecran_ajout_service(&self, cx: &mut Context<Self>) -> AnyElement {
+        let svc = self.ajout_service.unwrap_or(Service::WhatsApp);
+        let compte = self.meta(svc);
+        let texte = |s: String| div().text_center().text_size(px(13.)).text_color(th().texte).child(s);
+        let attente = |s: &'static str| div().mt(px(10.)).text_color(th().texte).child(t(s));
+        let mut carte = Self::carte_ajout_vide()
+            .child(logo(svc, 52.))
+            .child(
+                div()
+                    .text_size(px(22.))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(th().texte_fort)
+                    .child(format!("{} {}", t("Connecter"), svc.court())),
+            );
+        let qr = |q: &qrcode::QrCode| div().mt(px(4.)).p(px(14.)).rounded(rayon(20.)).bg(blanc(1.)).child(dessiner_qr(q));
+        match svc {
+            Service::WhatsApp => {
+                carte = carte.child(texte(t("Sur votre téléphone : WhatsApp → Appareils connectés → Connecter un appareil, puis scannez ce code.").into()));
+                if let Some(code) = &compte.code {
+                    // Le code à 8 caractères, en gros, avec un bouton Copier.
+                    let fait = self.copie.as_deref() == Some(code.as_str());
+                    let v = code.clone();
+                    carte = carte
+                        .child(
+                            div()
+                                .mt(px(6.))
+                                .px(px(22.))
+                                .py(px(12.))
+                                .rounded(rayon(16.))
+                                .bg(ton(blanc(0.85), th().surface))
+                                .text_size(px(36.))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(th().texte_fort)
+                                .child(code.clone()),
+                        )
+                        .child(
+                            div()
+                                .id("copier-code-wa")
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap(px(4.))
+                                .px(px(10.))
+                                .py(px(4.))
+                                .rounded(rayon(8.))
+                                .cursor_pointer()
+                                .hover(|s| s.bg(th().survol))
+                                .child(icone(if fait { "check" } else { "copy" }, 14., th().accent))
+                                .child(div().text_size(px(13.)).text_color(th().accent).child(if fait { t("Copié") } else { t("Copier") }))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(v.clone()));
+                                    this.copie = Some(v.clone());
+                                    cx.notify();
+                                })),
+                        )
+                        .child(texte(
+                            t("Sur le téléphone, dans « Connecter un appareil », touchez « Associer avec un numéro de téléphone à la place » et tapez ce code.").into(),
+                        ));
+                } else if let Some(q) = &compte.qr {
+                    carte = carte.child(qr(q));
+                } else if compte.etat == Etat::Connexion {
+                    carte = carte.child(attente("Connexion…"));
+                } else {
+                    carte = carte.child(attente("Préparation du code QR…"));
+                }
+                // « Associer avec un numéro de téléphone » : le numéro, puis un code.
+                carte = carte
+                    .child(div().mt(px(8.)).w_full().h(px(1.)).bg(th().survol))
+                    .child(div().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(t("Associer avec un numéro de téléphone")))
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(8.))
+                            .child(
+                                verre(0.8, 999.)
+                                    .flex_1()
+                                    .pl(px(14.))
+                                    .pr(px(6.))
+                                    .py(px(1.))
+                                    .child(Input::new(&self.telephone_wa).appearance(false)),
+                            )
+                            .child(bouton_texte("wa-code", t("Recevoir un code"), ACCENT).on_click(cx.listener(|this, _, _, cx| {
+                                this.associer_par_numero(cx);
+                                cx.notify();
+                            }))),
+                    );
+            }
+            Service::Signal => {
+                carte = carte.child(texte(t("Sur votre téléphone : Signal → Paramètres → Appareils liés → +, puis scannez ce code.").into()));
+                if let Some(q) = &compte.qr {
+                    carte = carte.child(qr(q));
+                } else if compte.etat == Etat::Connexion {
+                    carte = carte.child(attente("Connexion…"));
+                } else {
+                    carte = carte.child(attente("Préparation du code QR…"));
+                }
+                carte = carte.child(
+                    div()
+                        .text_center()
+                        .text_size(px(12.))
+                        .text_color(th().texte_pale)
+                        .child(t("Les anciens messages ne sont pas récupérés : seuls ceux reçus après la liaison s'affichent.")),
+                );
+            }
+            _ => {
+                if compte.connexion_ouverte {
+                    carte = carte.child(attente("Connectez-vous dans la fenêtre x.com…"));
+                } else if self.cookies_x.is_some() {
+                    // Connecté à x.com : le code d'accès X Chat, un seul essai.
+                    carte = carte
+                        .child(texte(t("Entrez le code d'accès X Chat (4 chiffres), celui choisi dans X Chat. Il sert une seule fois à récupérer vos clés.").into()))
+                        .child(
+                            div()
+                                .w_full()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap(px(8.))
+                                .child(verre(0.8, 999.).flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.code_x).appearance(false)))
+                                .child(bouton_texte("x-continuer", t("Continuer"), ACCENT).on_click(cx.listener(|this, _, window, cx| {
+                                    this.envoyer_code_x(window, cx);
+                                    cx.notify();
+                                }))),
+                        )
+                        .child(
+                            div()
+                                .px(px(14.))
+                                .py(px(8.))
+                                .rounded(rayon(14.))
+                                .bg(alpha(c(AVERTI), 0.12))
+                                .text_size(px(13.))
+                                .text_color(th().texte_fort)
+                                .child(t("X verrouille X Chat après quelques codes faux.")),
+                        );
+                } else if matches!(compte.etat, Etat::Association | Etat::Connexion) {
+                    carte = carte.child(attente("Connexion à X…"));
+                } else {
+                    carte = carte
+                        .child(texte(t("Connectez-vous à x.com dans la fenêtre qui s'ouvre. Jasette vous demandera ensuite votre code X Chat.").into()))
+                        .child(Self::bouton_principal("x-fenetre", t("Se connecter à x.com")).mt(px(6.)).on_click(cx.listener(|this, _, _, cx| {
+                            this.connecter_meta(Service::X);
+                            cx.notify();
+                        })));
+                }
+            }
+        }
+        // WhatsApp et Signal : un nouveau code si le précédent a expiré.
+        if matches!(svc, Service::WhatsApp | Service::Signal) && compte.etat != Etat::Connexion {
+            carte = carte.child(
+                div()
+                    .id("ajout-recommencer")
+                    .text_size(px(13.))
+                    .text_color(th().accent)
+                    .cursor_pointer()
+                    .hover(|s| s.opacity(0.7))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.connecter_meta(svc);
+                        cx.notify();
+                    }))
+                    .child(t("Nouveau code QR")),
+            );
+        }
+        carte = carte.child(lien_retour("ajout-retour").on_click(cx.listener(|this, _, _, cx| {
+            this.ajout_service = None;
+            this.cookies_x = None;
+            this.erreur = None;
+            cx.notify();
+        })));
+        if let Some(e) = &self.erreur {
+            carte = carte.child(boite_erreur(e.clone()));
+        }
+        Self::carte_ajout("ajout-defile", carte)
+    }
+
     fn ecran_connexion(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let mut carte = verre(0.62, 28.)
             .when(th().sombre, |d| d.bg(th().liste).rounded(rayon(16.)))
@@ -7469,7 +8088,7 @@ impl Jasette {
                 div()
                     .text_center()
                     .text_color(th().texte)
-                    .child(t("Google Messages, Messenger et Instagram au même endroit, avec tout l'historique.")),
+                    .child(t("Google Messages, Messenger, Instagram, WhatsApp, Signal et X au même endroit.")),
             );
 
         if let Some(emoji) = &self.emoji {
@@ -7515,10 +8134,10 @@ impl Jasette {
                         .child("Google Messages > Association d'appareils > Scanner le code QR"),
                 );
         } else if let Some(svc) = SERVICES_META.into_iter().find(|s| self.meta(*s).connexion_ouverte) {
-            carte = carte.child(div().mt(px(10.)).text_color(th().texte).child(if svc == Service::Instagram {
-                t("Connectez-vous dans la fenêtre Instagram…")
-            } else {
-                t("Connectez-vous dans la fenêtre Facebook…")
+            carte = carte.child(div().mt(px(10.)).text_color(th().texte).child(match svc {
+                Service::Instagram => t("Connectez-vous dans la fenêtre Instagram…"),
+                Service::X => t("Connectez-vous dans la fenêtre x.com…"),
+                _ => t("Connectez-vous dans la fenêtre Facebook…"),
             }));
         } else if self.serveur_occupe {
             carte = carte.child(div().mt(px(10.)).text_color(th().texte).child(t("Un instant…")));
@@ -7616,6 +8235,18 @@ impl Jasette {
                     this.connecter_meta(Service::Instagram);
                     cx.notify();
                 })))
+                // WhatsApp, Signal et X : seulement si leur pont est là.
+                .children(self.services_presents().into_iter().filter(|s| s.facultatif()).map(|svc| {
+                    let id = match svc {
+                        Service::WhatsApp => "accueil-whatsapp",
+                        Service::Signal => "accueil-signal",
+                        _ => "accueil-x",
+                    };
+                    service(id, svc).on_click(cx.listener(move |this, _, _, cx| {
+                        this.connecter_meta(svc);
+                        cx.notify();
+                    }))
+                }))
                 .when(self.reglages.mode_serveur.is_empty(), |d| {
                     d.child(
                         div()
@@ -7788,8 +8419,7 @@ impl Jasette {
 
         // Premier lancement, aucun compte : l'écran d'accueil seul.
         if !self.etat.associe()
-            && !self.messenger.associe()
-            && !self.instagram.associe()
+            && !SERVICES_META.into_iter().any(|s| self.meta(s).deja_connu(s))
             && self.reglages.mode_serveur != "client"
             && self.convs.is_empty()
             && self.section.is_none()
@@ -7997,6 +8627,30 @@ fn groupe() -> Div {
         .flex()
         .flex_col()
         .overflow_hidden()
+}
+
+/// « ← Retour », sous les écrans d'ajout de compte.
+fn lien_retour(id: &'static str) -> gpui::Stateful<Div> {
+    div()
+        .id(id)
+        .mt(px(4.))
+        .text_size(px(13.))
+        .text_color(th().texte_pale)
+        .cursor_pointer()
+        .hover(|s| s.opacity(0.7))
+        .child(t("← Retour"))
+}
+
+/// Une erreur dans une carte (accueil, ajout de compte).
+fn boite_erreur(e: String) -> Div {
+    div()
+        .px(px(14.))
+        .py(px(8.))
+        .rounded(rayon(14.))
+        .bg(alpha(th().danger, 0.08))
+        .text_size(px(13.))
+        .text_color(th().danger)
+        .child(e)
 }
 
 fn bouton_texte(id: impl Into<gpui::ElementId>, texte: &'static str, couleur: u32) -> gpui::Stateful<Div> {
@@ -8228,7 +8882,7 @@ fn t(fr: &'static str) -> &'static str {
         "Aperçu du message" => "Message preview",
         "Aplats gris et fil noir, bulles plates." => "Flat grays, black thread, flat bubbles.",
         "Apparence" => "Appearance",
-        "Aussi pour Messenger et Instagram (par le nom)" => "Also for Messenger and Instagram (by name)",
+        "Aussi pour les autres services (par le nom)" => "Also for the other services (by name)",
         "La photo d'un contact du téléphone remplace celle de Google Messages, par le numéro." => {
             "A phone contact's photo replaces the Google Messages one, matched by number."
         }
@@ -8339,13 +8993,14 @@ fn t(fr: &'static str) -> &'static str {
         "Avatar d'Instagram" => "Instagram avatar",
         "Pont introuvable" => "Bridge not found",
         "Connectez-vous dans la fenêtre Instagram…" => "Sign in in the Instagram window…",
-        "Google Messages est déjà connecté : connectez Messenger ou Instagram ci-dessus." => "Google Messages is already connected: connect Messenger or Instagram above.",
         "le pont s'est arrêté. Relancez Jasette pour réessayer." => "the bridge stopped. Restart Jasette to try again.",
         "Ouvrir avec l'ordinateur" => "Open at startup",
         "Jasette s'ouvre toute seule à l'ouverture de session : les messages arrivent dès le départ." => "Jasette opens by itself when you log in, so messages arrive right away.",
         "Icône de l'app" => "App icon",
         "Blanche" => "White",
-        "Google Messages, Messenger et Instagram au même endroit, avec tout l'historique." => "Google Messages, Messenger and Instagram in one place, with your full history.",
+        "Google Messages, Messenger, Instagram, WhatsApp, Signal et X au même endroit." => {
+            "Google Messages, Messenger, Instagram, WhatsApp, Signal and X in one place."
+        }
         "Connectez un premier service :" => "Connect a first service:",
         "← Autres services" => "← Other services",
         "Comment utiliser Jasette ici ?" => "How do you want to use Jasette here?",
@@ -8426,6 +9081,53 @@ fn t(fr: &'static str) -> &'static str {
         "Rien ici pour l'instant." => "Nothing here yet.",
         "Seize couleurs et police IBM, comme un PC de 1984." => "Sixteen colors and the IBM font, like a 1984 PC.",
         "Interface" => "Interface",
+        // WhatsApp, Signal et X
+        "Numéro, ex. : +1 514 555 1234" => "Number, e.g. +1 514 555 1234",
+        "Code X Chat (4 chiffres)" => "X Chat code (4 digits)",
+        "Entrez le numéro complet, avec l'indicatif du pays (ex. : +1 514 555 1234)." => {
+            "Enter the full number, with the country code (e.g. +1 514 555 1234)."
+        }
+        "Le code X Chat est fait de 4 chiffres." => "The X Chat code is 4 digits.",
+        "Avatar de WhatsApp" => "WhatsApp avatar",
+        "Avatar de Signal" => "Signal avatar",
+        "Avatar de X" => "X avatar",
+        "Nouvelle conversation WhatsApp" => "New WhatsApp chat",
+        "Nouvelle conversation Signal" => "New Signal chat",
+        "Nouvelle conversation X" => "New X chat",
+        "Nouveau message par WhatsApp" => "New message via WhatsApp",
+        "Nouveau message par Signal" => "New message via Signal",
+        "Supprimer : bientôt pour WhatsApp." => "Delete: coming soon for WhatsApp.",
+        "Connectez-vous dans la fenêtre x.com…" => "Sign in in the x.com window…",
+        "Association en cours…" => "Pairing…",
+        "Tous vos services sont déjà connectés." => "All your services are already connected.",
+        "Sur votre téléphone : WhatsApp → Appareils connectés → Connecter un appareil, puis scannez ce code." => {
+            "On your phone: WhatsApp → Linked devices → Link a device, then scan this code."
+        }
+        "Sur le téléphone, dans « Connecter un appareil », touchez « Associer avec un numéro de téléphone à la place » et tapez ce code." => {
+            "On your phone, in “Link a device”, tap “Link with phone number instead” and type this code."
+        }
+        "Préparation du code QR…" => "Preparing the QR code…",
+        "Associer avec un numéro de téléphone" => "Link with a phone number",
+        "Recevoir un code" => "Get a code",
+        "Sur votre téléphone : Signal → Paramètres → Appareils liés → +, puis scannez ce code." => {
+            "On your phone: Signal → Settings → Linked devices → +, then scan this code."
+        }
+        "Les anciens messages ne sont pas récupérés : seuls ceux reçus après la liaison s'affichent." => {
+            "Older messages aren't retrieved: only those received after linking appear."
+        }
+        "Entrez le code d'accès X Chat (4 chiffres), celui choisi dans X Chat. Il sert une seule fois à récupérer vos clés." => {
+            "Enter your X Chat passcode (4 digits), the one you chose in X Chat. It's used once to retrieve your keys."
+        }
+        "X verrouille X Chat après quelques codes faux." => {
+            "X locks X Chat after a few wrong codes."
+        }
+        "Connexion à X…" => "Connecting to X…",
+        "Connectez-vous à x.com dans la fenêtre qui s'ouvre. Jasette vous demandera ensuite votre code X Chat." => {
+            "Sign in to x.com in the window that opens. Jasette will then ask for your X Chat code."
+        }
+        "Se connecter à x.com" => "Sign in to x.com",
+        "Nouveau code QR" => "New QR code",
+        "← Retour" => "← Back",
         _ => fr,
     }
 }

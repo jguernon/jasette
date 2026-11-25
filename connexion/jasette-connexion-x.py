@@ -18,6 +18,10 @@ Le code d'accès voyage avec les cookies (l'interface les transmet tels
 quels) ; le pont le retire aussitôt et ne le garde jamais : il ne garde que
 les clés qu'il a servi à récupérer.
 
+Avec --sans-code, la fenêtre ne demande pas le code : elle écrit les cookies
+dès la connexion et se ferme (l'interface de Jasette demande alors le code
+elle-même, et l'envoie au pont dans « pin »).
+
 Code de sortie : 0 si les cookies ont été écrits, 1 si la fenêtre a été
 fermée avant (rien n'est écrit sur la sortie standard).
 
@@ -42,6 +46,8 @@ REQUIS = {"auth_token", "ct0"}
 # autres font ressembler les requêtes du pont à celles du navigateur.
 VOULUS = REQUIS | {"twid", "kdt", "att", "guest_id", "guest_id_ads", "guest_id_marketing",
                    "personalization_id", "lang", "dnt", "d_prefs", "__cf_bm", "gt"}
+# --sans-code : l'interface demande le code elle-même.
+SANS_CODE = "--sans-code" in sys.argv[1:]
 # Le nom sous lequel le code d'accès voyage parmi les cookies (voir login.go du pont).
 CLE_CODE = "jasette_pin"
 # Le pont parle à X comme Chrome : la fenêtre se présente de la même façon.
@@ -140,6 +146,11 @@ class Connexion(Gtk.ApplicationWindow):
             # Pas encore connecté : la minuterie revérifie.
             return
         self.trouves = trouves
+        if SANS_CODE:
+            self.fini = True
+            print(json.dumps({"cookies": trouves, "platform": "x"}), flush=True)
+            self.get_application().quit()
+            return
         self.demander_code()
 
     # ---- Le code d'accès X Chat ----

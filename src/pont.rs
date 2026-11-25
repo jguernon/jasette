@@ -57,9 +57,17 @@ impl Pont {
         Self::lancer_nomme("jasette-pont", "JASETTE_PONT", None)
     }
 
-    /// Le pont Meta, pour « messenger » ou « instagram » : le même programme,
-    /// une copie par service, chacune avec son dossier de données.
+    /// Le pont d'un service autre que Google : « messenger » ou « instagram »
+    /// (le pont Meta, une copie par service, chacune avec son dossier de
+    /// données), ou « whatsapp », « signal », « x » (un pont chacun, qui parle
+    /// le même protocole ; erreur si son binaire est absent).
     pub fn lancer_meta(service: &str) -> Result<Self, String> {
+        match service {
+            "whatsapp" => return Self::lancer_nomme("jasette-wa", "JASETTE_WA", None),
+            "signal" => return Self::lancer_nomme("jasette-signal", "JASETTE_SIGNAL", None),
+            "x" => return Self::lancer_nomme("jasette-x", "JASETTE_X", None),
+            _ => {}
+        }
         // Instagram a changé de protocole : son propre pont (instameow), s'il est là.
         if service == "instagram" && chemin("jasette-ig", "JASETTE_IG").is_some() {
             return Self::lancer_nomme("jasette-ig", "JASETTE_IG", Some(service));
@@ -111,7 +119,8 @@ impl Pont {
         })
     }
 
-    /// Le service `service` (« google », « messenger » ou « instagram ») d'un
+    /// Le service `service` (« google », « messenger », « instagram »,
+    /// « whatsapp », « signal » ou « x ») d'un
     /// serveur Jasette jumelé. Ne bloque pas : la connexion (une seule par
     /// serveur, partagée entre les services) se fait en arrière-plan, et
     /// l'interface reçoit `state: connecting` puis l'état réel du pont du

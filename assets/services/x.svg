@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- X, dessiné pour Jasette : noir (blanc en thème sombre, l'interface remplace la couleur). -->
+  <path d="M16 16 H38 L84 84 H62 Z M25 21 L65 79 H75 L35 21 Z" fill="#000000" fill-rule="evenodd"/>
+  <path d="M81 16 L56.3 43.1 M43.7 56.9 L19 84" fill="none" stroke="#000000" stroke-width="6.5"/>
+</svg>
