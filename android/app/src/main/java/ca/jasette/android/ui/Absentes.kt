@@ -51,12 +51,18 @@ fun absence(id: String): Absence? {
     }
 }
 
-/** Grisé : le service n'est pas là (une conversation plus ancienne d'un service prêt ne l'est pas). */
-fun Absence?.grise() = this == Absence.CHARGEMENT || this == Absence.DECONNECTE
+/**
+ * Grisé : le service est vraiment déconnecté. Un service qui se connecte
+ * (démarrage, reconnexion) ne grise rien : ses conversations viennent du cache
+ * ([ca.jasette.android.CacheConvs] ou [CacheMarques]) et sont montrées normalement.
+ */
+fun Absence?.grise() = this == Absence.DECONNECTE
 
-/** La petite indication sous une conversation absente, ou null. */
+/** Le service n'est pas là (déconnecté ou en train de se connecter) : pas de fil à demander. */
+fun Absence?.horsLigne() = this == Absence.CHARGEMENT || this == Absence.DECONNECTE
+
+/** La petite indication sous une conversation absente, ou null (seulement « déconnecté »). */
 fun Absence?.indication(): String? = when (this) {
-    Absence.CHARGEMENT -> t("chargement…")
     Absence.DECONNECTE -> t("déconnecté")
     else -> null
 }

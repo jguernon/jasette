@@ -293,7 +293,7 @@ fun Fil(
         val inverse = liste.asReversed()
         LaunchedEffect(liste.lastOrNull()?.id) { if (liste.isNotEmpty()) etat.animateScrollToItem(0) }
         Box(Modifier.fillMaxSize().padding(marges).onGloballyPositioned { conteneur = it }) {
-        if (conv == null && liste.isEmpty() && absente.grise()) {
+        if (conv == null && liste.isEmpty() && absente.horsLigne()) {
             // Pas chargée, aucun message reçu : le service n'est pas là.
             FilHorsLigne(Service.de(id), absente, reglages)
         } else

@@ -46,6 +46,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         Depot.visible = false
+        // L'app passe en arrière-plan : le cache des conversations est écrit sans attendre.
+        CacheConvs.ecrireMaintenant()
         super.onStop()
     }
 

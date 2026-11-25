@@ -92,6 +92,12 @@ data class Conv(
 ) {
     val service get() = Service.de(id)
 
+    /** Les mêmes champs que ceux du pont (pour le cache sur disque, relu par [de]). */
+    fun json(): JSONObject = JSONObject().put("id", id).put("name", name).put("preview", preview)
+        .put("from_me", fromMe).put("time", time).put("unread", unread).put("group", group).put("rcs", rcs)
+        .put("color", color).put("members", JSONArray(members)).put("read_only", readOnly)
+        .put("archived", archived).put("e2ee", e2ee).put("number", number)
+
     companion object {
         fun de(o: JSONObject) = Conv(
             id = o.chaine("id"),
@@ -125,6 +131,9 @@ data class Piece(
     val estImage get() = mime.startsWith("image/")
     val estAudio get() = mime.startsWith("audio/")
 
+    fun json(): JSONObject = JSONObject().put("media_id", mediaId).put("key", key).put("mime", mime)
+        .put("name", name).put("size", size).put("w", w).put("h", h)
+
     companion object {
         fun de(o: JSONObject) = Piece(
             mediaId = o.chaine("media_id"),
@@ -156,6 +165,21 @@ data class Msg(
 ) {
     /** Un envoi local pas encore confirmé par le pont. */
     val local get() = id == tmpId
+
+    /** Les mêmes champs que ceux du pont (pour le cache sur disque, relu par [de]). */
+    fun json(): JSONObject {
+        val o = JSONObject().put("id", id).put("conv", conv).put("text", text).put("media", media)
+            .put("from_me", fromMe).put("sender", sender).put("time", time).put("status", status).put("kind", kind)
+        if (tmpId.isNotEmpty()) o.put("tmp_id", tmpId)
+        if (attachments.isNotEmpty()) o.put("attachments", JSONArray(attachments.map { it.json() }))
+        if (reactions.isNotEmpty()) {
+            o.put(
+                "reactions",
+                JSONArray(reactions.map { JSONObject().put("emoji", it.emoji).put("sender", it.sender).put("from_me", it.fromMe) }),
+            )
+        }
+        return o
+    }
 
     /** L'aperçu dans la liste ou une notification. */
     fun apercu(): String = when {

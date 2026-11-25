@@ -63,6 +63,10 @@ object Depot {
     /** Les réactions d'avant une réaction optimiste : id du message → (conv, réactions). */
     private val reactionsAvant = HashMap<String, Pair<String, List<Reaction>>>()
     private val demandes = HashSet<String>()
+    /** Les conversations dont le service a déjà répondu `messages` depuis qu'il est prêt (pas le cache). */
+    private val fraiches = HashSet<String>()
+    /** Les conversations dont on attend la réponse `messages` (une seule demande à la fois). */
+    private val demandesFil = HashSet<String>()
 
     /** L'état de chaque compte. */
     val etats = mutableStateMapOf<Service, Etat>().apply { Service.entries.forEach { put(it, Etat.DEMARRAGE) } }
@@ -140,16 +144,81 @@ object Depot {
         } else {
             Marques.brancher(null, null)
         }
+        CacheConvs.initialiser(appli)
         if (cfg != null) {
-            services = Service.LOCAUX
-            // WhatsApp, Signal et X attendent que le serveur les annonce (servicesOfferts).
+            // WhatsApp, Signal et X attendent que le serveur les annonce (servicesOfferts) ;
+            // ceux qu'il offrait la dernière fois (gardés en cache) se montrent déjà.
+            services = Service.LOCAUX + CacheConvs.servicesGardes().filter { it.serveurSeulement }
+            chargerCache()
             Service.LOCAUX.forEach { lancer(it) }
         } else {
             // Sur cet appareil : les ponts embarqués, plus WhatsApp, Signal et X
             // si leur pont a été compilé dans l'APK (sinon, absents sans erreur).
             services = Service.LOCAUX + Service.entries.filter { it.serveurSeulement && embarque(it) }
+            chargerCache()
             services.forEach { lancer(it) }
         }
+    }
+
+    /**
+     * Avant toute connexion : les listes gardées par [CacheConvs] s'affichent
+     * tout de suite (lues ici, elles sont petites), puis les messages gardés
+     * arrivent d'un fil à part. Ce qu'un service a déjà envoyé n'est pas écrasé.
+     */
+    private fun chargerCache() {
+        for (s in services) {
+            if (convs.any { it.service == s } || archives.any { it.service == s }) continue
+            val l = CacheConvs.lireListes(s) ?: continue
+            for ((k, v) in l.avatars) if (!avatars.containsKey(k)) avatars[k] = v
+            if (l.convs.isNotEmpty()) remplacerConvs(convs + l.convs.filter { c -> archives.none { it.id == c.id } })
+            if (l.archives.isNotEmpty()) remplacerArchives(archives + l.archives.filter { c -> convs.none { it.id == c.id } })
+        }
+        val g = generation
+        CacheConvs.lireFils(services) { fils ->
+            if (g != generation) return@lireFils
+            for (f in fils) {
+                for ((k, v) in f.medias) if (!medias.containsKey(k)) medias[k] = v
+                val deja = messages[f.conv]
+                messages[f.conv] = if (deja == null) f.messages else ajouterAnciens(deja, f.messages)
+                if (!plusAnciens.containsKey(f.conv)) plusAnciens[f.conv] = f.plus
+                if (chargement == f.conv && messages[f.conv].orEmpty().isNotEmpty()) chargement = null
+            }
+        }
+    }
+
+    /** [deja] (venu du service) d'abord ; les messages gardés qui n'y sont pas s'y ajoutent, dans l'ordre. */
+    private fun ajouterAnciens(deja: List<Msg>, gardes: List<Msg>): List<Msg> {
+        val ids = deja.mapTo(HashSet()) { it.id }
+        val (locaux, confirmes) = deja.partition { it.local }
+        return (confirmes + gardes.filter { it.id !in ids }).sortedBy { it.time } + locaux
+    }
+
+    /**
+     * La réponse `messages` (non `older`) fusionnée avec ce qu'on montre déjà
+     * (le cache, ou une réponse précédente), par id de message, sans doublon,
+     * dans l'ordre. Les envois locaux pas encore confirmés restent à la fin.
+     * Une vraie réponse du service ([autorite], pas `cache:true`) fait foi sur
+     * sa période : un message gardé qui tombe entre son plus vieux et son plus
+     * récent message, mais qu'elle n'a pas, a été supprimé entre-temps.
+     */
+    private fun fusionner(liste: List<Msg>, items: List<Msg>, autorite: Boolean): List<Msg> {
+        val recus = items.filter { !it.local }.distinctBy { it.id }
+        val ids = recus.mapTo(HashSet()) { it.id }
+        val tmps = recus.mapNotNullTo(HashSet()) { it.tmpId.ifEmpty { null } }
+        val debut = recus.minOfOrNull { it.time } ?: Long.MAX_VALUE
+        val fin = recus.maxOfOrNull { it.time } ?: Long.MIN_VALUE
+        val locaux = ArrayList<Msg>()
+        val autres = ArrayList<Msg>()
+        for (m in liste) {
+            when {
+                m.id in ids -> {}
+                m.tmpId.isNotEmpty() && m.tmpId in tmps -> {}
+                m.local -> locaux.add(m)
+                autorite && m.time in debut..fin -> {}
+                else -> autres.add(m)
+            }
+        }
+        return (recus + autres).sortedBy { it.time } + locaux
     }
 
     /**
@@ -178,6 +247,7 @@ object Depot {
     fun etat(service: Service): Etat = etats[service] ?: Etat.DEMARRAGE
 
     fun arreter() {
+        CacheConvs.ecrireMaintenant()
         enMarche = false
         generation++
         ponts.values.forEach { it.arreter() }
@@ -193,6 +263,8 @@ object Depot {
         ConfigServeur.garder(appli, config)
         arreter()
         vider()
+        // Autre serveur, ou plus de serveur : le cache des conversations ne vaut plus.
+        CacheConvs.toutEffacer()
         // Les copies des fichiers d'un serveur abandonné ne servent plus.
         if (config == null) File(appli.filesDir, "distant").deleteRecursively()
         serveur = config
@@ -216,6 +288,8 @@ object Depot {
         envois.clear()
         reactionsAvant.clear()
         demandes.clear()
+        fraiches.clear()
+        demandesFil.clear()
         Service.entries.forEach { etats[it] = Etat.DEMARRAGE }
         services = Service.LOCAUX
         noms.clear()
@@ -394,6 +468,15 @@ object Depot {
     fun deconnecter(service: Service) {
         qr.remove(service)
         codeAssociation.remove(service)
+        // Le service est déconnecté : son cache (listes et messages) est effacé.
+        oublier(service)
+        for (k in messages.keys.filter { Service.de(it) == service }) {
+            messages.remove(k)
+            plusAnciens.remove(k)
+        }
+        fraiches.removeAll { Service.de(it) == service }
+        demandesFil.removeAll { Service.de(it) == service }
+        CacheConvs.effacer(service)
         // Les ponts WhatsApp, Signal et X ne connaissent que « unpair ».
         val cmd = if (service == Service.GOOGLE || service.serveurSeulement) "unpair" else "logout"
         commande(service, JSONObject().put("cmd", cmd))
@@ -437,6 +520,7 @@ object Depot {
                 if (apres == Etat.PRET && avant != Etat.PRET) {
                     commande(service, JSONObject().put("cmd", "conversations").put("count", 50))
                     pretPourArchives(service)
+                    filsAuPret(service)
                 }
                 if (apres == Etat.NON_ASSOCIE) oublier(service)
                 // Hors association, le QR et le code n'ont plus de sens.
@@ -476,6 +560,10 @@ object Depot {
                 val texte = v.chaine("text")
                 if (v.chaine("where") == "search") Log.d("jasette", "search ${service.court} : erreur (${texte.length} car.)")
                 if (v.chaine("where") == "react") annulerReactions()
+                if (v.chaine("where") == "messages") {
+                    chargement = null
+                    demandesFil.removeAll { Service.de(it) == service }
+                }
                 if (texte.isNotEmpty()) erreur = "${service.court} : ${t(texte)}"
             }
             "pont_ferme" -> pontFerme(service)
@@ -500,6 +588,7 @@ object Depot {
                         // plus tard ne la recevrait jamais (pas rejouée).
                         if (avant != Etat.PRET) {
                             commande(Service.GOOGLE, JSONObject().put("cmd", "conversations").put("count", 50))
+                            filsAuPret(Service.GOOGLE)
                         }
                         pretPourArchives(Service.GOOGLE)
                     }
@@ -546,6 +635,7 @@ object Depot {
                 if (conv.isNotEmpty() && path.isNotEmpty()) {
                     avatars[conv] = path
                     CacheMarques.noterAvatar(conv)
+                    CacheConvs.noterListes()
                 }
             }
             "avatars_groupe" -> {
@@ -558,6 +648,7 @@ object Depot {
                     if (path.isNotEmpty()) {
                         avatars[conv] = path
                         CacheMarques.noterAvatar(conv)
+                        CacheConvs.noterListes()
                         break
                     }
                 }
@@ -567,25 +658,43 @@ object Depot {
                 val id = v.chaine("media_id")
                 demandes.remove(id)
                 val path = v.chaine("path")
-                if (path.isNotEmpty()) medias[id] = path else echecs[id] = true
+                if (path.isNotEmpty()) {
+                    medias[id] = path
+                    // Le fichier est gardé avec les messages de sa conversation.
+                    for ((conv, liste) in messages) {
+                        if (liste.any { m -> m.attachments.any { it.mediaId == id } }) CacheConvs.noterFil(conv)
+                    }
+                } else {
+                    echecs[id] = true
+                }
             }
             "messages" -> {
                 val conv = v.chaine("conv")
                 val arr = v.optJSONArray("items")
                 val items = (0 until (arr?.length() ?: 0)).map { Msg.de(arr!!.getJSONObject(it)) }
                 val older = v.optBoolean("older")
+                // Le serveur Jasette répond d'abord depuis son propre cache (`cache:true`),
+                // puis le service répond pour de vrai : les deux se fusionnent pareil.
+                val duCache = v.optBoolean("cache")
                 telechargerImages(items)
                 val liste = messages[conv].orEmpty()
-                messages[conv] = if (older) {
-                    items.filter { m -> liste.none { it.id == m.id } } + liste
+                if (older) {
+                    messages[conv] = items.filter { m -> liste.none { it.id == m.id } } + liste
+                    plusAnciens[conv] = v.optBoolean("more")
                 } else {
-                    // Garde les envois locaux pas encore confirmés.
-                    val attente = liste.filter { m -> m.local && items.none { it.tmpId == m.tmpId } }
-                    items + attente
+                    val fusion = fusionner(liste, items, autorite = !duCache)
+                    messages[conv] = fusion
+                    // Des messages gardés plus vieux que la réponse : on pourra en demander d'autres.
+                    val plusVieux = items.minOfOrNull { it.time }?.let { d -> fusion.any { !it.local && it.time < d } } ?: false
+                    plusAnciens[conv] = v.optBoolean("more") || plusVieux
+                    if (!duCache) {
+                        fraiches.add(conv)
+                        demandesFil.remove(conv)
+                    }
                 }
-                plusAnciens[conv] = v.optBoolean("more")
-                if (chargement == conv) chargement = null
+                if (chargement == conv && (older || !duCache || messages[conv].orEmpty().isNotEmpty())) chargement = null
                 if (!older && visible && ouverte == conv) marquerLu(conv)
+                CacheConvs.noterFil(conv)
             }
             "message" -> {
                 val m = Msg.de(v.optJSONObject("item") ?: return)
@@ -598,6 +707,7 @@ object Depot {
                 if (convs.any { it.id == id }) remplacerConvs(convs.filter { it.id != id })
                 if (archives.any { it.id == id }) remplacerArchives(archives.filter { it.id != id })
                 messages.remove(id)
+                CacheConvs.noterFil(id)
                 // Une suppression explicite (ici ou ailleurs) : ses marques partent aussi.
                 // C'est, avec Depot.supprimer, le seul retrait automatique de marques :
                 // une conversation simplement absente (service coupé, liste rechargée) les garde.
@@ -620,7 +730,10 @@ object Depot {
                 if (v.chaine("where") == "search") Log.d("jasette", "search ${service.court} : erreur (${texte.length} car.)")
                 if (v.chaine("where") == "react") annulerReactions()
                 if (texte.isNotEmpty()) erreur = t(texte)
-                if (v.chaine("where") == "messages") chargement = null
+                if (v.chaine("where") == "messages") {
+                    chargement = null
+                    demandesFil.clear()
+                }
             }
             "pont_ferme" -> pontFerme(service)
             else -> {}
@@ -644,6 +757,7 @@ object Depot {
             liste.sortBy { it.time }
         }
         messages[m.conv] = liste
+        CacheConvs.noterFil(m.conv)
 
         val conv = conv(m.conv)
         if (conv != null) {
@@ -674,6 +788,7 @@ object Depot {
         convs.addAll(triee)
         // Les conversations marquées (Head, favoris, épingles) : gardées pour quand leur service sera absent.
         CacheMarques.noter(triee)
+        CacheConvs.noterListes()
     }
 
     private fun remplacerArchives(liste: List<Conv>) {
@@ -681,6 +796,7 @@ object Depot {
         archives.clear()
         archives.addAll(triee)
         CacheMarques.noter(triee)
+        CacheConvs.noterListes()
     }
 
     /** Une conversation, dans la boîte de réception ou les archives. */
@@ -750,14 +866,38 @@ object Depot {
 
     // ---- Les actions de l'interface ----
 
+    /**
+     * Ouvre une conversation : ses messages gardés s'affichent tout de suite,
+     * et le service est interrogé une fois (depuis qu'il est prêt) ; sa réponse
+     * se fusionne à l'écran. L'indicateur de chargement ne paraît que si l'on
+     * n'a encore aucun message à montrer.
+     */
     fun ouvrir(id: String) {
         ouverte = id
-        if (!messages.containsKey(id)) {
-            chargement = id
-            commande(JSONObject().put("cmd", "messages").put("conv", id).put("count", 60))
-        } else {
-            marquerLu(id)
+        val vide = messages[id].isNullOrEmpty()
+        if (id !in fraiches) {
+            if (vide) chargement = id
+            demanderFil(id)
         }
+        // Messages gardés, service pas encore prêt : « lu » partira quand il le sera (filsAuPret).
+        if (!vide && pret(Service.de(id))) marquerLu(id)
+    }
+
+    private fun demanderFil(id: String) {
+        if (!demandesFil.add(id)) return
+        commande(JSONObject().put("cmd", "messages").put("conv", id).put("count", 60))
+    }
+
+    /**
+     * Un service (re)devient prêt : ses réponses d'avant ne sont plus sûres
+     * (des messages ont pu arriver pendant la coupure). La conversation ouverte
+     * est redemandée ; les autres le seront à leur ouverture.
+     */
+    private fun filsAuPret(service: Service) {
+        fraiches.removeAll { Service.de(it) == service }
+        demandesFil.removeAll { Service.de(it) == service }
+        val o = ouverte ?: return
+        if (Service.de(o) == service) ouvrir(o)
     }
 
     fun plusVieux(id: String) {
@@ -881,6 +1021,7 @@ object Depot {
         remplacerConvs(convs.filter { it.id != id })
         remplacerArchives(archives.filter { it.id != id })
         messages.remove(id)
+        CacheConvs.noterFil(id)
         Marques.oublier(id)
     }
 
@@ -969,6 +1110,7 @@ object Depot {
         for ((msg, avant) in reactionsAvant) {
             val (conv, reactions) = avant
             messages[conv]?.let { l -> messages[conv] = l.map { if (it.id == msg) it.copy(reactions = reactions) else it } }
+            CacheConvs.noterFil(conv)
         }
         reactionsAvant.clear()
     }
