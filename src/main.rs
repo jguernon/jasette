@@ -1025,7 +1025,8 @@ fn image_service_svg(s: Service, taille: f32) -> Arc<gpui::Image> {
     let (cle, source) = match s {
         _ => (2u8, include_str!("../assets/services/x.svg")),
     };
-    let blanc = s == Service::X && th().sombre;
+    // Le carré noir du X garde ses couleurs dans tous les thèmes.
+    let blanc = false;
     let cote = taille.ceil().max(1.) as u32;
     let mut cache = CACHE.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
     cache
