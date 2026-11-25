@@ -486,7 +486,8 @@ object Depot {
     private fun nouvelle(v: JSONObject, service: Service) {
         when (v.chaine("ev")) {
             "state" -> {
-                etats[Service.GOOGLE] = Etat.de(v.chaine("state"), etat(Service.GOOGLE))
+                val avant = etat(Service.GOOGLE)
+                etats[Service.GOOGLE] = Etat.de(v.chaine("state"), avant)
                 when (etat(Service.GOOGLE)) {
                     Etat.NON_ASSOCIE -> {
                         emoji = null
@@ -494,6 +495,12 @@ object Depot {
                     }
                     Etat.PRET -> {
                         emoji = null
+                        // Prêt : on demande la liste. Le pont l'envoie seul à son
+                        // démarrage, mais un client d'un serveur Jasette branché
+                        // plus tard ne la recevrait jamais (pas rejouée).
+                        if (avant != Etat.PRET) {
+                            commande(Service.GOOGLE, JSONObject().put("cmd", "conversations").put("count", 50))
+                        }
                         pretPourArchives(Service.GOOGLE)
                     }
                     else -> {}
