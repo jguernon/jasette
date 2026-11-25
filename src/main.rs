@@ -1088,7 +1088,26 @@ fn image_service_svg(s: Service, taille: f32) -> Arc<gpui::Image> {
 /// comme dans le Play Store. L'image est arrondie elle aussi : GPUI ne
 /// découpe pas les enfants selon les coins de leur parent.
 fn logo(s: Service, taille: f32) -> Div {
+    logo_gris(s, taille, false)
+}
+
+/// Le logo d'un service caché de la boîte de réception (`gris`) : désaturé, à
+/// 40 % d'opacité ; en EGA, gris et opaque, sur l'aplat gris foncé.
+fn logo_gris(s: Service, taille: f32, gris: bool) -> Div {
     let rayon = px(taille * 0.3);
+    // EGA : pas de transparence ; un carré gris EGA, le logo désaturé en retrait au centre.
+    if gris && th().ega {
+        return div()
+            .flex_none()
+            .size(px(taille))
+            .bg(c(EGA_GRIS))
+            .border_1()
+            .border_color(c(EGA_GRIS_CLAIR))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(img(image_service(s, taille)).size(px((taille * 0.6).round())).object_fit(ObjectFit::Contain).grayscale(true));
+    }
     div()
         .flex_none()
         .size(px(taille))
@@ -1099,7 +1118,8 @@ fn logo(s: Service, taille: f32) -> Div {
         .when(!th().sombre, |d| {
             d.bg(blanc(1.)).border_1().border_color(ton(rgba(0x0000001a).into(), hsla(0., 0., 0., 0.)))
         })
-        .child(img(image_service(s, taille)).size_full().rounded(rayon).object_fit(ObjectFit::Contain))
+        .when(gris, |d| d.opacity(0.4))
+        .child(img(image_service(s, taille)).size_full().rounded(rayon).object_fit(ObjectFit::Contain).grayscale(gris))
 }
 
 // ---- Les données ----
@@ -1368,6 +1388,13 @@ struct Reglages {
     /// le serveur Jasette, sinon elle-même). Ceux du service restent affichés.
     #[serde(default = "vrai")]
     apercus_liens: bool,
+    /// Les services cachés (leurs clés : « google », « messenger »…) : leurs
+    /// conversations quittent la boîte de réception, les Head, les favoris et
+    /// les archives, sans qu'aucune marque ne soit retirée (un filtre
+    /// d'affichage). La vue du service et la recherche les montrent toujours ;
+    /// les notifications continuent. Propre à cet appareil, jamais synchronisé.
+    #[serde(default)]
+    services_caches: Vec<String>,
     /// « Utiliser les photos de mes contacts » (les contacts du téléphone, par Google Messages).
     #[serde(default = "vrai")]
     photos_contacts: bool,
@@ -1464,6 +1491,7 @@ impl Default for Reglages {
             taille_messages: 1.,
             liste_grosse: false,
             apercus_liens: true,
+            services_caches: Vec::new(),
             photos_contacts: true,
             photos_contacts_meta: false,
             marques_version: 0,
@@ -1602,6 +1630,19 @@ impl Reglages {
     /// Archivée par Jasette : seulement pour les services qui n'archivent pas eux-mêmes.
     fn archivee_jasette(&self, id: &str) -> bool {
         !service_de(id).archive_native() && self.archives.iter().any(|x| x == id)
+    }
+
+    /// Un service caché de la boîte de réception (voir `services_caches`).
+    fn service_cache(&self, s: Service) -> bool {
+        self.services_caches.iter().any(|c| c == s.cle())
+    }
+
+    /// Montre ou cache un service dans la boîte de réception.
+    fn montrer_service(&mut self, s: Service, montre: bool) {
+        self.services_caches.retain(|c| c != s.cle());
+        if !montre {
+            self.services_caches.push(s.cle().to_string());
+        }
     }
 
     /// Les colonnes du Head : 3 à 6, 4 par défaut (les anciennes valeurs
@@ -1851,6 +1892,8 @@ struct Jasette {
     menu_avatar: bool,
     /// Le menu « … » de la conversation ouverte, et la confirmation de suppression.
     menu_conv: bool,
+    /// Le menu du clic droit sur l'icône d'un service, dans le rail.
+    menu_rail: Option<Service>,
     /// La vue Favoris en mode « réorganiser » (flèches sur chaque rangée).
     reorganiser: bool,
     confirmer_suppression: bool,
@@ -2727,6 +2770,7 @@ impl Jasette {
             emojis_ouverts: false,
             menu_avatar: false,
             menu_conv: false,
+            menu_rail: None,
             reorganiser: false,
             confirmer_suppression: false,
             nouveau_texte: String::new(),
@@ -3382,9 +3426,25 @@ impl Jasette {
         self.fantomes = fantomes;
     }
 
-    /// Les non-lues de la boîte de réception (sans les archives de Jasette).
+    /// Les non-lues de la boîte de réception (sans les archives de Jasette ni les services cachés).
     fn non_lus(&self) -> usize {
-        self.convs.iter().filter(|c| c.unread && !self.reglages.archivee_jasette(&c.id) && !self.privee(&c.id)).count()
+        self.convs
+            .iter()
+            .filter(|c| {
+                c.unread
+                    && !self.reglages.archivee_jasette(&c.id)
+                    && !self.privee(&c.id)
+                    && !self.reglages.service_cache(service_de(&c.id))
+            })
+            .count()
+    }
+
+    /// Les non-lues d'un service (son icône du rail, quand il est caché de la boîte).
+    fn non_lus_service(&self, s: Service) -> usize {
+        self.convs
+            .iter()
+            .filter(|c| c.unread && service_de(&c.id) == s && !self.reglages.archivee_jasette(&c.id) && !self.privee(&c.id))
+            .count()
     }
 
     /// La boîte de réception (et les vues Favoris et par service) : sans les archives de Jasette.
@@ -4958,6 +5018,12 @@ impl Jasette {
         let en_reglages = self.section.is_some();
         let non_lus = self.non_lus();
         let gm_probleme = !matches!(self.etat, Etat::Pret | Etat::Demarrage);
+        // Google garde sa pastille de la boîte ; caché, il montre ses propres non-lues.
+        let non_lus_gm = if self.reglages.service_cache(Service::GoogleMessages) {
+            self.non_lus_service(Service::GoogleMessages)
+        } else {
+            non_lus
+        };
         let initiale = self
             .reglages
             .email
@@ -5039,17 +5105,25 @@ impl Jasette {
                         this.vue = Vue::Service(Service::GoogleMessages);
                         cx.notify();
                     }))
-                    .child(logo(Service::GoogleMessages, 32.))
+                    .on_mouse_down(MouseButton::Right, cx.listener(|this, _, _, cx| {
+                        this.menu_rail = Some(Service::GoogleMessages);
+                        cx.stop_propagation();
+                        cx.notify();
+                    }))
+                    .child(logo_gris(Service::GoogleMessages, 32., self.reglages.service_cache(Service::GoogleMessages)))
                     .when(matches!(self.etat, Etat::Association | Etat::Connexion | Etat::Reconnexion), |d| {
                         d.child(pastille_chargement("chargement-google"))
                     })
                     .when(gm_probleme && !matches!(self.etat, Etat::Association | Etat::Connexion | Etat::Reconnexion), |d| {
                         d.child(pastille_alerte())
                     })
-                    .when(!gm_probleme && non_lus > 0, |d| d.child(pastille_nombre(non_lus, ton(c(DANGER), th().accent)))),
+                    .when(!gm_probleme && non_lus_gm > 0, |d| d.child(pastille_nombre(non_lus_gm, ton(c(DANGER), th().accent))))
+                    .children(self.menu_rail_vue(Service::GoogleMessages, cx)),
             ))
             .children(SERVICES_META.into_iter().filter(|s| self.meta(*s).deja_connu(*s)).map(|svc| {
                 let etat = self.meta(svc).etat;
+                let cache = self.reglages.service_cache(svc);
+                let non_lus_svc = if cache { self.non_lus_service(svc) } else { 0 };
                 Self::bouton_rail(svc.id_rail(), !en_reglages && self.vue == Vue::Service(svc))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.section = None;
@@ -5057,11 +5131,21 @@ impl Jasette {
                         this.vue = Vue::Service(svc);
                         cx.notify();
                     }))
-                    .child(logo(svc, 32.))
+                    .on_mouse_down(MouseButton::Right, cx.listener(move |this, _, _, cx| {
+                        this.menu_rail = Some(svc);
+                        cx.stop_propagation();
+                        cx.notify();
+                    }))
+                    .child(logo_gris(svc, 32., cache))
                     .when(matches!(etat, Etat::Association | Etat::Connexion | Etat::Reconnexion), |d| {
                         d.child(pastille_chargement(svc.id_chargement()))
                     })
                     .when(matches!(etat, Etat::TelephoneHorsLigne), |d| d.child(pastille_alerte()))
+                    // Caché de la boîte : ses non-lues restent sur son icône.
+                    .when(cache && non_lus_svc > 0 && !matches!(etat, Etat::TelephoneHorsLigne), |d| {
+                        d.child(pastille_nombre(non_lus_svc, ton(c(DANGER), th().accent)))
+                    })
+                    .children(self.menu_rail_vue(svc, cx))
             }))
             // Les services non connectés n'ont pas d'icône : « ••• » mène à l'ajout de compte.
             .child(
@@ -5084,6 +5168,55 @@ impl Jasette {
             )
     }
 
+    /// Le menu du clic droit sur l'icône d'un service : le montrer ou le cacher
+    /// dans la boîte de réception. Peint par-dessus la liste, à droite de l'icône.
+    fn menu_rail_vue(&self, svc: Service, cx: &mut Context<Self>) -> Option<gpui::Deferred> {
+        if self.menu_rail != Some(svc) {
+            return None;
+        }
+        let cache = self.reglages.service_cache(svc);
+        let texte = if cache { t("Montrer dans la boîte de réception") } else { t("Cacher de la boîte de réception") };
+        let menu = verre(0.96, 14.)
+            .id("menu-rail")
+            .absolute()
+            .left(px(50.))
+            .top(px(4.))
+            .w(px(290.))
+            .p(px(6.))
+            .shadow(ombre_verre())
+            .when(th().sombre, |d| d.bg(th().menu).border_1().border_color(th().trait_fin))
+            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                this.menu_rail = None;
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .id("menu-rail-basculer")
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(10.))
+                    .px(px(12.))
+                    .py(px(9.))
+                    .rounded(rayon(10.))
+                    .text_size(px(14.))
+                    .text_color(th().texte_fort)
+                    .cursor_pointer()
+                    .hover(|s| s.bg(th().survol))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.reglages.montrer_service(svc, cache);
+                        this.reglages.garder();
+                        this.menu_rail = None;
+                        cx.notify();
+                    }))
+                    .child(icone(if cache { "eye" } else { "eye-off" }, 16., th().texte_fort))
+                    .child(texte),
+            );
+        Some(gpui::deferred(menu).with_priority(1))
+    }
+
     // ---- Dessin : la liste ----
 
     fn correspond(&self, conv: &Conv) -> bool {
@@ -5092,6 +5225,14 @@ impl Jasette {
             return false;
         }
         if self.non_lus_seulement && !conv.unread {
+            return false;
+        }
+        // Un service caché : absent de la boîte (et de ses Head), des favoris et
+        // des archives, sans recherche ; sa vue propre le montre toujours.
+        if matches!(self.vue, Vue::Tout | Vue::Favoris | Vue::Archives)
+            && self.filtre.is_empty()
+            && self.reglages.service_cache(service_de(&conv.id))
+        {
             return false;
         }
         if let Vue::Service(s) = self.vue
@@ -8554,6 +8695,7 @@ impl Jasette {
                     "Les services se connectent et se déconnectent sur le serveur.",
                 )))
                 .child(div().mt(px(14.)).child(lignes))
+                .child(self.boite_services(cx))
                 .into_any_element();
         }
         let associe = self.etat.associe();
@@ -8651,7 +8793,70 @@ impl Jasette {
                     .child(icone("circle-plus", 17., th().accent))
                     .child(t("Ajouter un compte")),
             )
+            .child(self.boite_services(cx))
             .into_any_element()
+    }
+
+    /// « Dans la boîte de réception » (Réglages → Comptes) : une case par
+    /// service ; décochée, le service est caché (comme son clic droit dans le rail).
+    fn boite_services(&self, cx: &mut Context<Self>) -> Div {
+        let services: Vec<Service> = std::iter::once(Service::GoogleMessages)
+            .filter(|_| self.etat != Etat::NonAssocie || self.reglages.mode_serveur == "client")
+            .chain(SERVICES_META.into_iter().filter(|s| self.meta(*s).deja_connu(*s)))
+            .collect();
+        let mut lignes = groupe();
+        for (i, svc) in services.into_iter().enumerate() {
+            if i > 0 {
+                lignes = lignes.child(separateur());
+            }
+            let montre = !self.reglages.service_cache(svc);
+            lignes = lignes.child(
+                div()
+                    .id(SharedString::from(format!("boite-{}", svc.cle())))
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(12.))
+                    .px(px(16.))
+                    .py(px(10.))
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.reglages.montrer_service(svc, !montre);
+                        this.reglages.garder();
+                        cx.notify();
+                    }))
+                    .child(logo_gris(svc, 28., !montre))
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_color(if montre { th().texte_fort } else { th().texte_pale })
+                            .child(svc.court()),
+                    )
+                    .child(
+                        div()
+                            .size(px(20.))
+                            .flex_none()
+                            .rounded(rayon(5.))
+                            .border_2()
+                            .border_color(if montre { th().accent } else { th().texte_pale })
+                            .when(montre, |d| d.bg(th().accent))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .when(montre, |d| d.child(icone("check", 14., blanc(1.)))),
+                    ),
+            );
+        }
+        div()
+            .mt(px(22.))
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(div().px(px(4.)).font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(t("Dans la boîte de réception")))
+            .child(lignes)
+            .child(div().px(px(4.)).text_size(px(12.)).text_color(th().texte_pale).child(t(
+                "Les services décochés sont cachés de la boîte de réception, des Head, des favoris et des archives. Rien n'est oublié : recochez-les pour les retrouver. Le clic droit sur l'icône d'un service fait la même chose.",
+            )))
     }
 
     // ------------------------------------------------------------------
@@ -10790,6 +10995,10 @@ fn t(fr: &'static str) -> &'static str {
         "Grille du Head" => "Head grid",
         "Grosseur du texte des messages" => "Message text size",
         "Liste des conversations plus grosse" => "Larger conversation list",
+        "Montrer dans la boîte de réception" => "Show in the inbox",
+        "Cacher de la boîte de réception" => "Hide from the inbox",
+        "Dans la boîte de réception" => "In the inbox",
+        "Les services décochés sont cachés de la boîte de réception, des Head, des favoris et des archives. Rien n'est oublié : recochez-les pour les retrouver. Le clic droit sur l'icône d'un service fait la même chose." => "Unchecked services are hidden from the inbox, the Head, favorites and archives. Nothing is forgotten: check them again to bring them back. Right-clicking a service's icon does the same.",
         "Noms, aperçus, heures et titres des Head un peu plus gros." => "Slightly larger names, previews, times and Head titles.",
         "Texte des messages :" => "Message text:",
         "On se voit au chalet vendredi ?" => "See you at the cabin Friday?",

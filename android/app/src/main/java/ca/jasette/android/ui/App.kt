@@ -95,6 +95,7 @@ const val LARGEUR_RAIL = 600
 @Composable
 fun App(activite: Activity, prive: Boolean = false) {
     Taille.charger(activite)
+    ServicesCaches.charger(activite)
     var pile by remember { mutableStateOf(listOf<Ecran>(Ecran.Liste)) }
     var vue by remember { mutableStateOf<Vue>(if (prive) Vue.Privees else Vue.Tout) }
     // La conversation ouverte : à droite en deux volets, sinon en plein écran.
@@ -345,8 +346,11 @@ private fun Liste(
                 is Vue.DuService -> c.service == vue.service
                 else -> true
             }
+            // Un service caché (écran Services) : absent de la boîte, des favoris et des
+            // archives, sauf dans sa propre vue et dans la recherche. Ses marques restent.
+            val cache = f.isEmpty() && vue !is Vue.DuService && vue != Vue.Privees && ServicesCaches.cache(c.service)
             // Liste privée : nulle part ailleurs que dans sa vue.
-            dansVue && Marques.estPrivee(c.id) == (vue == Vue.Privees) && (f.isEmpty() || ca.jasette.android.plier(c.name).contains(f) ||
+            !cache && dansVue && Marques.estPrivee(c.id) == (vue == Vue.Privees) && (f.isEmpty() || ca.jasette.android.plier(c.name).contains(f) ||
                 ca.jasette.android.plier(c.preview).contains(f) ||
                 c.members.any { ca.jasette.android.plier(it).contains(f) })
         }
@@ -359,7 +363,7 @@ private fun Liste(
         val nbEpingles = if (vue == Vue.Favoris) 0 else visibles.count { rang(it) != Int.MAX_VALUE }
         // Le Head : la grille en haut de la boîte de réception, tous ses ids (chargés ou du cache).
         val head = if (vue == Vue.Tout && f.isEmpty()) {
-            Marques.head.filter { !Marques.estPrivee(it) }.map { convMarquee(it) }
+            Marques.head.filter { !Marques.estPrivee(it) && !ServicesCaches.cache(Service.de(it)) }.map { convMarquee(it) }
         } else {
             emptyList()
         }

@@ -58,6 +58,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
@@ -103,9 +104,12 @@ fun MenuDeListe(c: Conv, ouvert: Boolean, fermer: () -> Unit, retiree: (String) 
 
 /** Le nombre de conversations non lues d'une vue (la pastille du rail). */
 fun nonLus(v: Vue): Int = when (v) {
-    Vue.Tout -> Depot.boite.count { it.unread }
-    Vue.Favoris -> Marques.favoris.count { id -> !Marques.estPrivee(id) && Depot.conv(id)?.unread == true }
-    Vue.Archives -> Depot.toutesArchives.count { it.unread }
+    // Les services cachés (écran Services) ne comptent pas, sauf sur leur propre icône.
+    Vue.Tout -> Depot.boite.count { it.unread && !ServicesCaches.cache(it.service) }
+    Vue.Favoris -> Marques.favoris.count { id ->
+        !Marques.estPrivee(id) && !ServicesCaches.cache(Service.de(id)) && Depot.conv(id)?.unread == true
+    }
+    Vue.Archives -> Depot.toutesArchives.count { it.unread && !ServicesCaches.cache(it.service) }
     is Vue.DuService -> Depot.boite.count { it.service == v.service && it.unread }
     Vue.Privees -> Depot.privees.count { it.unread }
 }
@@ -148,9 +152,22 @@ private fun IconeNav(choisi: Boolean, contenu: @Composable () -> Unit) {
 /** Les couleurs du rail : l'indicateur de Material, sauf en EGA (voir [IconeNav]). */
 private fun indicateur() = if (P.ega) androidx.compose.ui.graphics.Color.Transparent else P.choisi
 
+/**
+ * Le logo d'un service. [gris] : un service caché de la boîte de réception,
+ * désaturé à 40 % d'opacité ; en EGA, gris et opaque (pas de transparence).
+ */
 @Composable
-fun LogoService(s: Service, taille: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
-    Image(painterResource(iconeService(s)), s.court, modifier.size(taille).clip(formeLogo(taille)))
+fun LogoService(s: Service, taille: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier, gris: Boolean = false) {
+    val filtre = if (gris) {
+        androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix().apply { setToSaturation(0f) })
+    } else {
+        null
+    }
+    Image(
+        painterResource(iconeService(s)), s.court,
+        modifier.size(taille).clip(formeLogo(taille)).let { if (gris && !P.ega) it.alpha(0.4f) else it },
+        colorFilter = filtre,
+    )
 }
 
 /**
@@ -184,7 +201,11 @@ fun Rail(vue: Vue, enReglages: Boolean, choisir: (Vue) -> Unit, reglages: () -> 
             NavigationRailItem(
                 selected = !enReglages && vue == v,
                 onClick = { choisir(v) },
-                icon = { IconeNav(!enReglages && vue == v) { AvecPastille(nonLus(v)) { LogoService(s, 30.dp) } } },
+                icon = {
+                    IconeNav(!enReglages && vue == v) {
+                        AvecPastille(nonLus(v)) { LogoService(s, 30.dp, gris = ServicesCaches.cache(s)) }
+                    }
+                },
                 colors = couleurs,
             )
         }
@@ -272,25 +293,48 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
                 if (liste.isEmpty()) {
                     Text(t("Aucun service connecté."), color = P.textePale, modifier = Modifier.padding(20.dp))
                 }
+                val ctx = androidx.compose.ui.platform.LocalContext.current
                 for (s in liste) {
                     val v = Vue.DuService(s)
-                    Row(
-                        Modifier.fillMaxWidth().clickable {
-                            choixService = false
-                            choisir(v)
-                        }.padding(horizontal = 20.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        LogoService(s, 34.dp)
-                        Spacer(Modifier.width(14.dp))
-                        Text(s.titre, color = P.texteFort, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                        val n = nonLus(v)
-                        if (n > 0) Pastille("$n")
-                        if (vue == v) {
-                            Spacer(Modifier.width(10.dp))
-                            Icon(Icons.Filled.Check, null, tint = P.accent)
+                    val montre = !ServicesCaches.cache(s)
+                    // L'appui sur la ligne ouvre le service ; la case, à droite, est une zone à part.
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            Modifier.weight(1f).clickable {
+                                choixService = false
+                                choisir(v)
+                            }.padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            LogoService(s, 34.dp, gris = !montre)
+                            Spacer(Modifier.width(14.dp))
+                            Text(
+                                s.titre, color = if (montre) P.texteFort else P.textePale, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            val n = nonLus(v)
+                            if (n > 0) Pastille("$n")
+                            if (vue == v) {
+                                Spacer(Modifier.width(10.dp))
+                                Icon(Icons.Filled.Check, null, tint = P.accent)
+                            }
                         }
+                        androidx.compose.material3.Checkbox(
+                            checked = montre,
+                            onCheckedChange = { ServicesCaches.montrer(ctx, s, it) },
+                            colors = androidx.compose.material3.CheckboxDefaults.colors(
+                                checkedColor = P.accent, uncheckedColor = P.textePale, checkmarkColor = P.surAccent,
+                            ),
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
                     }
+                }
+                if (liste.isNotEmpty()) {
+                    Text(
+                        t("Les services décochés sont cachés de la boîte de réception, des Head et des favoris. Rien n'est oublié : recochez-les pour les retrouver."),
+                        color = P.textePale, fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                    )
                 }
             }
         }
