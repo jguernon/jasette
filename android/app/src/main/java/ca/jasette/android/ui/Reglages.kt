@@ -417,6 +417,7 @@ fun ServeurJasette(retour: () -> Unit) {
                         }
                     }
                     BoutonQuitterServeur()
+                    ConnexionMcp(cfg.adresse)
                 }
                 Depot.choixClient -> FormulaireClient(occupe)
             }
@@ -428,6 +429,95 @@ fun ServeurJasette(retour: () -> Unit) {
                 }
             }
             Depot.erreurServeur?.let { Text(it, color = P.danger, fontSize = 14.sp) }
+        }
+    }
+}
+
+/** « Connexion MCP (Claude) » : la connexion MCP du serveur, pour brancher Claude. */
+@Composable
+private fun ConnexionMcp(adresse: String) {
+    LaunchedEffect(adresse) { Depot.actionMcp("etat") }
+    val e = Depot.mcp
+    val occupe = Depot.mcpOccupe
+    val ctx = LocalContext.current
+    var copie by remember { mutableStateOf<String?>(null) }
+    fun copier(v: String) {
+        val cm = ctx.getSystemService(android.content.ClipboardManager::class.java) ?: return
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("Jasette", v))
+        copie = v
+    }
+    @Composable
+    fun Copiable(v: String) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(v, color = P.texteFort, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            TextButton(onClick = { copier(v) }) { Text(if (copie == v) t("Copié") else t("Copier"), color = P.accent) }
+        }
+    }
+    Text(t("Connexion MCP (Claude)"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+    Groupe {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (e == null || !e.ouvert) {
+                Text(
+                    t("Branchez Claude (claude.ai ou Claude Code) sur les messageries de ce serveur : il pourra lister vos conversations, les lire et y chercher. Lire ne marque rien comme lu."),
+                    color = P.texte, fontSize = 13.sp,
+                )
+                Text(t("Fermée par défaut. Un jeton secret protège l'accès ; Fermer le révoque."), color = P.textePale, fontSize = 12.sp)
+                Button(
+                    onClick = { Depot.actionMcp("ouvrir") }, enabled = !occupe && (e != null || Depot.mcpErreur != null),
+                    shape = formeBouton,
+                ) { Text(t("Ouvrir ma connexion MCP")) }
+            } else {
+                val hote = runCatching { ca.jasette.android.hotePort(adresse).first }.getOrDefault("")
+                val urls = e.urls(hote)
+                Text(t("Adresse du point MCP :"), color = P.texte, fontSize = 13.sp)
+                urls.forEach { Copiable(it) }
+                Text(t("Jeton (secret, comme un mot de passe) :"), color = P.texte, fontSize = 13.sp)
+                Copiable(e.jeton)
+                if (!e.ecoute) {
+                    Text("${t("Le serveur n'a pas pu ouvrir le port MCP :")} ${e.erreur ?: ""}", color = P.danger, fontSize = 13.sp)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(onClick = { Depot.actionMcp("regenerer") }, enabled = !occupe, shape = formeBouton) {
+                        Text(t("Régénérer le jeton"))
+                    }
+                    OutlinedButton(onClick = { Depot.actionMcp("fermer") }, enabled = !occupe, shape = formeBouton) {
+                        Text(t("Fermer"), color = P.danger)
+                    }
+                }
+                Text(t("Claude Code"), color = P.texteFort, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(t("Sur une machine qui joint le serveur, dans un terminal :"), color = P.textePale, fontSize = 12.sp)
+                Copiable("claude mcp add --transport http jasette ${urls.firstOrNull() ?: ""} --header \"Authorization: Bearer ${e.jeton}\"")
+                Text(t("claude.ai"), color = P.texteFort, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    t("claude.ai joint le serveur depuis Internet : il lui faut une adresse HTTPS publique qui mène au port MCP. Au choix (à installer vous-même) : Tailscale Funnel (tailscale funnel PORT), Cloudflare Tunnel (cloudflared), ou un mandataire inverse (Caddy, nginx) avec un certificat.")
+                        .replace("PORT", e.port.toString()),
+                    color = P.textePale, fontSize = 12.sp,
+                )
+                Text(
+                    t("claude.ai n'envoie pas d'en-tête choisi : donnez-lui l'URL secrète ci-dessous (Réglages > Connecteurs > Ajouter un connecteur personnalisé), en remplaçant le nom public. Elle contient le jeton : gardez-la pour vous."),
+                    color = P.textePale, fontSize = 12.sp,
+                )
+                Copiable("https://${t("VOTRE-NOM-PUBLIC")}/mcp/${e.jeton}")
+            }
+            Depot.mcpErreur?.let { Text(it, color = P.danger, fontSize = 13.sp) }
+        }
+    }
+    if (e != null && e.ouvert) {
+        Groupe {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(t("Permettre à Claude d'envoyer des messages"), color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    Text(
+                        t("Désactivé par défaut. Seulement dans une conversation existante, au plus 5 envois par minute et 30 par heure."),
+                        color = P.textePale, fontSize = 13.sp,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Interrupteur(e.envoi) { if (!occupe) Depot.actionMcp("envoi", it) }
+            }
         }
     }
 }

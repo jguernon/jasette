@@ -604,8 +604,8 @@ class ConnexionServeur(
                     }
                 }
             }
-            v.has("fichier") || v.has("depose") -> {
-                val r = v.optJSONObject("fichier") ?: v.optJSONObject("depose") ?: return
+            v.has("fichier") || v.has("depose") || v.has("mcp") -> {
+                val r = v.optJSONObject("fichier") ?: v.optJSONObject("depose") ?: v.optJSONObject("mcp") ?: return
                 attentes[r.optLong("id", -1)]?.offer(r)
             }
         }
@@ -631,6 +631,35 @@ class ConnexionServeur(
         val q = LinkedBlockingQueue<JSONObject>()
         attentes[id] = q
         return id to q
+    }
+
+    /**
+     * La connexion MCP du serveur (PROTOCOLE.md, §9) : `etat`, `ouvrir`,
+     * `fermer`, `regenerer` ou `envoi` (avec [envoi]). Bloquant (10 s au
+     * plus) : hors du fil principal.
+     */
+    fun commandeMcp(action: String, envoi: Boolean? = null): EtatMcp {
+        val l = lienCourant() ?: throw IOException(t("Pas de connexion au serveur Jasette."))
+        val (id, q) = attendre()
+        try {
+            val m = JSONObject().put("id", id).put("action", action)
+            if (envoi != null) m.put("envoi", envoi)
+            val ligne = JSONObject().put("mcp", m).toString()
+            executer(ecrivain) {
+                try {
+                    l.ecrire(ligne)
+                } catch (_: Exception) {
+                    l.fermer()
+                }
+            }
+            val r = q.poll(10, java.util.concurrent.TimeUnit.SECONDS)
+            if (r == null || !r.has("port")) {
+                throw IOException(t("Le serveur Jasette ne répond pas. S'il est d'une version sans connexion MCP, mettez-le à jour."))
+            }
+            return EtatMcp.lire(r)
+        } finally {
+            attentes.remove(id)
+        }
     }
 
     /** Copie locale d'un fichier du serveur (rien n'est renvoyé s'il n'a pas changé). */
@@ -746,6 +775,46 @@ private fun sha256Fichier(f: File): String = try {
     hex(md.digest())
 } catch (_: Exception) {
     ""
+}
+
+// ---------------------------------------------------------------------------
+// La connexion MCP du serveur (pour Claude)
+// ---------------------------------------------------------------------------
+
+/** L'état de la connexion MCP du serveur, tel qu'il le répond à la trame `mcp`. */
+data class EtatMcp(
+    val ouvert: Boolean,
+    val jeton: String,
+    val envoi: Boolean,
+    val port: Int,
+    val chemin: String,
+    val adresses: List<String>,
+    val ecoute: Boolean,
+    val erreur: String?,
+) {
+    override fun toString() = "EtatMcp(ouvert=$ouvert, jeton=…, envoi=$envoi, port=$port)"
+
+    /** Les URL du point MCP : d'abord par [hote] (celui par lequel on joint le serveur), puis ses adresses. */
+    fun urls(hote: String): List<String> =
+        (listOf(hote) + adresses).filter { it.isNotEmpty() }
+            .map { h -> "http://${if (':' in h && !h.startsWith("[")) "[$h]" else h}:$port$chemin" }
+            .distinct()
+
+    companion object {
+        fun lire(v: JSONObject): EtatMcp {
+            val a = v.optJSONArray("adresses")
+            return EtatMcp(
+                ouvert = v.optBoolean("ouvert"),
+                jeton = v.chaine("jeton"),
+                envoi = v.optBoolean("envoi"),
+                port = v.optInt("port", 47810),
+                chemin = v.chaine("chemin").ifEmpty { "/mcp" },
+                adresses = if (a == null) emptyList() else (0 until a.length()).map { a.optString(it) }.filter { it.isNotEmpty() },
+                ecoute = v.optBoolean("ecoute"),
+                erreur = v.chaine("erreur").ifEmpty { null },
+            )
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

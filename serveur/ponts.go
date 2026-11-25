@@ -43,6 +43,9 @@ type Pont struct {
 	precharge     string             // sous srv.mu : la conversation en préchargement
 	prechargeFini chan struct{}
 	aPrecharger   chan struct{}
+
+	// Sous srv.mu : les réponses attendues par le serveur MCP (mcp.go).
+	mcpAttentes []*attenteMCP
 }
 
 // demande : des clients attendent la réponse `messages` d'une conversation.
@@ -273,6 +276,10 @@ func (p *Pont) recu(ligne []byte) {
 	case "conversations":
 		archive := tete.Folder == "archive"
 		p.cache.liste(ligne, archive)
+		if !archive {
+			// Le MCP attendait une liste fraîche ; les appareils la reçoivent aussi.
+			p.livrerMCP("conversations", "inbox", ligne)
+		}
 		if !archive && p.pret {
 			p.declencher()
 		}
@@ -285,12 +292,63 @@ func (p *Pont) recu(ligne []byte) {
 	case "messages":
 		p.cache.page(ligne)
 		if tete.Older {
-			delete(p.demandes, cleAncien(tete.Conv))
-		} else if !p.pourUnClient(tete.Conv) {
-			// La réponse au préchargement ne va qu'au cache.
+			if !p.prendreDemande(cleAncien(tete.Conv)) && p.livrerMCP("messages", cleMessages(tete.Conv, true), ligne) {
+				// Une page demandée par le MCP : à lui seul.
+				return
+			}
+		} else if !p.prendreDemande(tete.Conv) {
+			if p.livrerMCP("messages", cleMessages(tete.Conv, false), ligne) {
+				// Ni la réponse du MCP ni celle du préchargement ne vont aux
+				// appareils : leur interface ne doit rien croire « ouvert ».
+				return
+			}
+			if !p.pourUnClient(tete.Conv) {
+				// La réponse au préchargement ne va qu'au cache.
+				return
+			}
+		}
+	case "search_messages":
+		var q struct {
+			Query string `json:"query"`
+		}
+		_ = json.Unmarshal(ligne, &q)
+		if p.livrerMCP("search", q.Query, ligne) {
 			return
 		}
+	case "sent":
+		var s struct {
+			TmpID string `json:"tmp_id"`
+		}
+		_ = json.Unmarshal(ligne, &s)
+		if s.TmpID != "" {
+			// Le MCP attend son envoi ; les appareils voient aussi `sent`.
+			p.livrerMCP("sent", s.TmpID, ligne)
+		}
 	case "error":
+		if !p.demandesEnCours() {
+			switch tete.Where {
+			case "messages", "search_messages":
+				// L'erreur d'une demande du MCP : à lui seul.
+				sorte := map[string]string{"messages": "messages", "search_messages": "search"}[tete.Where]
+				var e struct {
+					Text string `json:"text"`
+				}
+				_ = json.Unmarshal(ligne, &e)
+				if p.erreurMCP(sorte, cmpOr(e.Text, "erreur du service")) {
+					logf("[%s] mcp : erreur du pont (%s)", p.svc, tete.Where)
+					return
+				}
+			}
+		}
+		if tete.Where == "send" {
+			if a := p.attendMCP("sent"); a != nil {
+				var e struct {
+					Text string `json:"text"`
+				}
+				_ = json.Unmarshal(ligne, &e)
+				a.erreur = e.Text
+			}
+		}
 		// L'échec d'un préchargement non plus (la commande n'est pas d'un client).
 		if tete.Where == "messages" && p.precharge != "" && !p.demandesEnCours() {
 			logf("[%s] préchargement : erreur du pont", p.svc)

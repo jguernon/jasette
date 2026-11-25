@@ -1745,6 +1745,11 @@ struct Jasette {
     choix_client: bool,
     /// La dernière valeur copiée (pour afficher « Copié »).
     copie: Option<String>,
+    /// La connexion MCP du serveur (Claude) : dernier état reçu, une
+    /// demande en cours, la dernière erreur.
+    mcp: Option<pont::EtatMcp>,
+    mcp_occupe: bool,
+    mcp_erreur: Option<String>,
     code_jumelage: Option<(String, String)>,
     appareils: Vec<String>,
     verif_client: Option<(String, String, pont::Verification)>,
@@ -2586,6 +2591,9 @@ impl Jasette {
             reglages,
             suivi_marques: pont::SuiviMarques::default(),
             serveur_occupe: false,
+            mcp: None,
+            mcp_occupe: false,
+            mcp_erreur: None,
             accueil_google: false,
             accueil_autonome: false,
             choix_client: false,
@@ -7429,6 +7437,9 @@ impl Jasette {
                     if this.reglages.mode_serveur == "serveur" {
                         this.lister_appareils(cx);
                     }
+                    if !this.reglages.mode_serveur.is_empty() {
+                        this.action_mcp("etat", None, cx);
+                    }
                     cx.notify();
                 },
             )))
@@ -8193,6 +8204,151 @@ impl Jasette {
         );
     }
 
+    /// La connexion MCP du serveur (pour Claude) : une trame `mcp` sur la
+    /// connexion au serveur, en mode Serveur comme en mode Client.
+    fn action_mcp(&mut self, action: &'static str, envoi: Option<bool>, cx: &mut Context<Self>) {
+        let Some(cfg) = self.reglages.serveur.clone().filter(|_| !self.reglages.mode_serveur.is_empty()) else { return };
+        if action == "etat" && self.mcp_occupe {
+            return;
+        }
+        self.mcp_occupe = true;
+        self.mcp_erreur = None;
+        cx.spawn(async move |this, cx| {
+            let r = cx.background_executor().spawn(async move { pont::commande_mcp(&cfg, action, envoi) }).await;
+            let _ = this.update(cx, |this, cx| {
+                this.mcp_occupe = false;
+                match r {
+                    Ok(e) => {
+                        this.mcp_erreur = e.erreur.clone();
+                        this.mcp = Some(e);
+                    }
+                    Err(e) => this.mcp_erreur = Some(t(e).to_string()),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// « Connexion MCP (Claude) », dans la section Serveur Jasette.
+    fn mcp_vue(&self, cx: &mut Context<Self>) -> Div {
+        let titre = div().pt(px(22.)).pb(px(12.)).text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).text_color(th().texte);
+        let mut bloc = div().flex().flex_col().child(titre.child(t("Connexion MCP (Claude)")));
+        let texte = |s: String| div().text_size(px(13.)).text_color(th().texte).child(s);
+        let pale = |s: String| div().text_size(px(12.)).text_color(th().texte_pale).child(s);
+        let copie = self.copie.clone();
+        // Une valeur longue (URL, jeton, commande) qui se replie, avec Copier.
+        let copiable = |id: String, valeur: String| {
+            let fait = copie.as_deref() == Some(valeur.as_str());
+            let v = valeur.clone();
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(8.))
+                .child(div().flex_1().min_w(px(0.)).text_size(px(13.)).text_color(th().texte_fort).child(valeur))
+                .child(
+                    div()
+                        .id(gpui::ElementId::Name(id.into()))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.))
+                        .px(px(8.))
+                        .py(px(3.))
+                        .rounded(rayon(8.))
+                        .cursor_pointer()
+                        .hover(|s| s.bg(th().survol))
+                        .child(icone(if fait { "check" } else { "copy" }, 14., th().accent))
+                        .child(div().text_size(px(12.)).text_color(th().accent).child(if fait { t("Copié") } else { t("Copier") }))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.write_to_clipboard(gpui::ClipboardItem::new_string(v.clone()));
+                            this.copie = Some(v.clone());
+                            cx.notify();
+                        })),
+                )
+        };
+        let ouvert = self.mcp.as_ref().is_some_and(|e| e.ouvert);
+        let occupe = self.mcp_occupe;
+        let mut boite = div().flex().flex_col().gap(px(10.)).p(px(16.));
+        match self.mcp.as_ref().filter(|e| e.ouvert) {
+            None => {
+                boite = boite
+                    .child(texte(t("Branchez Claude (claude.ai ou Claude Code) sur les messageries de ce serveur : il pourra lister vos conversations, les lire et y chercher. Lire ne marque rien comme lu.").into()))
+                    .child(pale(t("Fermée par défaut. Un jeton secret protège l'accès ; Fermer le révoque.").into()));
+                if self.mcp.is_some() || self.mcp_erreur.is_some() {
+                    boite = boite.child(div().flex().flex_row().child(
+                        bouton_texte("mcp-ouvrir", t("Ouvrir ma connexion MCP"), ACCENT)
+                            .when(!occupe, |d| d.on_click(cx.listener(|this, _, _, cx| this.action_mcp("ouvrir", None, cx)))),
+                    ));
+                } else {
+                    boite = boite.child(pale(t("Un instant…").into()));
+                }
+            }
+            Some(e) => {
+                let hote = self.reglages.serveur.as_ref().map(|c| pont::hote_de(&c.adresse)).unwrap_or_default();
+                let urls = e.urls(&hote);
+                let premiere = urls.first().cloned().unwrap_or_default();
+                boite = boite.child(texte(t("Adresse du point MCP :").into()));
+                for (i, u) in urls.iter().enumerate() {
+                    boite = boite.child(copiable(format!("mcp-url-{i}"), u.clone()));
+                }
+                boite = boite.child(texte(t("Jeton (secret, comme un mot de passe) :").into())).child(copiable("mcp-jeton".into(), e.jeton.clone()));
+                if !e.ecoute {
+                    boite = boite.child(div().text_size(px(13.)).text_color(c(DANGER)).child(format!(
+                        "{} {}",
+                        t("Le serveur n'a pas pu ouvrir le port MCP :"),
+                        e.erreur.clone().unwrap_or_default()
+                    )));
+                }
+                boite = boite.child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .gap(px(10.))
+                        .child(
+                            bouton_texte("mcp-regenerer", t("Régénérer le jeton"), ACCENT)
+                                .when(!occupe, |d| d.on_click(cx.listener(|this, _, _, cx| this.action_mcp("regenerer", None, cx)))),
+                        )
+                        .child(
+                            bouton_texte("mcp-fermer", t("Fermer"), DANGER)
+                                .when(!occupe, |d| d.on_click(cx.listener(|this, _, _, cx| this.action_mcp("fermer", None, cx)))),
+                        ),
+                );
+                boite = boite
+                    .child(div().pt(px(8.)).text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(t("Claude Code")))
+                    .child(pale(t("Sur une machine qui joint le serveur, dans un terminal :").into()))
+                    .child(copiable(
+                        "mcp-cmd".into(),
+                        format!("claude mcp add --transport http jasette {premiere} --header \"Authorization: Bearer {}\"", e.jeton),
+                    ))
+                    .child(div().pt(px(8.)).text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(t("claude.ai")))
+                    .child(pale(t("claude.ai joint le serveur depuis Internet : il lui faut une adresse HTTPS publique qui mène au port MCP. Au choix (à installer vous-même) : Tailscale Funnel (tailscale funnel PORT), Cloudflare Tunnel (cloudflared), ou un mandataire inverse (Caddy, nginx) avec un certificat.").replace("PORT", &e.port.to_string())))
+                    .child(pale(t("claude.ai n'envoie pas d'en-tête choisi : donnez-lui l'URL secrète ci-dessous (Réglages > Connecteurs > Ajouter un connecteur personnalisé), en remplaçant le nom public. Elle contient le jeton : gardez-la pour vous.").into()))
+                    .child(copiable("mcp-url-claude".into(), format!("https://{}/mcp/{}", t("VOTRE-NOM-PUBLIC"), e.jeton)));
+            }
+        }
+        if let Some(err) = &self.mcp_erreur {
+            boite = boite.child(div().text_size(px(13.)).text_color(c(DANGER)).child(err.clone()));
+        }
+        bloc = bloc.child(groupe().child(boite));
+        if ouvert {
+            let envoi = self.mcp.as_ref().is_some_and(|e| e.envoi);
+            bloc = bloc.child(div().h(px(12.))).child(groupe().child(ligne_interrupteur(
+                "mcp-envoi",
+                t("Permettre à Claude d'envoyer des messages"),
+                t("Désactivé par défaut. Seulement dans une conversation existante, au plus 5 envois par minute et 30 par heure."),
+                envoi,
+                cx.listener(move |this, _, _, cx| {
+                    if !this.mcp_occupe {
+                        this.action_mcp("envoi", Some(!envoi), cx);
+                    }
+                }),
+            )));
+        }
+        bloc
+    }
+
     /// La section « Serveur Jasette » des réglages.
     fn serveur_vue(&self, cx: &mut Context<Self>) -> AnyElement {
         let mode = self.reglages.mode_serveur.as_str();
@@ -8465,6 +8621,9 @@ impl Jasette {
                 );
             }
             _ => {}
+        }
+        if (mode == "serveur" || mode == "client") && !self.choix_client {
+            carte = carte.child(self.mcp_vue(cx));
         }
         if let Some(e) = &self.erreur {
             carte = carte.child(div().pt(px(12.)).text_size(px(13.)).text_color(c(DANGER)).child(e.clone()));
@@ -9815,6 +9974,35 @@ fn t(fr: &'static str) -> &'static str {
         "Les services se connectent et se déconnectent sur le serveur." => "Services are connected and disconnected on the server.",
         "Copier" => "Copy",
         "Copié" => "Copied",
+        "Connexion MCP (Claude)" => "MCP connection (Claude)",
+        "Branchez Claude (claude.ai ou Claude Code) sur les messageries de ce serveur : il pourra lister vos conversations, les lire et y chercher. Lire ne marque rien comme lu." => {
+            "Connect Claude (claude.ai or Claude Code) to this server's messaging: it can list your conversations, read them and search them. Reading marks nothing as read."
+        }
+        "Fermée par défaut. Un jeton secret protège l'accès ; Fermer le révoque." => "Closed by default. A secret token protects access; Close revokes it.",
+        "Ouvrir ma connexion MCP" => "Open my MCP connection",
+        "Adresse du point MCP :" => "MCP endpoint address:",
+        "Jeton (secret, comme un mot de passe) :" => "Token (secret, like a password):",
+        "Le serveur n'a pas pu ouvrir le port MCP :" => "The server could not open the MCP port:",
+        "Régénérer le jeton" => "Regenerate token",
+        "Fermer" => "Close",
+        "Claude Code" => "Claude Code",
+        "Sur une machine qui joint le serveur, dans un terminal :" => "On a machine that can reach the server, in a terminal:",
+        "claude.ai" => "claude.ai",
+        "claude.ai joint le serveur depuis Internet : il lui faut une adresse HTTPS publique qui mène au port MCP. Au choix (à installer vous-même) : Tailscale Funnel (tailscale funnel PORT), Cloudflare Tunnel (cloudflared), ou un mandataire inverse (Caddy, nginx) avec un certificat." => {
+            "claude.ai reaches the server from the Internet: it needs a public HTTPS address leading to the MCP port. Your choice (to install yourself): Tailscale Funnel (tailscale funnel PORT), Cloudflare Tunnel (cloudflared), or a reverse proxy (Caddy, nginx) with a certificate."
+        }
+        "claude.ai n'envoie pas d'en-tête choisi : donnez-lui l'URL secrète ci-dessous (Réglages > Connecteurs > Ajouter un connecteur personnalisé), en remplaçant le nom public. Elle contient le jeton : gardez-la pour vous." => {
+            "claude.ai doesn't send custom headers: give it the secret URL below (Settings > Connectors > Add custom connector), replacing the public name. It contains the token: keep it to yourself."
+        }
+        "VOTRE-NOM-PUBLIC" => "YOUR-PUBLIC-NAME",
+        "Permettre à Claude d'envoyer des messages" => "Allow Claude to send messages",
+        "Désactivé par défaut. Seulement dans une conversation existante, au plus 5 envois par minute et 30 par heure." => {
+            "Off by default. Only in an existing conversation, at most 5 sends per minute and 30 per hour."
+        }
+        "Pas de connexion au serveur Jasette." => "No connection to the Jasette server.",
+        "Le serveur Jasette ne répond pas. S'il est d'une version sans connexion MCP, mettez-le à jour." => {
+            "The Jasette server isn't answering. If its version has no MCP connection, update it."
+        }
         "Port (déjà rempli par défaut) :" => "Port (filled in by default):",
         "Contact" => "Contact",
         "Créé par" => "Created by",

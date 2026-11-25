@@ -66,6 +66,9 @@ type Cache struct {
 	listes map[string]json.RawMessage
 	convs  map[string]*convCache
 	sale   bool
+	// Quand le pont a envoyé la boîte de réception pour la dernière fois
+	// (pas gardé sur le disque) : le MCP la redemande si elle est vieille.
+	listeMaj time.Time
 }
 
 type fichierCache struct {
@@ -207,6 +210,9 @@ func (c *Cache) liste(ligne []byte, archive bool) {
 		cle = "archive"
 	}
 	c.listes[cle] = append(json.RawMessage(nil), ligne...)
+	if !archive {
+		c.listeMaj = time.Now()
+	}
 	c.sale = true
 }
 
@@ -686,23 +692,34 @@ func cleAncien(conv string) string { return conv + "\x00ancien" }
 // attendue par un client ? Sinon, et si c'est celle du préchargement, elle
 // ne va qu'au cache. Sous srv.mu.
 func (p *Pont) pourUnClient(conv string) bool {
-	if d, ok := p.demandes[conv]; ok {
-		if d.n > 0 && time.Since(d.depuis) <= demandeDuree {
-			d.n--
-			if d.n == 0 {
-				delete(p.demandes, conv)
-			} else {
-				p.demandes[conv] = d
-			}
-			return true
-		}
-		delete(p.demandes, conv)
+	if p.prendreDemande(conv) {
+		return true
 	}
 	if p.precharge != "" && p.precharge == conv {
 		p.finPrecharge()
 		return false
 	}
 	return true
+}
+
+// prendreDemande : un client attend-il cette réponse (clé de p.demandes) ?
+// Si oui, elle lui revient (une de moins à attendre). Sous srv.mu.
+func (p *Pont) prendreDemande(cle string) bool {
+	d, ok := p.demandes[cle]
+	if !ok {
+		return false
+	}
+	if d.n > 0 && time.Since(d.depuis) <= demandeDuree {
+		d.n--
+		if d.n == 0 {
+			delete(p.demandes, cle)
+		} else {
+			p.demandes[cle] = d
+		}
+		return true
+	}
+	delete(p.demandes, cle)
+	return false
 }
 
 // demandesEnCours : un client attend-il une réponse `messages` ? Sous srv.mu.

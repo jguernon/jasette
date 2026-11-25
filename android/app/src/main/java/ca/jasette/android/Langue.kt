@@ -52,6 +52,29 @@ object Langue {
 fun t(fr: String): String = if (!Langue.anglais) fr else ANGLAIS[fr] ?: fr
 
 private val ANGLAIS: Map<String, String> = mapOf(
+    // Réglages → Serveur Jasette → Connexion MCP (Claude).
+    "Connexion MCP (Claude)" to "MCP connection (Claude)",
+    "Branchez Claude (claude.ai ou Claude Code) sur les messageries de ce serveur : il pourra lister vos conversations, les lire et y chercher. Lire ne marque rien comme lu." to
+        "Connect Claude (claude.ai or Claude Code) to this server's messaging: it can list your conversations, read them and search them. Reading marks nothing as read.",
+    "Fermée par défaut. Un jeton secret protège l'accès ; Fermer le révoque." to "Closed by default. A secret token protects access; Close revokes it.",
+    "Ouvrir ma connexion MCP" to "Open my MCP connection",
+    "Adresse du point MCP :" to "MCP endpoint address:",
+    "Jeton (secret, comme un mot de passe) :" to "Token (secret, like a password):",
+    "Le serveur n'a pas pu ouvrir le port MCP :" to "The server could not open the MCP port:",
+    "Régénérer le jeton" to "Regenerate token",
+    "Copié" to "Copied",
+    "Sur une machine qui joint le serveur, dans un terminal :" to "On a machine that can reach the server, in a terminal:",
+    "claude.ai joint le serveur depuis Internet : il lui faut une adresse HTTPS publique qui mène au port MCP. Au choix (à installer vous-même) : Tailscale Funnel (tailscale funnel PORT), Cloudflare Tunnel (cloudflared), ou un mandataire inverse (Caddy, nginx) avec un certificat." to
+        "claude.ai reaches the server from the Internet: it needs a public HTTPS address leading to the MCP port. Your choice (to install yourself): Tailscale Funnel (tailscale funnel PORT), Cloudflare Tunnel (cloudflared), or a reverse proxy (Caddy, nginx) with a certificate.",
+    "claude.ai n'envoie pas d'en-tête choisi : donnez-lui l'URL secrète ci-dessous (Réglages > Connecteurs > Ajouter un connecteur personnalisé), en remplaçant le nom public. Elle contient le jeton : gardez-la pour vous." to
+        "claude.ai doesn't send custom headers: give it the secret URL below (Settings > Connectors > Add custom connector), replacing the public name. It contains the token: keep it to yourself.",
+    "VOTRE-NOM-PUBLIC" to "YOUR-PUBLIC-NAME",
+    "Permettre à Claude d'envoyer des messages" to "Allow Claude to send messages",
+    "Désactivé par défaut. Seulement dans une conversation existante, au plus 5 envois par minute et 30 par heure." to
+        "Off by default. Only in an existing conversation, at most 5 sends per minute and 30 per hour.",
+    "Pas de connexion au serveur Jasette." to "No connection to the Jasette server.",
+    "Le serveur Jasette ne répond pas. S'il est d'une version sans connexion MCP, mettez-le à jour." to
+        "The Jasette server isn't answering. If its version has no MCP connection, update it.",
     // Réglages → Apparence : les thèmes et les teintes du verre (comme au bureau).
     "Verre" to "Glass",
     "EGA" to "EGA",

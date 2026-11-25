@@ -16,6 +16,10 @@ Page de présentation et téléchargements : https://jonathanguernon.net/jasette
   machine toujours allumée, et tes autres appareils (bureau, Android) s'y
   branchent, par un lien TLS épinglé et un jumelage à code. Protocole :
   `serveur/PROTOCOLE.md`.
+  Il peut aussi ouvrir une **connexion MCP** pour Claude (claude.ai, Claude
+  Code) : Réglages > Serveur Jasette > « Ouvrir ma connexion MCP ». Fermée par
+  défaut, protégée par un jeton, en lecture seule (l'envoi de messages est une
+  case à part). Voir `serveur/PROTOCOLE.md`, §9.
 - **Android** (`android/`) : Kotlin et Compose. Il fonctionne seul (ponts
   embarqués) ou comme client de ton serveur Jasette.
 

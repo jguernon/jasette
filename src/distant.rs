@@ -712,7 +712,7 @@ impl Connexion {
                 Some(n) => verrou(&self.marques).push(n),
                 None => eprintln!("jasette : marques illisibles du serveur"),
             }
-        } else if let Some(r) = ["fichier", "depose"]
+        } else if let Some(r) = ["fichier", "depose", "mcp"]
             .into_iter()
             .find(|k| v.get(*k).is_some())
             .and_then(|k| v.get_mut(k).map(Value::take))
@@ -870,6 +870,109 @@ fn lire_plein(f: &mut fs::File, buf: &mut [u8]) -> io::Result<usize> {
         }
     }
     Ok(n)
+}
+
+// ---------------------------------------------------------------------------
+// La connexion MCP du serveur (PROTOCOLE.md, §9)
+// ---------------------------------------------------------------------------
+
+/// L'état de la connexion MCP du serveur, tel qu'il le répond à la trame `mcp`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EtatMcp {
+    pub ouvert: bool,
+    /// Vide si fermé.
+    pub jeton: String,
+    pub envoi: bool,
+    pub port: u16,
+    pub chemin: String,
+    /// Les adresses IPv4 du serveur, puis 127.0.0.1.
+    pub adresses: Vec<String>,
+    /// Faux si le port n'a pas pu être ouvert (voir `erreur`).
+    pub ecoute: bool,
+    pub erreur: Option<String>,
+}
+
+impl EtatMcp {
+    fn lire(v: &Value) -> Self {
+        let ch = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
+        Self {
+            ouvert: v.get("ouvert").and_then(Value::as_bool).unwrap_or(false),
+            jeton: ch("jeton"),
+            envoi: v.get("envoi").and_then(Value::as_bool).unwrap_or(false),
+            port: v.get("port").and_then(Value::as_u64).unwrap_or(47810) as u16,
+            chemin: v.get("chemin").and_then(Value::as_str).unwrap_or("/mcp").to_string(),
+            adresses: v
+                .get("adresses")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+                .unwrap_or_default(),
+            ecoute: v.get("ecoute").and_then(Value::as_bool).unwrap_or(false),
+            erreur: v.get("erreur").and_then(Value::as_str).filter(|e| !e.is_empty()).map(str::to_string),
+        }
+    }
+
+    /// Les URL du point MCP : d'abord par `hote` (celui par lequel cet
+    /// appareil joint le serveur), puis par les adresses du serveur.
+    pub fn urls(&self, hote: &str) -> Vec<String> {
+        let mut v: Vec<String> = Vec::new();
+        let hotes = std::iter::once(hote.to_string()).chain(self.adresses.iter().cloned());
+        for h in hotes.filter(|h| !h.is_empty()) {
+            let h = if h.contains(':') && !h.starts_with('[') { format!("[{h}]") } else { h };
+            let u = format!("http://{h}:{}{}", self.port, self.chemin);
+            if !v.contains(&u) {
+                v.push(u);
+            }
+        }
+        v
+    }
+}
+
+/// L'hôte d'une adresse « hôte », « hôte:port » ou « [ipv6]:port ».
+pub fn hote_de(adresse: &str) -> String {
+    let a = adresse.trim();
+    if let Some(reste) = a.strip_prefix('[') {
+        return reste.split(']').next().unwrap_or_default().to_string();
+    }
+    match a.rsplit_once(':') {
+        Some((h, p)) if !h.contains(':') && p.parse::<u16>().is_ok() => h.to_string(),
+        _ => a.to_string(),
+    }
+}
+
+/// Envoie une trame `mcp` (`etat`, `ouvrir`, `fermer`, `regenerer`, `envoi`)
+/// sur la connexion déjà ouverte avec ce serveur, et attend la réponse.
+/// Bloquant (10 s au plus) : à appeler hors du fil de l'interface.
+pub fn commande_mcp(config: &ConfigServeur, action: &str, envoi: Option<bool>) -> Result<EtatMcp, &'static str> {
+    let cx = {
+        let liste = verrou(&CONNEXIONS);
+        liste
+            .iter()
+            .filter_map(Weak::upgrade)
+            .find(|c| c.config.adresse == config.adresse && c.config.jeton == config.jeton && !c.arret.load(Ordering::SeqCst))
+    };
+    let Some(cx) = cx else { return Err("Pas de connexion au serveur Jasette.") };
+    let (id, rx) = cx.attendre();
+    let mut m = json!({"id": id, "action": action});
+    if let Some(e) = envoi {
+        m["envoi"] = json!(e);
+    }
+    let r = if cx.envoyer_direct(&json!({ "mcp": m }).to_string()) {
+        match rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(v) => Ok(v),
+            Err(_) => Err("Le serveur Jasette ne répond pas. S'il est d'une version sans connexion MCP, mettez-le à jour."),
+        }
+    } else {
+        Err("Pas de connexion au serveur Jasette.")
+    };
+    verrou(&cx.attentes).remove(&id);
+    let v = r?;
+    let e = EtatMcp::lire(&v);
+    // Un serveur d'avant la connexion MCP ne répond jamais ; une réponse sans
+    // `port` non plus n'en vient pas.
+    if v.get("port").is_none() {
+        return Err("Le serveur Jasette ne répond pas. S'il est d'une version sans connexion MCP, mettez-le à jour.");
+    }
+    Ok(e)
 }
 
 // ---------------------------------------------------------------------------

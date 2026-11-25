@@ -14,6 +14,8 @@
 //	jasette-serveur --appareils       liste les appareils jumelés
 //	jasette-serveur --revoquer NOM    retire un appareil (débranché aussitôt)
 //	jasette-serveur --empreinte       affiche l'empreinte du certificat
+//	jasette-serveur --mcp ACTION      connexion MCP pour Claude : etat, ouvrir, fermer,
+//	                                  regenerer, envoi-oui, envoi-non (mcp.go)
 //
 // Les données vivent dans <données Jasette>/serveur (JASETTE_DATA, sinon
 // ~/.local/share/jasette). Les journaux vont dans la sortie d'erreur ; on n'y
@@ -50,9 +52,13 @@ func main() {
 	appareils := flag.Bool("appareils", false, "lister les appareils jumelés")
 	revoquerNom := flag.String("revoquer", "", "révoquer l'appareil de ce nom")
 	empreinte := flag.Bool("empreinte", false, "afficher l'empreinte SHA-256 du certificat")
+	mcpPort := flag.Int("mcp-port", portMCPDefaut(), "port HTTP du serveur MCP (s'il est ouvert)")
+	mcpAction := flag.String("mcp", "", "connexion MCP : etat, ouvrir, fermer, regenerer, envoi-oui, envoi-non")
 	flag.Parse()
 
 	switch {
+	case *mcpAction != "":
+		os.Exit(cmdMCP(*mcpAction, *mcpPort))
 	case *jumeler:
 		os.Exit(cmdJumeler())
 	case *appareils:
@@ -68,7 +74,7 @@ func main() {
 		fmt.Println(fp)
 		return
 	}
-	if err := lancerServeur(net.JoinHostPort(*ecoute, strconv.Itoa(*port)), *services, *binDir); err != nil {
+	if err := lancerServeur(net.JoinHostPort(*ecoute, strconv.Itoa(*port)), *services, *binDir, *ecoute, *mcpPort); err != nil {
 		logf("%v", err)
 		os.Exit(1)
 	}
@@ -81,7 +87,14 @@ func portDefaut() int {
 	return portParDefaut
 }
 
-func lancerServeur(adresse, services, binDir string) error {
+func portMCPDefaut() int {
+	if p, err := strconv.Atoi(os.Getenv("JASETTE_MCP_PORT")); err == nil && p > 0 {
+		return p
+	}
+	return mcpPortParDefaut
+}
+
+func lancerServeur(adresse, services, binDir, hoteMCP string, portMCP int) error {
 	cert, fp, err := chargerCertificat()
 	if err != nil {
 		return fmt.Errorf("certificat : %w", err)
@@ -141,6 +154,8 @@ func lancerServeur(adresse, services, binDir string) error {
 		go p.boucle()
 		go p.prechargeur()
 	}
+	srv.mcp = nouveauServiceMCP(srv, hoteMCP, portMCP)
+	go srv.mcp.surveiller()
 	go srv.surveillerRevocations()
 	go srv.nettoyerDepots()
 

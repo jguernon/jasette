@@ -51,6 +51,7 @@ type Serveur struct {
 	interdit  string // le dossier du serveur lui-même : jamais servi
 	depots    string
 	limiteur  *Limiteur
+	mcp       *ServiceMCP // le serveur MCP (mcp.go)
 }
 
 type Client struct {
@@ -363,7 +364,12 @@ type trame struct {
 	Pong    json.RawMessage `json:"pong"`
 	Rejouer string          `json:"rejouer"`
 	Marques json.RawMessage `json:"marques"`
-	Get     *struct {
+	Mcp     *struct {
+		ID     int64  `json:"id"`
+		Action string `json:"action"`
+		Envoi  *bool  `json:"envoi"`
+	} `json:"mcp"`
+	Get *struct {
 		ID     int64  `json:"id"`
 		Chemin string `json:"chemin"`
 		Sha256 string `json:"sha256"`
@@ -390,6 +396,9 @@ func (c *Client) trame(ligne []byte) {
 		// signe de vie : le délai de lecture est déjà repoussé
 	case t.Marques != nil:
 		c.srv.recevoirMarques(c, t.Marques)
+	case t.Mcp != nil:
+		m := *t.Mcp
+		go c.trameMCP(m.ID, m.Action, m.Envoi)
 	case t.Rejouer != "":
 		c.srv.rejouer(c, t.Rejouer)
 	case t.Get != nil:
@@ -747,6 +756,19 @@ func (l *Limiteur) permis(cle string) bool {
 		}
 	}
 	return true
+}
+
+// depasse : la clé a-t-elle déjà épuisé ses essais (sans en compter un) ?
+func (l *Limiteur) depasse(cle string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for _, t := range l.essais[cle] {
+		if time.Since(t) < l.fenetre {
+			n++
+		}
+	}
+	return n >= l.max
 }
 
 func (l *Limiteur) oublier(cle string) {

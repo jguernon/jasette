@@ -608,3 +608,109 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"fichier":{"id",…}}` | morceaux ou erreur |
 | C→S | `{"put":{"id","nom","donnees","fin"}}` | téléverser |
 | S→C | `{"depose":{"id","chemin"|"erreur"}}` | fin du dépôt |
+| C→S | `{"mcp":{"id","action"[,"envoi"]}}` | connexion MCP pour Claude (§9) |
+| S→C | `{"mcp":{"id","ouvert","jeton","port","adresses",…}}` | état de la connexion MCP |
+
+## 9. Connexion MCP (Claude)
+
+Le serveur peut offrir un **serveur MCP** (Model Context Protocol) pour que
+Claude (claude.ai, Claude Code) lise les messageries de l'utilisateur. Il est
+**fermé par défaut** et ne s'ouvre que sur demande (bouton « Ouvrir ma
+connexion MCP » des réglages, ou `jasette-serveur --mcp ouvrir`).
+
+### 9.1 Transport et jeton
+
+- **Streamable HTTP** (SDK Go officiel `github.com/modelcontextprotocol/go-sdk`),
+  en HTTP simple, sur son **propre port** : **47810** par défaut
+  (`--mcp-port`, ou `JASETTE_MCP_PORT`), sur les mêmes interfaces que le
+  serveur (toutes, ou `--ecoute`), donc aussi `127.0.0.1`. Point d'accès :
+  `http://<hôte>:47810/mcp`.
+- Chaque requête exige le **jeton** : `Authorization: Bearer <jeton>`, ou,
+  pour un client qui ne sait pas envoyer d'en-tête (claude.ai), l'URL
+  secrète `/mcp/<jeton>`. Sinon : `401` ; après 20 jetons faux en
+  10 minutes depuis une adresse : `429`. Fermé : rien n'écoute.
+- Le jeton : 32 octets aléatoires en base64url (43 caractères), créé à
+  l'ouverture, gardé dans `<données>/serveur/mcp.json` (0600). **Fermer le
+  révoque** (une réouverture en crée un autre) ; « régénérer » le remplace :
+  les sessions de l'ancien tombent aussitôt. Il n'est jamais écrit dans les
+  journaux (ni l'URL qui peut le porter).
+- La protection DNS-rebinding « hôte local » du SDK est désactivée : derrière
+  un tunnel ou un mandataire, les requêtes arrivent sur 127.0.0.1 avec le nom
+  public dans `Host`. Le jeton protège chaque requête.
+- HTTP simple : sur le réseau local, le jeton passe en clair. Pour claude.ai,
+  il faut de toute façon une URL **HTTPS publique** devant le port 47810
+  (Tailscale Funnel, Cloudflare Tunnel, mandataire inverse avec certificat).
+
+### 9.2 Outils
+
+Ids de conversation préfixés comme les marques (§5.5). Les données viennent
+du cache du serveur (§5.8) et, au besoin, du pont.
+
+| Outil | Rôle |
+|---|---|
+| `lister_conversations` | conversations, de la plus récente : `service`, `nom`, `dernier_message`, `non_lu`, `marques`, `archivee` ; filtres `service`, `marque` (`head`, `favoris`, `epingles`, `archives`), `non_lus_seulement`, `inclure_archives`, `limite` |
+| `lire_messages` | messages d'une conversation (`conversation`, `nombre` ≤ 100) ; plus anciens : repasser `suite` dans `avant` |
+| `chercher_messages` | `texte` (sans accents ni casse) dans la copie du serveur et, sauf Google, par `search_messages` des ponts |
+| `etat_services` | état, compte, conversations et non lues de chaque service |
+| `envoyer_message` | **seulement si permis** (case à part, non par défaut, remise à non à la fermeture) : `conversation` existante, `texte` ≤ 4000 caractères ; 5 envois par minute et 30 par heure au plus |
+
+Rien d'autre : aucun outil ne marque comme lu, n'archive, ne supprime ni ne
+réagit.
+
+- **Rien n'est marqué comme lu.** Le serveur n'envoie jamais `read`, et la
+  commande `messages` des ponts ne marque rien. Les réponses des ponts aux
+  demandes du MCP (`messages`, `search_messages`, et leurs `error`) ne vont
+  **qu'au MCP** (et au cache), jamais aux appareils : leur interface ne les
+  prend pas pour une conversation ouverte. S'il y a en même temps une
+  demande d'un appareil pour la même conversation, la réponse lui revient
+  d'abord. Une liste `conversations` redemandée par le MCP (quand celle du
+  cache date de plus d'une minute) va à tous, comme d'habitude, et l'envoi
+  (`sent`, `message`) aussi.
+- **Journal** : chaque appel d'outil (nom, service ou conversation, nombre
+  de caractères, résultat, durée), jamais le contenu d'un message ni le
+  texte cherché.
+
+### 9.3 Commande des appareils : trame `mcp`
+
+C→S (une connexion authentifiée, §4) :
+
+```json
+{"mcp":{"id":4,"action":"etat"}}
+{"mcp":{"id":5,"action":"ouvrir"}}
+{"mcp":{"id":6,"action":"fermer"}}
+{"mcp":{"id":7,"action":"regenerer"}}
+{"mcp":{"id":8,"action":"envoi","envoi":true}}
+```
+
+S→C, **à ce client seulement**, après l'action :
+
+```json
+{"mcp":{"id":5,"ouvert":true,"jeton":"<43 caractères>","envoi":false,"port":47810,"chemin":"/mcp","adresses":["192.168.1.20","127.0.0.1"],"ecoute":true}}
+```
+
+- `jeton` : seulement si `ouvert`. `adresses` : les IPv4 du serveur (sans
+  Docker), puis `127.0.0.1` ; le client montre d'abord l'hôte par lequel il
+  joint lui-même le serveur. `ecoute` : faux si le port n'a pas pu être
+  ouvert (`erreur` dit pourquoi).
+- Échec : les mêmes champs, plus `"erreur":"…"` (action inconnue,
+  `regenerer` ou `envoi` alors que la connexion est fermée).
+
+En ligne de commande (sur le serveur) : `jasette-serveur --mcp etat|ouvrir|fermer|regenerer|envoi-oui|envoi-non`
+(le serveur en marche applique le changement dans les 2 secondes).
+
+### 9.4 Brancher Claude
+
+Claude Code :
+
+```sh
+claude mcp add --transport http jasette http://<hôte>:47810/mcp --header "Authorization: Bearer <jeton>"
+```
+
+claude.ai (Réglages > Connecteurs > Ajouter un connecteur personnalisé) :
+claude.ai joint le serveur depuis Internet et n'envoie pas d'en-tête
+choisi : il faut une URL **HTTPS publique** vers le port 47810, et l'URL
+secrète `https://<nom public>/mcp/<jeton>`. Au choix (rien n'est installé
+par Jasette) : `tailscale funnel 47810` (nom `*.ts.net`), Cloudflare Tunnel
+(`cloudflared tunnel --url http://localhost:47810`, ou un tunnel nommé), ou
+un mandataire inverse (Caddy, nginx) avec un certificat, devant
+`http://127.0.0.1:47810`. Régénérer le jeton change l'URL secrète.

@@ -392,6 +392,36 @@ object Depot {
     /** L'accueil : « Autonome » choisi, on passe au choix du premier service. */
     var accueilAutonome by mutableStateOf(false)
 
+    /** La connexion MCP du serveur (Claude) : dernier état reçu, demande en cours, erreur. */
+    var mcp by mutableStateOf<EtatMcp?>(null)
+        private set
+    var mcpOccupe by mutableStateOf(false)
+        private set
+    var mcpErreur by mutableStateOf<String?>(null)
+        private set
+
+    /** Une trame `mcp` au serveur (`etat`, `ouvrir`, `fermer`, `regenerer`, `envoi`). */
+    fun actionMcp(action: String, envoi: Boolean? = null) {
+        val cx = connexion ?: return
+        if (mcpOccupe) return
+        mcpOccupe = true
+        mcpErreur = null
+        Thread({
+            try {
+                val e = cx.commandeMcp(action, envoi)
+                principal.post {
+                    mcp = e
+                    mcpErreur = e.erreur
+                }
+            } catch (e: Exception) {
+                val texte = e.message ?: e.toString()
+                principal.post { mcpErreur = texte }
+            } finally {
+                principal.post { mcpOccupe = false }
+            }
+        }, "serveur-mcp").start()
+    }
+
     private fun tacheServeur(travail: () -> Unit) {
         serveurOccupe = true
         erreurServeur = null
