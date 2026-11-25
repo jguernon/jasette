@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import kotlin.math.roundToInt
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -149,6 +150,7 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
             Text(t("Apparence"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             ChoixTheme()
             ChoixGrilleHead()
+            ChoixTailleMessages()
             ChoixHeures()
             ChoixContacts()
             ChoixTeinte()
@@ -791,6 +793,55 @@ private fun ChoixTeinte() {
             }
         }
     }
+}
+
+/**
+ * Réglages → Apparence → Grosseur du texte des messages : un gradateur à crans
+ * et un aperçu en direct (une bulle reçue, une envoyée). Propre à cet appareil.
+ */
+@Composable
+private fun ChoixTailleMessages() {
+    val crans = listOf(0.85f, 0.92f, 1f, 1.1f, 1.2f, 1.32f, 1.45f, 1.6f)
+    val actuelle = ca.jasette.android.Marques.tailleMessages
+    val indice = crans.indices.minByOrNull { kotlin.math.abs(crans[it] - actuelle) } ?: 2
+    Text(t("Grosseur du texte des messages"), color = P.textePale, fontSize = 13.sp)
+    Groupe {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("A", color = P.textePale, fontSize = 12.sp)
+                androidx.compose.material3.Slider(
+                    value = indice.toFloat(),
+                    onValueChange = { ca.jasette.android.Marques.choisirTailleMessages(crans[it.roundToInt().coerceIn(0, crans.lastIndex)]) },
+                    valueRange = 0f..crans.lastIndex.toFloat(),
+                    steps = crans.size - 2,
+                    colors = androidx.compose.material3.SliderDefaults.colors(
+                        thumbColor = P.accent, activeTrackColor = P.accent, inactiveTrackColor = P.filet,
+                        activeTickColor = P.surAccent.copy(alpha = 0.6f), inactiveTickColor = P.textePale.copy(alpha = 0.5f),
+                    ),
+                    modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+                )
+                Text("A", color = P.textePale, fontSize = 20.sp)
+            }
+            Column(
+                Modifier.fillMaxWidth().clip(forme(14.dp)).background(P.fil).padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                val taille = (15f * actuelle).sp
+                val ligne = (20f * actuelle).sp
+                Text(
+                    t("On se voit au chalet vendredi ?"), color = P.texteFort, fontSize = taille, lineHeight = ligne,
+                    modifier = Modifier.clip(forme(18.dp)).background(P.surface).padding(horizontal = 13.dp, vertical = 8.dp),
+                )
+                Text(
+                    t("Oui ! J'apporte les guimauves."), color = P.surAccent, fontSize = taille, lineHeight = ligne,
+                    modifier = Modifier.align(Alignment.End).clip(forme(18.dp)).background(P.degrade)
+                        .padding(horizontal = 13.dp, vertical = 8.dp),
+                )
+            }
+            Text(t("Texte des messages : %d %%").format((actuelle * 100).roundToInt()), color = P.textePale, fontSize = 12.sp)
+        }
+    }
+    Spacer(Modifier.height(4.dp))
 }
 
 /**

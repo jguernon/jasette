@@ -565,7 +565,11 @@ private fun Message(
                             .combinedClickable(onClick = { if (echec) reessayer() }, onLongClick = appuiLong)
                             .padding(horizontal = 13.dp, vertical = 8.dp),
                     ) {
-                        Text(surligner(m.text, surligne, courant), color = if (m.fromMe) P.surAccent else P.texteFort, fontSize = 15.sp)
+                        Text(
+                            surligner(m.text, surligne, courant), color = if (m.fromMe) P.surAccent else P.texteFort,
+                            fontSize = (15f * ca.jasette.android.Marques.tailleMessages).sp,
+                            lineHeight = (20f * ca.jasette.android.Marques.tailleMessages).sp,
+                        )
                     }
                 }
             }

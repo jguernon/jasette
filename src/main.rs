@@ -1303,6 +1303,9 @@ struct Reglages {
     /// Afficher l'heure de chaque message (le (i) du fil reste un interrupteur ponctuel).
     #[serde(default)]
     heures_messages: bool,
+    /// La grosseur du texte des messages, relative au texte normal (1 = normal).
+    #[serde(default = "un")]
+    taille_messages: f32,
     /// « Utiliser les photos de mes contacts » (les contacts du téléphone, par Google Messages).
     #[serde(default = "vrai")]
     photos_contacts: bool,
@@ -1365,6 +1368,13 @@ fn vrai() -> bool {
     true
 }
 
+fn un() -> f32 {
+    1.
+}
+
+/// Les crans du gradateur « Grosseur du texte des messages ».
+const TAILLES_MESSAGES: [f32; 8] = [0.85, 0.92, 1.0, 1.1, 1.2, 1.32, 1.45, 1.6];
+
 impl Default for Reglages {
     fn default() -> Self {
         Self {
@@ -1388,6 +1398,7 @@ impl Default for Reglages {
             head_grille: String::new(),
             marques_cache: HashMap::new(),
             heures_messages: false,
+            taille_messages: 1.,
             photos_contacts: true,
             photos_contacts_meta: false,
             marques_version: 0,
@@ -5881,7 +5892,7 @@ impl Jasette {
                 })
                 // Le texte peut rétrécir sous sa largeur d'une ligne : il se replie
                 // dans la bulle, et l'heure passe alors en dessous, à droite.
-                .child(div().min_w(px(0.)).child(if flou {
+                .child(div().min_w(px(0.)).text_size(gpui::rems(self.reglages.taille_messages)).child(if flou {
                     m.text.clone().into_any_element()
                 } else {
                     texte_surligne(m.text.clone(), if m.from_me { blanc(1.) } else { th().texte_fort }, None, plage)
@@ -7098,6 +7109,101 @@ impl Jasette {
 
     /// Apparence : le choix de la grille du Head, une tuile par grille, avec
     /// son aperçu (un point par avatar, à l'échelle de la liste).
+    /// Le gradateur de la grosseur du texte des messages, avec un aperçu en direct.
+    fn choix_taille_messages(&self, cx: &mut Context<Self>) -> Div {
+        let actuelle = self.reglages.taille_messages;
+        let choisi = TAILLES_MESSAGES
+            .iter()
+            .enumerate()
+            .min_by(|a, b| (a.1 - actuelle).abs().total_cmp(&(b.1 - actuelle).abs()))
+            .map(|(i, _)| i)
+            .unwrap_or(2);
+        let n = TAILLES_MESSAGES.len();
+        let mut piste = div().flex_1().flex().flex_row().h(px(32.));
+        for (i, &e) in TAILLES_MESSAGES.iter().enumerate() {
+            let rempli = i <= choisi;
+            let couleur = if rempli { th().accent } else { th().trait_fin };
+            // Chaque cran : une moitié de trait de chaque côté (rien au-delà des bouts).
+            let gauche = if i == 0 { hsla(0., 0., 0., 0.) } else { couleur };
+            let droite = if i + 1 == n { hsla(0., 0., 0., 0.) } else if i < choisi { th().accent } else { th().trait_fin };
+            piste = piste.child(
+                div()
+                    .id(("taille-msg", i))
+                    .flex_1()
+                    .h_full()
+                    .relative()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.reglages.taille_messages = e;
+                        this.reglages.garder();
+                        cx.notify();
+                    }))
+                    .child(div().absolute().left_0().w(gpui::relative(0.5)).top(px(14.)).h(px(4.)).bg(gauche))
+                    .child(div().absolute().right_0().w(gpui::relative(0.5)).top(px(14.)).h(px(4.)).bg(droite))
+                    .child(if i == choisi {
+                        div()
+                            .size(px(20.))
+                            .rounded(rayon(999.))
+                            .bg(th().accent)
+                            .border_2()
+                            .border_color(blanc(1.))
+                            .shadow(ombre_flottante())
+                    } else {
+                        div().size(px(8.)).rounded(rayon(999.)).bg(couleur)
+                    }),
+            );
+        }
+        let curseur = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(12.))
+            .child(div().text_size(px(12.)).text_color(th().texte_pale).child("A"))
+            .child(piste)
+            .child(div().text_size(px(20.)).text_color(th().texte_pale).child("A"));
+        // L'aperçu : une bulle reçue, une envoyée, à la grosseur choisie.
+        let bulle = |texte: &'static str, moi: bool| {
+            let d = div()
+                .max_w(px(360.))
+                .px(px(mesure(14., 12.)))
+                .py(px(mesure(8., 7.)))
+                .rounded(rayon(mesure(20., 18.)))
+                .border_1()
+                .text_size(gpui::rems(actuelle))
+                .child(t(texte));
+            if moi {
+                d.border_color(hsla(0., 0., 0., 0.)).bg(degrade_accent()).text_color(blanc(1.))
+            } else {
+                d.bg(th().surface).border_color(th().surface_bord).text_color(th().texte_fort)
+            }
+        };
+        let apercu = div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .p(px(14.))
+            .rounded(rayon(14.))
+            .bg(th().fil)
+            .child(div().flex().flex_row().child(bulle("On se voit au chalet vendredi ?", false)))
+            .child(div().flex().flex_row().justify_end().child(bulle("Oui ! J'apporte les guimauves.", true)));
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(14.))
+            .p(px(14.))
+            .child(curseur)
+            .child(apercu)
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(th().texte_pale)
+                    .child(format!("{} {} %", t("Texte des messages :"), (actuelle * 100.).round())),
+            )
+    }
+
     fn choix_grille_head(&self, cx: &mut Context<Self>) -> Div {
         let mut tuiles = div().flex().flex_row().flex_wrap().gap(px(8.));
         for (i, cols) in COLONNES_HEAD.into_iter().enumerate() {
@@ -7525,6 +7631,16 @@ impl Jasette {
                             .child(t("Grille du Head")),
                     )
                     .child(groupe().child(self.choix_grille_head(cx)))
+                    .child(
+                        div()
+                            .pt(px(22.))
+                            .pb(px(12.))
+                            .text_size(px(15.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(th().texte)
+                            .child(t("Grosseur du texte des messages")),
+                    )
+                    .child(groupe().child(self.choix_taille_messages(cx)))
                     .child(div().h(px(14.)))
                     .child(groupe().child(ligne_interrupteur(
                         "a-heures",
@@ -9715,6 +9831,10 @@ fn t(fr: &'static str) -> &'static str {
         "Confirmer la suppression" => "Confirm delete",
         "Archivée par le service : désarchive-la dans son app." => "Archived by the service: unarchive it in its app.",
         "Grille du Head" => "Head grid",
+        "Grosseur du texte des messages" => "Message text size",
+        "Texte des messages :" => "Message text:",
+        "On se voit au chalet vendredi ?" => "See you at the cabin Friday?",
+        "Oui ! J'apporte les guimauves." => "Yes! I'm bringing marshmallows.",
         "chargement…" => "loading…",
         "déconnecté" => "disconnected",
         "n'est pas connecté." => "is not connected.",

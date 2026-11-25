@@ -92,6 +92,15 @@ object Marques {
         prefs?.edit()?.putString("head_grille", headGrille)?.commit()
     }
 
+    /** La grosseur du texte des messages (1 = normal, 0,85 à 1,6). Propre à l'appareil. */
+    var tailleMessages by mutableStateOf(1f)
+        private set
+
+    fun choisirTailleMessages(e: Float) {
+        tailleMessages = e.coerceIn(0.85f, 1.6f)
+        prefs?.edit()?.putFloat("taille_messages", tailleMessages)?.apply()
+    }
+
     /** Mon avatar : « google », « messenger », « instagram », « fichier », « initiale » ou vide (pas encore choisi). */
     var avatarSource by mutableStateOf("")
         private set
@@ -123,6 +132,7 @@ object Marques {
         deuxVolets = p.getBoolean("deux_volets", true)
         heureChaqueMessage = p.getBoolean("heure_chaque_message", false)
         headGrille = colonnes(p.getString("head_grille", "4") ?: "4").toString()
+        tailleMessages = p.getFloat("taille_messages", 1f).coerceIn(0.85f, 1.6f)
         head.clear()
         head.addAll(lire(p, "head"))
         favoris.clear()
