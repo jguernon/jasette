@@ -691,6 +691,21 @@ impl Service {
     }
 }
 
+/// Le serveur Jasette à utiliser, s'il y en a un : en mode « serveur » (cette
+/// machine l'est) comme en mode « client », l'interface passe par lui.
+fn serveur_actif(r: &Reglages) -> Option<&pont::ConfigServeur> {
+    if r.mode_serveur.is_empty() { None } else { r.serveur.as_ref() }
+}
+
+/// Le pont d'un service : un processus ici, ou ce service sur le serveur Jasette.
+fn lancer_pont(r: &Reglages, svc: Service) -> Result<Pont, String> {
+    match serveur_actif(r) {
+        Some(cfg) => Ok(Pont::distant(cfg, svc.cle())),
+        None if svc == Service::GoogleMessages => Pont::lancer(),
+        None => Pont::lancer_meta(svc.cle()),
+    }
+}
+
 /// Les services servis par le pont Meta (une copie du pont par service).
 const SERVICES_META: [Service; 2] = [Service::Messenger, Service::Instagram];
 
@@ -705,9 +720,9 @@ struct CompteMeta {
 }
 
 impl CompteMeta {
-    fn lancer(s: Service) -> Self {
+    fn lancer(s: Service, r: &Reglages) -> Self {
         Self {
-            pont: Pont::lancer_meta(s.cle()).map_err(|e| eprintln!("jasette : {e}")).ok(),
+            pont: lancer_pont(r, s).map_err(|e| eprintln!("jasette : {e}")).ok(),
             etat: Etat::Demarrage,
             nom: None,
             avatar: None,
@@ -908,6 +923,7 @@ enum Vue {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Section {
     Comptes,
+    Serveur,
     Notifications,
     Apparence,
     Langue,
@@ -935,6 +951,13 @@ struct Reglages {
     langue: String,
     /// Le « Head » : la grille d'avatars en tête de liste (ids, préfixés pour
     /// Messenger), dans l'ordre d'ajout. Gardé sous l'ancien nom « favoris ».
+    /// Serveur Jasette : "" (tout sur cet appareil), "serveur" (cette machine
+    /// fait tourner jasette-serveur) ou "client" (un serveur ailleurs).
+    #[serde(default)]
+    mode_serveur: String,
+    /// Le serveur jumelé (adresse, empreinte épinglée, jeton : secret).
+    #[serde(default)]
+    serveur: Option<pont::ConfigServeur>,
     /// L'icône de l'app : « sombre » (défaut) ou « blanche ».
     #[serde(default)]
     icone: String,
@@ -972,6 +995,8 @@ impl Default for Reglages {
             langue: String::new(),
             head: Vec::new(),
             icone: String::new(),
+            mode_serveur: String::new(),
+            serveur: None,
             etoiles: Vec::new(),
             epingles: Vec::new(),
         }
@@ -1010,6 +1035,12 @@ impl Reglages {
         if let Ok(s) = serde_json::to_string_pretty(self) {
             let tmp = dir.join("reglages.json.tmp");
             if std::fs::write(&tmp, s).is_ok() {
+                // Le jeton du serveur Jasette y est : lisible par moi seul.
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+                }
                 let _ = std::fs::rename(tmp, dir.join("reglages.json"));
             }
         }
@@ -1098,6 +1129,15 @@ struct Jasette {
     banniere_fermee: bool,
     recherche: Entity<InputState>,
     numero: Entity<InputState>,
+    /// Serveur Jasette : une opération en cours, le code pour jumeler un
+    /// appareil (code, vérification), les appareils jumelés, la vérification
+    /// d'un serveur à confirmer (mode client), et les champs du jumelage.
+    serveur_occupe: bool,
+    code_jumelage: Option<(String, String)>,
+    appareils: Vec<String>,
+    verif_client: Option<(String, String, pont::Verification)>,
+    adresse_serveur: Entity<InputState>,
+    code_serveur: Entity<InputState>,
     filtre: String,
     // Le fil
     saisie: Entity<InputState>,
@@ -1373,6 +1413,88 @@ fn regler_demarrage_auto(actif: bool) -> Result<(), String> {
     std::fs::write(&fichier, contenu).map_err(|e| e.to_string())
 }
 
+/// Le nom de cette machine (pour le serveur : le nom de l'appareil jumelé).
+fn nom_machine() -> String {
+    std::fs::read_to_string("/etc/hostname").map(|s| s.trim().to_string()).ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "Jasette".into())
+}
+
+fn systemctl(args: &[&str]) -> bool {
+    std::process::Command::new("systemctl")
+        .arg("--user")
+        .args(args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// `jasette-serveur <args>` : sa sortie standard, ou son erreur.
+fn commande_serveur(args: &[&str]) -> Result<String, String> {
+    let bin = pont::chemin("jasette-serveur", "JASETTE_SERVEUR").ok_or("jasette-serveur introuvable")?;
+    let out = std::process::Command::new(&bin).args(args).stdin(std::process::Stdio::null()).output().map_err(|e| e.to_string())?;
+    let texte = String::from_utf8_lossy(&out.stdout).to_string();
+    if out.status.success() {
+        Ok(texte)
+    } else {
+        Err(format!("jasette-serveur : {}{}", texte.trim(), String::from_utf8_lossy(&out.stderr).trim()))
+    }
+}
+
+/// Installe jasette-serveur comme service systemd de l'utilisateur, le démarre,
+/// puis jumelle cette interface avec lui (code lu sur place, empreinte vérifiée).
+fn installer_serveur() -> Result<pont::ConfigServeur, String> {
+    let bin = pont::chemin("jasette-serveur", "JASETTE_SERVEUR").ok_or("jasette-serveur introuvable")?;
+    let ponts = pont::chemin("jasette-pont", "JASETTE_PONT")
+        .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+        .ok_or("Les ponts de Jasette sont introuvables")?;
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .ok_or("Dossier de configuration introuvable")?;
+    let unite = config.join("systemd/user/jasette-serveur.service");
+    if let Some(d) = unite.parent() {
+        std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
+    }
+    let contenu = format!(
+        "# Écrit par Jasette (Réglages > Serveur Jasette).\n[Unit]\nDescription=Jasette, serveur de messagerie\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart=\"{}\" --port {} --bin \"{}\"\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=yes\nPrivateTmp=yes\n\n[Install]\nWantedBy=default.target\n",
+        bin.display(),
+        pont::PORT_PAR_DEFAUT,
+        ponts.display()
+    );
+    std::fs::write(&unite, contenu).map_err(|e| e.to_string())?;
+    systemctl(&["daemon-reload"]);
+    if !systemctl(&["enable", "--now", "jasette-serveur"]) {
+        return Err("Impossible de démarrer le service jasette-serveur (voir journalctl --user -u jasette-serveur)".into());
+    }
+    // Qu'il tourne aussi sans session ouverte (sans effet si déjà permis).
+    let _ = std::process::Command::new("loginctl").arg("enable-linger").status();
+    let adresse = format!("127.0.0.1:{}", pont::PORT_PAR_DEFAUT);
+    let mut pret = false;
+    for _ in 0..40 {
+        if std::net::TcpStream::connect(&adresse).is_ok() {
+            pret = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    if !pret {
+        return Err("Le serveur ne répond pas (port 47800)".into());
+    }
+    let sortie = commande_serveur(&["--jumeler"])?;
+    let code: String = sortie
+        .lines()
+        .find(|l| l.starts_with("Code de jumelage"))
+        .and_then(|l| l.split_once(':'))
+        .map(|(_, v)| v.chars().filter(char::is_ascii_digit).collect())
+        .ok_or("Code de jumelage illisible")?;
+    let empreinte = commande_serveur(&["--empreinte"])?.trim().to_lowercase();
+    let v = pont::verifier_serveur(&adresse, &code)?;
+    if v.empreinte.to_lowercase() != empreinte {
+        return Err("Le serveur local n'a pas le certificat attendu : jumelage refusé".into());
+    }
+    pont::jumeler(&adresse, &code, &nom_machine(), &v.empreinte)
+}
+
 /// Ouvre une adresse (https:, tel:) avec l'application par défaut.
 fn ouvrir_adresse(adresse: &str) {
     let _ = std::process::Command::new("xdg-open")
@@ -1465,6 +1587,8 @@ impl Jasette {
         })
         .detach();
         let numero = cx.new(|cx| InputState::new(window, cx).placeholder(t("Nom ou numéro de téléphone")));
+        let adresse_serveur = cx.new(|cx| InputState::new(window, cx).placeholder(t("Adresse du serveur (ex. : thinkcentretc)")));
+        let code_serveur = cx.new(|cx| InputState::new(window, cx).placeholder(t("Code de jumelage (6 chiffres)")));
         cx.subscribe_in(&numero, window, |this, state, ev: &InputEvent, window, cx| {
             if let InputEvent::Change = ev {
                 let texte = state.read(cx).value().trim().to_string();
@@ -1505,7 +1629,8 @@ impl Jasette {
         })
         .detach();
 
-        let (pont, erreur) = match Pont::lancer() {
+        let reglages = Reglages::charger();
+        let (pont, erreur) = match lancer_pont(&reglages, Service::GoogleMessages) {
             Ok(p) => (Some(p), None),
             Err(e) => (None, Some(format!("Pont introuvable : {e}"))),
         };
@@ -1597,8 +1722,8 @@ impl Jasette {
             emoji: None,
             connexion: Arc::new(Mutex::new(None)),
             connexion_ouverte: false,
-            messenger: CompteMeta::lancer(Service::Messenger),
-            instagram: CompteMeta::lancer(Service::Instagram),
+            messenger: CompteMeta::lancer(Service::Messenger, &reglages),
+            instagram: CompteMeta::lancer(Service::Instagram, &reglages),
             besoin_nip: false,
             nip,
             convs: Vec::new(),
@@ -1650,7 +1775,13 @@ impl Jasette {
             ouvrir_apres: HashSet::new(),
             avatars: HashMap::new(),
             mosaiques: HashMap::new(),
-            reglages: Reglages::charger(),
+            reglages,
+            serveur_occupe: false,
+            code_jumelage: None,
+            appareils: Vec::new(),
+            verif_client: None,
+            adresse_serveur,
+            code_serveur,
             section: None,
             ajout_compte: false,
             active: window.is_window_active(),
@@ -4769,6 +4900,15 @@ impl Jasette {
                     cx.notify();
                 }),
             ))
+            .child(item("s-serveur", Section::Serveur, t("Serveur Jasette"), "server", 0x8b5cf6, None).on_click(cx.listener(
+                |this, _, _, cx| {
+                    this.section = Some(Section::Serveur);
+                    if this.reglages.mode_serveur == "serveur" {
+                        this.lister_appareils(cx);
+                    }
+                    cx.notify();
+                },
+            )))
             .child(item("s-langue", Section::Langue, t("Langue"), "languages", 0x0ea5e9, None).on_click(cx.listener(
                 |this, _, _, cx| {
                     this.section = Some(Section::Langue);
@@ -4792,6 +4932,7 @@ impl Jasette {
                 self.ecran_connexion(cx).into_any_element()
             }
             Section::Comptes => self.comptes(cx).into_any_element(),
+            Section::Serveur => self.serveur_vue(cx),
             Section::Notifications => carte_section("Notifications")
                 .child(
                     groupe()
@@ -5109,7 +5250,55 @@ impl Jasette {
             )
     }
 
-    fn comptes(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn comptes(&self, cx: &mut Context<Self>) -> AnyElement {
+        // Par un serveur Jasette : les services se gèrent sur le serveur.
+        if self.reglages.mode_serveur == "client" {
+            let adresse = self.reglages.serveur.as_ref().map(|c| c.adresse.clone()).unwrap_or_default();
+            let etats: Vec<String> = [Service::GoogleMessages, Service::Messenger, Service::Instagram]
+                .into_iter()
+                .map(|s| {
+                    let e = if s == Service::GoogleMessages { self.etat } else { self.meta(s).etat };
+                    format!("{} : {}", s.court(), e.texte())
+                })
+                .collect();
+            return carte_section(t("Comptes"))
+                .child(
+                    groupe().child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(14.))
+                            .px(px(16.))
+                            .py(px(13.))
+                            .child(icone("server", 26., th().accent))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(2.))
+                                    .child(
+                                        div()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(th().texte_fort)
+                                            .child(format!("{} · {adresse}", t("Serveur Jasette"))),
+                                    )
+                                    .child(div().text_size(px(12.)).text_color(th().texte_pale).child(etats.join(" · "))),
+                            )
+                            .child(bouton_texte("srv-quitter", t("Ne plus l'utiliser"), DANGER).on_click(cx.listener(
+                                |this, _, _, cx| {
+                                    this.utiliser_cet_appareil(cx);
+                                    cx.notify();
+                                },
+                            ))),
+                    ),
+                )
+                .child(div().pt(px(12.)).text_size(px(12.)).text_color(th().texte_pale).child(t(
+                    "Les services se connectent et se déconnectent sur le serveur.",
+                )))
+                .into_any_element();
+        }
         let associe = self.etat.associe();
         let gm = div()
             .flex()
@@ -5204,6 +5393,385 @@ impl Jasette {
                     .child(icone("circle-plus", 17., th().accent))
                     .child(t("Ajouter un compte")),
             )
+            .into_any_element()
+    }
+
+    // ------------------------------------------------------------------
+    // Serveur Jasette
+    // ------------------------------------------------------------------
+
+    /// Refait tous les ponts selon le mode choisi (ici, ou par le serveur).
+    /// Les anciens s'arrêtent d'abord : deux ponts sur une même session se la voleraient.
+    fn rebrancher(&mut self) {
+        self.pont = None;
+        self.messenger.pont = None;
+        self.instagram.pont = None;
+        self.convs.clear();
+        self.archives.clear();
+        self.messages.clear();
+        self.choisie = None;
+        self.etat = Etat::Demarrage;
+        match lancer_pont(&self.reglages, Service::GoogleMessages) {
+            Ok(p) => self.pont = Some(p),
+            Err(e) => self.erreur = Some(format!("Pont introuvable : {e}")),
+        }
+        for svc in SERVICES_META {
+            let r = lancer_pont(&self.reglages, svc).map_err(|e| eprintln!("jasette : {e}")).ok();
+            let m = self.meta_mut(svc);
+            m.pont = r;
+            m.etat = Etat::Demarrage;
+            m.nom = None;
+        }
+    }
+
+    /// Un travail bloquant (réseau, systemctl) hors du fil de l'interface.
+    fn tache_serveur<T: Send + 'static>(
+        &mut self,
+        cx: &mut Context<Self>,
+        travail: impl FnOnce() -> Result<T, String> + Send + 'static,
+        fin: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
+    ) {
+        self.serveur_occupe = true;
+        self.erreur = None;
+        cx.spawn(async move |this, cx| {
+            let r = cx.background_executor().spawn(async move { travail() }).await;
+            let _ = this.update(cx, |this, cx| {
+                this.serveur_occupe = false;
+                match r {
+                    Ok(v) => fin(this, v, cx),
+                    Err(e) => this.erreur = Some(e),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// « Je suis le serveur Jasette » : installe et démarre jasette-serveur
+    /// (service systemd de l'utilisateur), puis jumelle cette interface avec lui.
+    fn devenir_serveur(&mut self, cx: &mut Context<Self>) {
+        // Les ponts locaux s'arrêtent avant que le serveur lance les siens.
+        self.reglages.mode_serveur = String::new();
+        self.pont = None;
+        self.messenger.pont = None;
+        self.instagram.pont = None;
+        self.tache_serveur(cx, installer_serveur, |this, cfg, _cx| {
+            this.reglages.serveur = Some(cfg);
+            this.reglages.mode_serveur = "serveur".into();
+            this.reglages.garder();
+            this.rebrancher();
+        });
+        self.lister_appareils(cx);
+    }
+
+    /// « Sur cet appareil » : plus de serveur. Si cette machine l'était, il s'arrête.
+    fn utiliser_cet_appareil(&mut self, cx: &mut Context<Self>) {
+        let etait_serveur = self.reglages.mode_serveur == "serveur";
+        self.reglages.mode_serveur = String::new();
+        self.reglages.serveur = None;
+        self.reglages.garder();
+        self.code_jumelage = None;
+        self.verif_client = None;
+        self.pont = None;
+        self.messenger.pont = None;
+        self.instagram.pont = None;
+        if etait_serveur {
+            self.tache_serveur(
+                cx,
+                || {
+                    systemctl(&["disable", "--now", "jasette-serveur"]);
+                    Ok(())
+                },
+                |this, _, _| this.rebrancher(),
+            );
+        } else {
+            self.rebrancher();
+        }
+    }
+
+    /// Un code pour jumeler un autre appareil (et son code de vérification).
+    fn nouveau_code(&mut self, cx: &mut Context<Self>) {
+        self.tache_serveur(
+            cx,
+            || {
+                let sortie = commande_serveur(&["--jumeler"])?;
+                let valeur = |debut: &str| {
+                    sortie.lines().find(|l| l.starts_with(debut)).and_then(|l| l.split_once(':')).map(|(_, v)| v.trim().to_string())
+                };
+                match (valeur("Code de jumelage"), valeur("Vérification")) {
+                    (Some(c), Some(v)) => Ok((c, v)),
+                    _ => Err(format!("Réponse inattendue du serveur : {sortie}")),
+                }
+            },
+            |this, code, _| this.code_jumelage = Some(code),
+        );
+    }
+
+    fn lister_appareils(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let r = cx.background_executor().spawn(async move { commande_serveur(&["--appareils"]) }).await;
+            let _ = this.update(cx, |this, cx| {
+                this.appareils = r
+                    .map(|s| {
+                        s.lines()
+                            .filter_map(|l| l.split_once(" jumelé le ").map(|(nom, reste)| format!("{}\t{}", nom.trim(), reste.trim())))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn revoquer(&mut self, nom: String, cx: &mut Context<Self>) {
+        self.tache_serveur(cx, move || commande_serveur(&["--revoquer", &nom]).map(|_| ()), |this, _, cx| this.lister_appareils(cx));
+    }
+
+    /// Client, étape 1 : se brancher au serveur et calculer le code de vérification.
+    /// Rien de secret ne part tant que l'utilisateur n'a pas comparé les codes.
+    fn verifier_client(&mut self, cx: &mut Context<Self>) {
+        let adresse = self.adresse_serveur.read(cx).value().trim().to_string();
+        let code: String = self.code_serveur.read(cx).value().chars().filter(char::is_ascii_digit).collect();
+        if adresse.is_empty() || code.len() != 6 {
+            self.erreur = Some(t("Entrez l'adresse du serveur et le code à 6 chiffres qu'il affiche.").into());
+            return;
+        }
+        self.tache_serveur(
+            cx,
+            move || pont::verifier_serveur(&adresse, &code).map(|v| (adresse, code, v)),
+            |this, v, _| this.verif_client = Some(v),
+        );
+    }
+
+    /// Client, étape 2 : les codes correspondent, on jumelle et on passe par le serveur.
+    fn jumeler_client(&mut self, cx: &mut Context<Self>) {
+        let Some((adresse, code, v)) = self.verif_client.take() else { return };
+        self.tache_serveur(
+            cx,
+            move || pont::jumeler(&adresse, &code, &nom_machine(), &v.empreinte),
+            |this, cfg, _| {
+                this.reglages.serveur = Some(cfg);
+                this.reglages.mode_serveur = "client".into();
+                this.reglages.garder();
+                this.rebrancher();
+            },
+        );
+    }
+
+    /// La section « Serveur Jasette » des réglages.
+    fn serveur_vue(&self, cx: &mut Context<Self>) -> AnyElement {
+        let mode = self.reglages.mode_serveur.as_str();
+        let occupe = self.serveur_occupe;
+        let choix = |id: &'static str, ic: &'static str, titre: &'static str, detail: &'static str, actif: bool| {
+            div()
+                .id(id)
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(14.))
+                .px(px(16.))
+                .py(px(13.))
+                .cursor_pointer()
+                .hover(|s| s.bg(th().survol))
+                .child(icone(ic, 22., if actif { th().accent } else { th().texte_pale }))
+                .child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.))
+                        .child(div().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(t(titre)))
+                        .child(div().text_size(px(12.)).text_color(th().texte_pale).child(t(detail))),
+                )
+                .when(actif, |d| d.child(icone("check", 18., th().accent)))
+        };
+        let mut carte = carte_section(t("Serveur Jasette")).child(
+            groupe()
+                .child(
+                    choix(
+                        "srv-local",
+                        "laptop",
+                        "Sur cet appareil",
+                        "Jasette se connecte elle-même à chaque service.",
+                        mode.is_empty(),
+                    )
+                    .when(!mode.is_empty() && !occupe, |d| {
+                        d.on_click(cx.listener(|this, _, _, cx| {
+                            this.utiliser_cet_appareil(cx);
+                            cx.notify();
+                        }))
+                    }),
+                )
+                .child(separateur())
+                .child(
+                    choix(
+                        "srv-serveur",
+                        "server",
+                        "Je suis le serveur Jasette",
+                        "Cette machine garde les sessions, même Jasette fermée. Vos autres appareils s'y branchent.",
+                        mode == "serveur",
+                    )
+                    .when(mode != "serveur" && !occupe, |d| {
+                        d.on_click(cx.listener(|this, _, _, cx| {
+                            this.devenir_serveur(cx);
+                            cx.notify();
+                        }))
+                    }),
+                )
+                .child(separateur())
+                .child(
+                    choix(
+                        "srv-client",
+                        "monitor",
+                        "Utiliser mon serveur Jasette",
+                        "Tous les services passent par votre serveur : rien à connecter ici.",
+                        mode == "client",
+                    ),
+                ),
+        );
+        if occupe {
+            carte = carte.child(div().pt(px(12.)).text_color(th().texte_pale).child(t("Un instant…")));
+        }
+        let titre = |texte: &'static str| {
+            div().pt(px(22.)).pb(px(12.)).text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).text_color(th().texte).child(t(texte))
+        };
+        let champ_serveur = |e: &Entity<InputState>| verre(0.8, 999.).pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
+        match mode {
+            "serveur" => {
+                let adresse = self.reglages.serveur.as_ref().map(|c| c.adresse.clone()).unwrap_or_default();
+                let mut jumeler = div().flex().flex_col().gap(px(10.)).p(px(16.)).child(
+                    div()
+                        .text_size(px(13.))
+                        .text_color(th().texte)
+                        .child(format!("{} {} · {}", t("Adresse pour les autres appareils :"), nom_machine(), pont::PORT_PAR_DEFAUT)),
+                );
+                if let Some((code, verif)) = &self.code_jumelage {
+                    jumeler = jumeler
+                        .child(div().text_size(px(28.)).font_weight(FontWeight::BOLD).text_color(th().texte_fort).child(code.clone()))
+                        .child(div().text_size(px(13.)).text_color(th().texte).child(format!(
+                            "{} {verif}",
+                            t("L'autre appareil doit afficher ce code de vérification :")
+                        )))
+                        .child(div().text_size(px(12.)).text_color(th().texte_pale).child(t("Valable 10 minutes, pour un seul appareil.")));
+                }
+                jumeler = jumeler.child(
+                    bouton_texte("srv-code", if self.code_jumelage.is_some() { t("Nouveau code") } else { t("Jumeler un appareil") }, ACCENT)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.nouveau_code(cx);
+                            this.lister_appareils(cx);
+                            cx.notify();
+                        })),
+                );
+                carte = carte.child(titre("Jumeler un appareil")).child(groupe().child(jumeler));
+                let mut liste = groupe();
+                let autres: Vec<&String> = self.appareils.iter().filter(|a| !a.starts_with(&format!("{}\t", nom_machine()))).collect();
+                if autres.is_empty() {
+                    liste = liste.child(div().p(px(16.)).text_color(th().texte_pale).child(t("Aucun autre appareil jumelé.")));
+                }
+                for (i, a) in autres.into_iter().enumerate() {
+                    let (nom, detail) = a.split_once('\t').unwrap_or((a.as_str(), ""));
+                    let nom_r = nom.to_string();
+                    if i > 0 {
+                        liste = liste.child(separateur());
+                    }
+                    liste = liste.child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(12.))
+                            .px(px(16.))
+                            .py(px(11.))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .flex()
+                                    .flex_col()
+                                    .child(div().text_color(th().texte_fort).child(nom.to_string()))
+                                    .child(div().text_size(px(12.)).text_color(th().texte_pale).child(format!("{} {detail}", t("jumelé le")))),
+                            )
+                            .child(bouton_texte(SharedString::from(format!("revoquer-{i}")), t("Révoquer"), DANGER).on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.revoquer(nom_r.clone(), cx);
+                                    cx.notify();
+                                },
+                            ))),
+                    );
+                }
+                carte = carte.child(titre("Appareils jumelés")).child(liste);
+                if !adresse.is_empty() {
+                    carte = carte.child(div().pt(px(10.)).text_size(px(12.)).text_color(th().texte_pale).child(format!(
+                        "{} {adresse}. {}",
+                        t("Cette interface passe par le serveur local"),
+                        t("Connectez les services dans Comptes.")
+                    )));
+                }
+            }
+            "client" => {
+                let adresse = self.reglages.serveur.as_ref().map(|c| c.adresse.clone()).unwrap_or_default();
+                carte = carte.child(titre("Votre serveur")).child(
+                    groupe().child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.))
+                            .p(px(16.))
+                            .child(div().text_color(th().texte_fort).child(adresse))
+                            .child(div().text_size(px(12.)).text_color(th().texte_pale).child(t(
+                                "Pour changer de serveur, choisissez « Sur cet appareil », puis jumelez de nouveau.",
+                            ))),
+                    ),
+                );
+            }
+            _ => {
+                let mut boite = div().flex().flex_col().gap(px(10.)).p(px(16.));
+                if let Some((adresse, _, v)) = &self.verif_client {
+                    boite = boite
+                        .child(div().text_size(px(13.)).text_color(th().texte).child(format!(
+                            "{} {adresse} {}",
+                            t("Le serveur"),
+                            t("affiche-t-il ce code de vérification ?")
+                        )))
+                        .child(div().text_size(px(28.)).font_weight(FontWeight::BOLD).text_color(th().texte_fort).child(format!(
+                            "{} {}",
+                            &v.code_verification[..3.min(v.code_verification.len())],
+                            &v.code_verification[3.min(v.code_verification.len())..]
+                        )))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_row()
+                                .gap(px(10.))
+                                .child(bouton_texte("srv-oui", t("Oui, jumeler"), ACCENT).on_click(cx.listener(|this, _, _, cx| {
+                                    this.jumeler_client(cx);
+                                    cx.notify();
+                                })))
+                                .child(bouton_texte("srv-non", t("Non, annuler"), DANGER).on_click(cx.listener(|this, _, _, cx| {
+                                    this.verif_client = None;
+                                    this.erreur = Some(t("Jumelage annulé : les codes ne correspondaient pas.").into());
+                                    cx.notify();
+                                }))),
+                        );
+                } else {
+                    boite = boite
+                        .child(div().text_size(px(13.)).text_color(th().texte).child(t(
+                            "Sur le serveur : Réglages > Serveur Jasette > Jumeler un appareil. Entrez ici son adresse et le code affiché.",
+                        )))
+                        .child(champ_serveur(&self.adresse_serveur))
+                        .child(champ_serveur(&self.code_serveur))
+                        .child(bouton_texte("srv-continuer", t("Continuer"), ACCENT).on_click(cx.listener(|this, _, _, cx| {
+                            this.verifier_client(cx);
+                            cx.notify();
+                        })));
+                }
+                carte = carte.child(titre("Utiliser mon serveur Jasette")).child(groupe().child(boite));
+            }
+        }
+        if let Some(e) = &self.erreur {
+            carte = carte.child(div().pt(px(12.)).text_size(px(13.)).text_color(c(DANGER)).child(e.clone()));
+        }
+        carte.into_any_element()
     }
 
     /// La rangée d'un compte Meta (Messenger ou Instagram) dans « Comptes ».
@@ -6096,6 +6664,24 @@ fn statut(s: &str) -> &'static str {
 }
 
 fn main() {
+    // Sans fenêtre : faire de cette machine le serveur Jasette (comme le
+    // bouton des réglages), pour une installation à distance.
+    if std::env::args().any(|a| a == "--devenir-serveur") {
+        match installer_serveur() {
+            Ok(cfg) => {
+                let mut r = Reglages::charger();
+                r.serveur = Some(cfg);
+                r.mode_serveur = "serveur".into();
+                r.garder();
+                println!("Cette machine est le serveur Jasette (port {}).", pont::PORT_PAR_DEFAUT);
+            }
+            Err(e) => {
+                eprintln!("jasette : {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     gpui_platform::application().with_assets(gpui_kit_assets::AllAssets).run(|cx: &mut App| {
         if let Err(e) = cx
             .text_system()

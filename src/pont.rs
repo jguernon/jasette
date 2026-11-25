@@ -36,7 +36,7 @@ enum Genre {
 
 /// La variable d'environnement `var`, sinon `nom` à côté de l'exécutable,
 /// sinon dans `.cache/bin` du projet.
-fn chemin(nom: &str, var: &str) -> Option<PathBuf> {
+pub(crate) fn chemin(nom: &str, var: &str) -> Option<PathBuf> {
     if let Some(p) = std::env::var_os(var) {
         return Some(PathBuf::from(p));
     }
