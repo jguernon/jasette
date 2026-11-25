@@ -24,6 +24,7 @@ pub mod distant;
 pub use distant::{ConfigServeur, PORT_PAR_DEFAUT, Verification, code_verification, jumeler, verifier_serveur};
 pub use distant::{CopieMarques, Marques, NouvelleMarques, SuiviMarques};
 pub use distant::{EtatMcp, commande_mcp, hote_de};
+pub use distant::apercu_lien;
 
 pub struct Pont {
     genre: Genre,

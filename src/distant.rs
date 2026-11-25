@@ -712,7 +712,7 @@ impl Connexion {
                 Some(n) => verrou(&self.marques).push(n),
                 None => eprintln!("jasette : marques illisibles du serveur"),
             }
-        } else if let Some(r) = ["fichier", "depose", "mcp"]
+        } else if let Some(r) = ["fichier", "depose", "mcp", "apercu"]
             .into_iter()
             .find(|k| v.get(*k).is_some())
             .and_then(|k| v.get_mut(k).map(Value::take))
@@ -973,6 +973,40 @@ pub fn commande_mcp(config: &ConfigServeur, action: &str, envoi: Option<bool>) -
         return Err("Le serveur Jasette ne répond pas. S'il est d'une version sans connexion MCP, mettez-le à jour.");
     }
     Ok(e)
+}
+
+/// L'aperçu d'un lien, demandé au serveur Jasette (PROTOCOLE.md, §5.9) sur
+/// la connexion déjà ouverte : `Ok(Some(réponse))` (son `image` déjà
+/// téléchargée ici), `Ok(None)` si le serveur n'en a pas fait, `Err` s'il
+/// ne répond pas (pas de connexion, ou serveur d'avant les aperçus).
+/// Bloquant (12 s au plus) : hors du fil de l'interface.
+pub fn apercu_lien(config: &ConfigServeur, url: &str) -> Result<Option<Value>, ()> {
+    let cx = {
+        let liste = verrou(&CONNEXIONS);
+        liste
+            .iter()
+            .filter_map(Weak::upgrade)
+            .find(|c| c.config.adresse == config.adresse && c.config.jeton == config.jeton && !c.arret.load(Ordering::SeqCst))
+    };
+    let cx = cx.ok_or(())?;
+    let (id, rx) = cx.attendre();
+    let r = if cx.envoyer_direct(&json!({"apercu": {"id": id, "url": url}}).to_string()) {
+        rx.recv_timeout(Duration::from_secs(12)).map_err(|_| ())
+    } else {
+        Err(())
+    };
+    verrou(&cx.attentes).remove(&id);
+    let mut v = r?;
+    if v.get("erreur").is_some() {
+        return Ok(None);
+    }
+    if let Some(Value::String(image)) = v.get_mut("image") {
+        match image.starts_with('/').then(|| cx.telecharger(image)).flatten() {
+            Some(local) => *image = local.to_string_lossy().into_owned(),
+            None => image.clear(),
+        }
+    }
+    Ok(Some(v))
 }
 
 // ---------------------------------------------------------------------------

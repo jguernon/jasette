@@ -12,6 +12,7 @@
 //! plat à la Beeper (aplats gris, fil noir), le défaut ; et « Verre », le look
 //! liquid glass du skill stageshow (fond pastel à halos, verre translucide).
 
+mod apercu;
 mod cache;
 mod pont;
 mod prive;
@@ -156,13 +157,26 @@ fn texte_surligne(
     gras: Option<FontWeight>,
     plage: Option<(Range<usize>, Hsla)>,
 ) -> gpui::StyledText {
+    texte_liens(s, couleur, gras, plage, &[], couleur)
+}
+
+/// Comme `texte_surligne`, et les liens (plages en octets de `s`) soulignés,
+/// de la couleur `couleur_lien`.
+fn texte_liens(
+    s: impl Into<SharedString>,
+    couleur: Hsla,
+    gras: Option<FontWeight>,
+    plage: Option<(Range<usize>, Hsla)>,
+    liens: &[Range<usize>],
+    couleur_lien: Hsla,
+) -> gpui::StyledText {
     let s: SharedString = s.into();
     let mut runs = Vec::new();
     let mut debut = 0;
-    // Chaque morceau : (emoji ?, surligné ?).
-    let mut courant: Option<(bool, bool)> = None;
+    // Chaque morceau : (emoji ?, surligné ?, lien ?).
+    let mut courant: Option<(bool, bool, bool)> = None;
     let fond = plage.as_ref().map(|(_, f)| *f);
-    let run = |len: usize, (emoji, marque): (bool, bool)| {
+    let run = |len: usize, (emoji, marque, lien): (bool, bool, bool)| {
         let mut f = gpui::font(if emoji { POLICE_EMOJI } else { police() });
         if let Some(g) = gras {
             f.weight = g;
@@ -170,25 +184,28 @@ fn texte_surligne(
         if marque {
             f.weight = FontWeight::BOLD;
         }
+        let base = if lien { couleur_lien } else { couleur };
         let (color, background_color) = match (marque, fond) {
-            (true, Some(f)) => (if th().ega { c(EGA_NOIR) } else { couleur }, Some(f)),
-            _ => (couleur, None),
+            (true, Some(f)) => (if th().ega { c(EGA_NOIR) } else { base }, Some(f)),
+            _ => (base, None),
         };
-        gpui::TextRun { len, font: f, color, background_color, underline: None, strikethrough: None }
+        let underline = lien.then(|| gpui::UnderlineStyle { thickness: px(1.), color: Some(color), wavy: false });
+        gpui::TextRun { len, font: f, color, background_color, underline, strikethrough: None }
     };
     for (i, ch) in s.char_indices() {
         // Un joint ou un sélecteur garde la police de ce qui précède.
         let prec = courant.map(|c| c.0);
         let e = if ch == '\u{200D}' || ch == '\u{FE0F}' { prec.unwrap_or(true) } else { est_emoji(ch) };
         let m = plage.as_ref().is_some_and(|(r, _)| r.contains(&i));
+        let l = liens.iter().any(|r| r.contains(&i));
         match courant {
-            Some(p) if p != (e, m) => {
+            Some(p) if p != (e, m, l) => {
                 runs.push(run(i - debut, p));
                 debut = i;
             }
             _ => {}
         }
-        courant = Some((e, m));
+        courant = Some((e, m, l));
     }
     if let Some(p) = courant {
         runs.push(run(s.len() - debut, p));
@@ -1183,6 +1200,9 @@ struct Msg {
     /// Groupes : qui a lu ce message (si le pont le sait).
     #[serde(default)]
     read_by: Vec<String>,
+    /// L'aperçu du lien fourni par le service (PROTOCOLE.md, §5.9).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    link_preview: Option<apercu::Apercu>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1340,6 +1360,10 @@ struct Reglages {
     /// La grosseur du texte des messages, relative au texte normal (1 = normal).
     #[serde(default = "un")]
     taille_messages: f32,
+    /// « Aperçus des liens » : Jasette va chercher l'aperçu d'une adresse (par
+    /// le serveur Jasette, sinon elle-même). Ceux du service restent affichés.
+    #[serde(default = "vrai")]
+    apercus_liens: bool,
     /// « Utiliser les photos de mes contacts » (les contacts du téléphone, par Google Messages).
     #[serde(default = "vrai")]
     photos_contacts: bool,
@@ -1434,6 +1458,7 @@ impl Default for Reglages {
             marques_cache: HashMap::new(),
             heures_messages: false,
             taille_messages: 1.,
+            apercus_liens: true,
             photos_contacts: true,
             photos_contacts_meta: false,
             marques_version: 0,
@@ -1849,6 +1874,14 @@ struct Jasette {
     /// Où chaque vocal a été mis en pause.
     pauses: HashMap<String, f32>,
     ondes_pretes: Arc<Mutex<Vec<(String, Vec<f32>, f32)>>>,
+    /// Les aperçus de liens faits par Jasette (adresse → aperçu ; None : en
+    /// cours, ou rien à montrer), les images `image_url` des services, et les
+    /// recherches en cours.
+    apercus: HashMap<String, Option<apercu::Apercu>>,
+    images_apercu: HashMap<String, Option<PathBuf>>,
+    travaux_apercus: Arc<apercu::Travaux>,
+    /// Ce que `demander_apercus` a vu la dernière fois (rien à refaire si rien n'a bougé).
+    apercus_vus: Option<(String, usize, String, bool)>,
     // Pièces jointes : téléchargées (id → fichier), demandées, en échec, à ouvrir dès l'arrivée.
     medias: HashMap<String, PathBuf>,
     demandes: HashSet<String>,
@@ -2516,6 +2549,18 @@ impl Jasette {
                             this.ondes.insert(id, (barres, duree));
                             change = true;
                         }
+                        let apercus: Vec<_> = this.travaux_apercus.prets.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
+                        for a in apercus {
+                            match a {
+                                apercu::Pret::Page(u, a) => {
+                                    this.apercus.insert(u, a);
+                                }
+                                apercu::Pret::Image(u, p) => {
+                                    this.images_apercu.insert(u, p);
+                                }
+                            }
+                            change = true;
+                        }
                         let lignes: Vec<Value> = this.pont.as_ref().map(|p| p.recevoir()).unwrap_or_default();
                         for l in lignes {
                             this.cache_sale |= touche_cache(&l);
@@ -2605,6 +2650,7 @@ impl Jasette {
                             change = true;
                         }
                         if change {
+                            this.demander_apercus();
                             cx.notify();
                         }
                     })
@@ -2696,6 +2742,10 @@ impl Jasette {
             ondes_demandees: HashSet::new(),
             pauses: HashMap::new(),
             ondes_pretes: Arc::new(Mutex::new(Vec::new())),
+            apercus: HashMap::new(),
+            images_apercu: HashMap::new(),
+            travaux_apercus: Arc::new(apercu::Travaux::default()),
+            apercus_vus: None,
             medias: cache.medias,
             demandes: HashSet::new(),
             echecs: HashSet::new(),
@@ -4175,6 +4225,7 @@ impl Jasette {
             attachments: pieces,
             reactions: Vec::new(),
             read_by: Vec::new(),
+            link_preview: None,
         });
         self.descendre = true;
         tmp
@@ -6237,8 +6288,7 @@ impl Jasette {
                 .child(div().min_w(px(0.)).text_size(gpui::rems(self.reglages.taille_messages)).child(if flou {
                     m.text.clone().into_any_element()
                 } else {
-                    texte_surligne(m.text.clone(), if m.from_me { blanc(1.) } else { th().texte_fort }, None, plage)
-                        .into_any_element()
+                    self.texte_bulle(m, plage)
                 }))
                 .when(pied_dedans, |d| {
                     d.child(
@@ -6256,6 +6306,10 @@ impl Jasette {
                     )
                 });
                 ligne = ligne.child(self.bulle_reactive(m, bulle.into_any_element(), flou, cx));
+                // L'aperçu du lien, sous la bulle, dès qu'il est là.
+                if !flou && let Some(carte) = self.carte_apercu(m) {
+                    ligne = ligne.child(carte);
+                }
             } else if !flou && (!m.reactions.is_empty() || self.barre_reactions.as_deref() == Some(m.id.as_str())) {
                 // Un message sans texte (photo, vocal) : la pastille sous la pièce.
                 ligne = ligne.child(self.bulle_reactive(m, div().h(px(2.)).w(px(60.)).into_any_element(), flou, cx));
@@ -6357,6 +6411,177 @@ impl Jasette {
     /// Une bulle qu'on peut faire réagir : appui long, clic droit ou bouton 🙂
     /// au survol ouvrent la barre des réactions rapides ; la pastille des
     /// réactions déjà là chevauche le bas de la bulle, du côté de l'expéditeur.
+    /// Le texte d'une bulle : emojis, passage trouvé surligné, et liens
+    /// soulignés qu'un clic ouvre dans le navigateur.
+    fn texte_bulle(&self, m: &Msg, plage: Option<(Range<usize>, Hsla)>) -> AnyElement {
+        let couleur = if m.from_me { blanc(1.) } else { th().texte_fort };
+        let liens = if m.text.contains("://") || m.text.to_ascii_lowercase().contains("www.") {
+            apercu::liens(&m.text)
+        } else {
+            Vec::new()
+        };
+        if liens.is_empty() {
+            return texte_surligne(m.text.clone(), couleur, None, plage).into_any_element();
+        }
+        // Sur ma bulle (accent), le blanc souligné ; sur la reçue, l'accent lisible du thème.
+        let couleur_lien = if m.from_me {
+            blanc(1.)
+        } else if th().ega {
+            c(EGA_CYAN_VIF)
+        } else {
+            ton(th().accent, c(0x6b9bff))
+        };
+        let plages: Vec<Range<usize>> = liens.iter().map(|(r, _)| r.clone()).collect();
+        let urls: Vec<String> = liens.into_iter().map(|(_, u)| u).collect();
+        gpui::InteractiveText::new(
+            SharedString::from(format!("t-{}", m.id)),
+            texte_liens(m.text.clone(), couleur, None, plage, &plages, couleur_lien),
+        )
+        .on_click(plages, move |i, _, _| {
+            if let Some(u) = urls.get(i) {
+                ouvrir_adresse(u);
+            }
+        })
+        .into_any_element()
+    }
+
+    /// Les aperçus à chercher pour la conversation ouverte : la vignette des
+    /// aperçus du service (pièce à demander au pont, ou image_url), et, si le
+    /// réglage le permet, l'aperçu de la première adresse des autres messages.
+    fn demander_apercus(&mut self) {
+        let Some(id) = self.choisie.clone() else { return };
+        let Some(liste) = self.messages.get(&id) else { return };
+        let vu = (id, liste.len(), liste.last().map(|m| format!("{}{}", m.id, m.link_preview.is_some())).unwrap_or_default(), self.reglages.apercus_liens);
+        if self.apercus_vus.as_ref() == Some(&vu) {
+            return;
+        }
+        self.apercus_vus = Some(vu);
+        let (mut pieces, mut taches) = (Vec::new(), Vec::new());
+        // Les plus récents d'abord.
+        for m in liste.iter().rev().take(80) {
+            if let Some(lp) = &m.link_preview {
+                if !lp.image.is_empty() {
+                    continue;
+                }
+                if let Some(p) = lp.image_media.as_ref().and_then(|v| serde_json::from_value::<Piece>(v.clone()).ok()) {
+                    pieces.push(p);
+                } else if !lp.image_url.is_empty() && !self.images_apercu.contains_key(&lp.image_url) {
+                    self.images_apercu.insert(lp.image_url.clone(), None);
+                    taches.push(apercu::Tache::Image(lp.image_url.clone()));
+                }
+            } else if self.reglages.apercus_liens
+                && let Some(u) = apercu::premier_lien(&m.text)
+                && !self.apercus.contains_key(&u)
+            {
+                self.apercus.insert(u.clone(), None);
+                taches.push(apercu::Tache::Page(u));
+            }
+        }
+        for p in &pieces {
+            self.telecharger(p);
+        }
+        let serveur = serveur_actif(&self.reglages).cloned();
+        let dossier = dossier_medias().join("apercus");
+        for t in taches {
+            self.travaux_apercus.lancer(t, serveur.clone(), dossier.clone());
+        }
+    }
+
+    /// La carte d'aperçu d'un lien (PROTOCOLE.md, §5.9) : celle du service,
+    /// sinon celle que Jasette a faite (si le réglage le permet). Image en
+    /// haut (environ 16:9), titre en gras, description, domaine ; un clic
+    /// ouvre le lien.
+    fn carte_apercu(&self, m: &Msg) -> Option<AnyElement> {
+        let (a, image) = if let Some(lp) = &m.link_preview {
+            let image = if !lp.image.is_empty() {
+                Some(PathBuf::from(&lp.image))
+            } else if let Some(mid) = lp.image_media.as_ref().and_then(|v| v.get("media_id")).and_then(Value::as_str) {
+                self.medias.get(mid).cloned()
+            } else if !lp.image_url.is_empty() {
+                self.images_apercu.get(&lp.image_url).cloned().flatten()
+            } else {
+                None
+            };
+            (lp.clone(), image)
+        } else {
+            if !self.reglages.apercus_liens {
+                return None;
+            }
+            let a = self.apercus.get(&apercu::premier_lien(&m.text)?)?.clone()?;
+            let image = (!a.image.is_empty()).then(|| PathBuf::from(&a.image));
+            (a, image)
+        };
+        if a.title.is_empty() && a.description.is_empty() {
+            return None;
+        }
+        const LARGEUR: f32 = 300.;
+        let ega = th().ega;
+        let url = a.url.clone();
+        let domaine = a.domaine();
+        let bord = if ega { c(EGA_GRIS_CLAIR) } else { ton(blanc(0.9), c(0x3a3a3c)) };
+        let mut carte = div()
+            .id(SharedString::from(format!("apercu-{}", m.id)))
+            .w(px(LARGEUR))
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .rounded(rayon(16.))
+            .bg(th().surface)
+            .border_1()
+            .border_color(bord)
+            .when(!ega, |d| d.shadow(ombre_flottante()))
+            .cursor_pointer()
+            .hover(|s| s.bg(th().survol))
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                ouvrir_adresse(&url);
+            });
+        if let Some(image) = image.filter(|p| p.is_file()) {
+            carte = carte.child(
+                div()
+                    .w_full()
+                    .h(px((LARGEUR * 9. / 16.).round()))
+                    .flex_none()
+                    .overflow_hidden()
+                    .when(ega, |d| d.border_b_1().border_color(bord))
+                    .child(img(image).size_full().object_fit(ObjectFit::Cover)),
+            );
+        }
+        let mut texte = div().flex().flex_col().gap(px(3.)).px(px(12.)).py(px(9.));
+        if !a.title.is_empty() {
+            texte = texte.child(
+                div()
+                    .text_size(px(14.))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(th().texte_fort)
+                    .line_clamp(2)
+                    .child(texte_emoji(a.title.clone(), th().texte_fort, Some(FontWeight::BOLD))),
+            );
+        }
+        if !a.description.is_empty() {
+            texte = texte.child(
+                div()
+                    .text_size(px(12.5))
+                    .text_color(th().texte)
+                    .line_clamp(2)
+                    .child(texte_emoji(a.description.clone(), th().texte, None)),
+            );
+        }
+        let pied = if a.site.is_empty() || a.site.eq_ignore_ascii_case(&domaine) { domaine } else { format!("{} · {domaine}", a.site) };
+        texte = texte.child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(5.))
+                .text_size(px(11.5))
+                .text_color(th().texte_pale)
+                .child(icone("external-link", 11., th().texte_pale))
+                .child(div().min_w(px(0.)).truncate().child(pied)),
+        );
+        Some(carte.child(texte).into_any_element())
+    }
+
     fn bulle_reactive(&self, m: &Msg, bulle: AnyElement, flou: bool, cx: &mut Context<Self>) -> AnyElement {
         let mut boite = div().relative().flex_none().max_w(px(540.)).child(bulle);
         if flou {
@@ -8015,6 +8240,20 @@ impl Jasette {
                             this.reglages.heures_messages = !this.reglages.heures_messages;
                             this.reglages.garder();
                             this.details_heures = this.reglages.heures_messages;
+                            cx.notify();
+                        }),
+                    )))
+                    .child(div().h(px(14.)))
+                    .child(groupe().child(ligne_interrupteur(
+                        "a-apercus-liens",
+                        t("Aperçus des liens"),
+                        t("Jasette va chercher l'image et le titre des liens (par le serveur Jasette s'il y en a un). Les aperçus envoyés par le service restent affichés."),
+                        self.reglages.apercus_liens,
+                        cx.listener(|this, _, _, cx| {
+                            this.reglages.apercus_liens = !this.reglages.apercus_liens;
+                            this.reglages.garder();
+                            this.apercus_vus = None;
+                            this.demander_apercus();
                             cx.notify();
                         }),
                     )))
@@ -10270,6 +10509,10 @@ fn t(fr: &'static str) -> &'static str {
         "Aperçu du message" => "Message preview",
         "Aplats gris et fil noir, bulles plates." => "Flat grays, black thread, flat bubbles.",
         "Apparence" => "Appearance",
+        "Aperçus des liens" => "Link previews",
+        "Jasette va chercher l'image et le titre des liens (par le serveur Jasette s'il y en a un). Les aperçus envoyés par le service restent affichés." => {
+            "Jasette fetches the image and title of links (through the Jasette server if there is one). Previews sent by the service are always shown."
+        }
         "Aussi pour les autres services (par le nom)" => "Also for the other services (by name)",
         "La photo d'un contact du téléphone remplace celle de Google Messages, par le numéro." => {
             "A phone contact's photo replaces the Google Messages one, matched by number."
