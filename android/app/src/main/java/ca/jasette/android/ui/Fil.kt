@@ -289,9 +289,18 @@ fun Fil(
                 )
             }
         } },
-        // La saisie flotte aussi, floutée ; en EGA, l'aplat du fil (les messages passent dessous).
+        // La saisie flotte sur les messages, comme au bureau : pas de bande, seulement
+        // un dégradé vers le fond du fil sous les pastilles (les bulles s'estompent
+        // au-dessus par le masque du fil). En EGA, l'aplat du fil.
         bottomBar = {
-            Box(Modifier.barreFloutee(SELECTION_FIL, opaque = P.fil)) {
+            Box(
+                if (P.ega) Modifier.background(P.fil)
+                else Modifier.background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        0f to Color.Transparent, 0.5f to P.fil.copy(alpha = 0.85f), 1f to P.fil,
+                    ),
+                ),
+            ) {
                 Saisie(id, actif = Depot.pret(Service.de(id)) && conv?.readOnly != true)
             }
         },
