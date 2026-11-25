@@ -96,7 +96,8 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
                 Depot.emoji?.let { e -> BandeauEmoji(e) }
                 if (Depot.besoinNip) Nip()
             } else {
-                for (s in Service.entries) {
+                // Sur cet appareil : seulement les ponts embarqués (pas WhatsApp, Signal ni X).
+                for (s in Service.LOCAUX) {
                     Carte(s) {
                         val etat = Depot.etat(s)
                         if (etat.associe || etat == Etat.ASSOCIATION) {
@@ -109,6 +110,7 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
                                     OutlinedButton(shape = formeBouton, onClick = { connecter(s, "facebook") }) { Text(t("Avec Facebook")) }
                                 }
                                 Service.INSTAGRAM -> BoutonAccent(t("Se connecter")) { connecter(s, "instagram") }
+                                else -> {}
                             }
                         }
                     }
@@ -183,8 +185,10 @@ private fun CarteServeur(adresse: String) {
         }
         // Écran étroit (Fold plié) : le service sur une ligne, l'état et le compte sur la suivante.
         val etroit = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 600
-        for (s in Service.entries) {
+        for (s in Depot.services) {
             val etat = Depot.etat(s)
+            // WhatsApp, Signal et X s'associent depuis Jasette sur l'ordinateur (QR, code, cookies).
+            val aConnecter = s.serveurSeulement && (etat == Etat.NON_ASSOCIE || etat == Etat.ASSOCIATION)
             Row(verticalAlignment = if (etroit) Alignment.Top else Alignment.CenterVertically) {
                 androidx.compose.foundation.layout.Box(
                     Modifier.padding(top = if (etroit) 6.dp else 0.dp).size(8.dp).clip(formeRonde).background(couleurEtat(etat)),
@@ -195,9 +199,13 @@ private fun CarteServeur(adresse: String) {
                     Column {
                         Text(s.court, color = P.texteFort, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                         Text(listOfNotNull(etat.texte, nom).joinToString(" · "), color = P.texte, fontSize = 13.sp)
+                        if (aConnecter) Text(t("Connecte-le depuis Jasette sur ton ordinateur"), color = P.textePale, fontSize = 12.sp)
                     }
                 } else {
-                    Text("${s.court}${t(" : ")}${etat.texte}${nom?.let { " · $it" } ?: ""}", color = P.texte, fontSize = 13.sp)
+                    Column {
+                        Text("${s.court}${t(" : ")}${etat.texte}${nom?.let { " · $it" } ?: ""}", color = P.texte, fontSize = 13.sp)
+                        if (aConnecter) Text(t("Connecte-le depuis Jasette sur ton ordinateur"), color = P.textePale, fontSize = 12.sp)
+                    }
                 }
             }
         }

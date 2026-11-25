@@ -54,6 +54,7 @@ import ca.jasette.android.Depot
 import ca.jasette.android.Gestes
 import ca.jasette.android.peutArchiver
 import ca.jasette.android.peutSupprimer
+import ca.jasette.android.refusArchiverSupprimer
 import ca.jasette.android.t
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -129,7 +130,7 @@ fun RangeeGlissable(
             }
             ActionGeste.ARCHIVER -> {
                 if (!c.peutArchiver) {
-                    annoncer(t("Archiver et supprimer : bientôt pour Messenger."), null)
+                    annoncer(c.refusArchiverSupprimer ?: "", null)
                 } else {
                     val deja = archivee(c)
                     Depot.archiver(c.id, !deja)
@@ -144,7 +145,7 @@ fun RangeeGlissable(
             }
             ActionGeste.SUPPRIMER -> {
                 if (!c.peutSupprimer) {
-                    annoncer(t("Archiver et supprimer : bientôt pour Messenger."), null)
+                    annoncer(c.refusArchiverSupprimer ?: "", null)
                 } else {
                     confirmer = true
                 }

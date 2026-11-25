@@ -70,6 +70,9 @@ import ca.jasette.android.Depot
 import ca.jasette.android.Marques
 import ca.jasette.android.Service
 import ca.jasette.android.t
+import ca.jasette.android.peutArchiver
+import ca.jasette.android.peutSupprimer
+import ca.jasette.android.refusArchiverSupprimer
 
 /**
  * Une action à faire dans le fil qui s'ouvre, demandée par le menu d'une
@@ -104,7 +107,7 @@ fun nonLus(v: Vue): Int = when (v) {
 }
 
 /** Les services connectés, dans l'ordre du rail du bureau. */
-fun servicesConnectes(): List<Service> = Service.entries.filter { Depot.etat(it).associe }
+fun servicesConnectes(): List<Service> = Depot.services.filter { Depot.etat(it).associe }
 
 /** Une icône avec la pastille du nombre de non-lus. */
 @Composable
@@ -400,8 +403,8 @@ fun Rangee(
 /**
  * Le menu d'une conversation (`menu_conversation` du bureau), le même dans la
  * liste (appui long) et dans l'en-tête du fil (« … ») : Head, favoris,
- * épingler, médias, archiver et supprimer (ces deux-là pour Google seulement,
- * comme au bureau ; supprimer demande une confirmation), puis rechercher.
+ * épingler, médias, archiver et supprimer (selon `peutArchiver` et
+ * `peutSupprimer` ; supprimer demande une confirmation), puis rechercher.
  */
 @Composable
 fun MenuConversation(
@@ -413,7 +416,8 @@ fun MenuConversation(
     rechercher: () -> Unit,
 ) {
     var confirmer by remember { mutableStateOf(false) }
-    val google = c.service == Service.GOOGLE
+    val archivable = c.peutArchiver
+    val supprimable = c.peutSupprimer
     val archivee = c.archived || Depot.archives.any { it.id == c.id }
     val epinglee = Marques.estEpinglee(c.id)
     val favori = Marques.estFavori(c.id)
@@ -443,19 +447,19 @@ fun MenuConversation(
         Item(
             if (archivee) t("Désarchiver") else t("Archiver"),
             if (archivee) Icones.desarchiver else Icones.archive,
-            actif = google,
+            actif = archivable,
         ) {
             Depot.archiver(c.id, !archivee)
             retiree(c.id)
         }
-        if (!google) {
+        c.refusArchiverSupprimer?.let { refus ->
             Text(
-                t("Archiver et supprimer : bientôt pour Messenger."), color = P.textePale, fontSize = 12.sp,
+                refus, color = P.textePale, fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp).width(220.dp),
             )
         }
         HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = P.traitFin)
-        Item(t("Supprimer la conversation"), Icons.Filled.Delete, couleur = P.danger, actif = google) { confirmer = true }
+        Item(t("Supprimer la conversation"), Icons.Filled.Delete, couleur = P.danger, actif = supprimable) { confirmer = true }
         HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = P.traitFin)
         Item(t("Rechercher"), Icons.Filled.Search, action = rechercher)
     }

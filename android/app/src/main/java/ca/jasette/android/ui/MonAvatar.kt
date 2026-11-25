@@ -50,12 +50,14 @@ private fun photoMoi(): String? = when (Marques.avatarSource) {
     "messenger" -> Depot.avatarsMoi[Service.MESSENGER]
     "instagram" -> Depot.avatarsMoi[Service.INSTAGRAM]
     "fichier" -> Marques.avatarFichier?.takeIf { File(it).isFile }
-    else -> null
+    // WhatsApp, Signal, X (choisis par défaut quand leur photo arrive la première).
+    else -> Service.deCle(Marques.avatarSource)?.let { Depot.avatarsMoi[it] }
 }
 
 /** Mon initiale : d'après le nom d'un compte connecté. */
 private fun initialeMoi(): String? =
-    listOf(Service.MESSENGER, Service.INSTAGRAM, Service.GOOGLE).firstNotNullOfOrNull { Depot.noms[it] }
+    (listOf(Service.MESSENGER, Service.INSTAGRAM, Service.GOOGLE) + Service.entries.filter { it.serveurSeulement })
+        .firstNotNullOfOrNull { Depot.noms[it] }
         ?.firstOrNull { it.isLetter() }?.uppercase()
 
 @Composable
@@ -66,7 +68,7 @@ fun AvatarMoi(taille: Dp, source: String = Marques.avatarSource) {
         "messenger" -> Depot.avatarsMoi[Service.MESSENGER]
         "instagram" -> Depot.avatarsMoi[Service.INSTAGRAM]
         "fichier" -> Marques.avatarFichier?.takeIf { File(it).isFile }
-        else -> null
+        else -> Service.deCle(source)?.let { Depot.avatarsMoi[it] }
     }
     val rond = Modifier.size(taille).clip(formeRonde)
     if (photo != null) {

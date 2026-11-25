@@ -66,6 +66,15 @@ object Depot {
 
     /** L'état de chaque compte. */
     val etats = mutableStateMapOf<Service, Etat>().apply { Service.entries.forEach { put(it, Etat.DEMARRAGE) } }
+    /**
+     * Les services à montrer, dans l'ordre : sur cet appareil, Google, Messenger
+     * et Instagram ; en mode client, ceux que le serveur annonce dans `auth ok`
+     * (les trois premiers tant qu'il n'a pas répondu). Un service absent d'ici
+     * n'apparaît nulle part (réglages, filtres, nouveau message).
+     */
+    var services by mutableStateOf(Service.LOCAUX)
+        private set
+
     /** Le nom du compte : courriel Google, nom Messenger ou Instagram. */
     val noms = mutableStateMapOf<Service, String>()
     /** Ma photo dans chaque service (`avatar_moi`). */
@@ -116,7 +125,10 @@ object Depot {
         if (cfg != null) {
             // Les marques : le serveur est la source (Marques.recu, sur le fil principal).
             val g = generation
-            val cx = ConnexionServeur(cfg, ConnexionServeur.dossierCache(appli, cfg.adresse)) { m ->
+            val cx = ConnexionServeur(
+                cfg, ConnexionServeur.dossierCache(appli, cfg.adresse),
+                surServices = { cles -> principal.post { if (g == generation) servicesOfferts(cles) } },
+            ) { m ->
                 principal.post { if (g == generation) Marques.recu(m) }
             }
             connexion = cx
@@ -124,7 +136,32 @@ object Depot {
         } else {
             Marques.brancher(null, null)
         }
-        Service.entries.forEach { lancer(it) }
+        services = Service.LOCAUX
+        // WhatsApp, Signal et X attendent que le serveur les annonce (servicesOfferts).
+        Service.LOCAUX.forEach { lancer(it) }
+    }
+
+    /**
+     * Le serveur vient d'annoncer ses services (`auth ok`, à chaque connexion) :
+     * WhatsApp, Signal et X s'abonnent s'ils sont offerts, et disparaissent
+     * (conversations comprises) s'ils ne le sont plus.
+     */
+    private fun servicesOfferts(cles: List<String>) {
+        if (!enMarche || connexion == null) return
+        val offerts = Service.entries.filter { it.cle in cles }
+        for (s in Service.entries.filter { it.serveurSeulement }) {
+            if (s in offerts) {
+                if (!ponts.containsKey(s)) lancer(s)
+            } else {
+                ponts.remove(s)?.arreter()
+                oublier(s)
+                etats[s] = Etat.DEMARRAGE
+                noms.remove(s)
+                avatarsMoi.remove(s)
+            }
+        }
+        // Les trois services de toujours restent abonnés (le serveur dit lui-même s'il ne les offre pas).
+        services = if (offerts.isEmpty()) Service.LOCAUX else offerts
     }
 
     fun etat(service: Service): Etat = etats[service] ?: Etat.DEMARRAGE
@@ -169,7 +206,9 @@ object Depot {
         reactionsAvant.clear()
         demandes.clear()
         Service.entries.forEach { etats[it] = Etat.DEMARRAGE }
+        services = Service.LOCAUX
         noms.clear()
+        avatarsMoi.clear()
         emoji = null
         besoinNip = false
         erreurNip = null
@@ -196,14 +235,17 @@ object Depot {
     /**
      * Lance le pont d'un service. Le pont Meta sert Messenger ou Instagram selon
      * JASETTE_META_SERVICE, chacun avec son dossier (<données>/messenger ou /instagram).
+     * WhatsApp, Signal et X : seulement sur le serveur, jamais en pont local.
      */
     private fun lancer(service: Service) {
+        if (service.serveurSeulement && connexion == null) return
         val g = generation
-        // Depuis le fil de lecture : préfixe Meta, puis le fil principal.
+        // Depuis le fil de lecture : préfixe du service, puis le fil principal.
         val recu: (JSONObject) -> Unit = { v ->
             if (service.meta) prefixerMeta(v, service)
             principal.post {
-                if (g == generation) {
+                // Un service que le serveur n'offre plus : ses dernières nouvelles sont ignorées.
+                if (g == generation && (!service.serveurSeulement || service in services)) {
                     if (service.meta) nouvelleMeta(v, service) else nouvelle(v, Service.GOOGLE)
                 }
             }
@@ -587,7 +629,7 @@ object Depot {
         if (!enMarche) return
         etats[service] = Etat.ARRETE
         principal.postDelayed({
-            if (enMarche && ponts[service]?.vivant() != true) lancer(service)
+            if (enMarche && ponts[service]?.vivant() != true && service in services) lancer(service)
         }, 5000)
     }
 
@@ -624,7 +666,7 @@ object Depot {
     fun pret(service: Service) = etat(service) == Etat.PRET
 
     /**
-     * Archive ou désarchive (Google seulement, comme au bureau), et le montre
+     * Archive ou désarchive (Google et WhatsApp, voir `peutArchiver`), et le montre
      * tout de suite ; le téléphone confirmera par une nouvelle « conversation ».
      */
     fun archiver(id: String, archiver: Boolean) {
@@ -653,7 +695,8 @@ object Depot {
 
     /**
      * « À : » a changé : Messenger et Instagram cherchent parmi les amis et
-     * contacts, Google parmi les contacts du téléphone (aussi par numéro).
+     * contacts, Google parmi les contacts du téléphone (aussi par numéro),
+     * WhatsApp et Signal parmi leurs contacts et groupes (aussi par numéro).
      */
     fun chercherContacts(texte: String) {
         val q = texte.trim()
@@ -663,10 +706,12 @@ object Depot {
         numerosContacts.clear()
         if (q.length < 2) return
         val cmd = { JSONObject().put("cmd", "search").put("text", q) }
-        if (!estNumero(q)) {
-            for (s in Service.META) if (pret(s)) commande(s, cmd())
+        val numero = estNumero(q)
+        for (s in services) {
+            if (!pret(s) || !(s.cherchePersonnes || s == Service.GOOGLE)) continue
+            if (numero && !s.chercheNumeros) continue
+            commande(s, cmd())
         }
-        if (pret(Service.GOOGLE)) commande(Service.GOOGLE, cmd())
     }
 
     /**

@@ -145,6 +145,8 @@ fun Connexion(service: Service, plateforme: String, fini: () -> Unit) {
         Service.GOOGLE -> t("Connexion à Google")
         Service.MESSENGER -> if (plateforme == "facebook") t("Connexion à Facebook") else t("Connexion à Messenger")
         Service.INSTAGRAM -> t("Connexion à Instagram")
+        // WhatsApp, Signal et X se connectent sur le serveur : jamais ici.
+        else -> service.court
     }
     Scaffold(
         containerColor = P.fond,

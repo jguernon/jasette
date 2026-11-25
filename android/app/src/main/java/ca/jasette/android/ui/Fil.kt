@@ -380,11 +380,13 @@ private fun BoutonsAppel(activite: Activity, conv: ca.jasette.android.Conv) {
             IconButton(onClick = { Appels.video(activite, conv.number) }) { Icon(Icones.camera, t("Appel vidéo")) }
             IconButton(onClick = { Appels.telephone(activite, conv.number) }) { Icon(Icons.Filled.Phone, t("Appeler")) }
         }
-        else -> {
+        Service.MESSENGER, Service.INSTAGRAM -> {
             val nom = conv.service.court
             IconButton(onClick = { Appels.ouvrirMeta(activite, conv) }) { Icon(Icones.camera, "${t("Appel vidéo dans")} $nom") }
             IconButton(onClick = { Appels.ouvrirMeta(activite, conv) }) { Icon(Icons.Filled.Phone, "${t("Appel dans")} $nom") }
         }
+        // WhatsApp, Signal et X : pas d'appel depuis Jasette.
+        else -> {}
     }
 }
 
@@ -498,14 +500,6 @@ private fun Message(
                             .padding(horizontal = 13.dp, vertical = 8.dp),
                     ) {
                         Text(surligner(m.text, surligne, courant), color = if (m.fromMe) P.surAccent else P.texteFort, fontSize = 15.sp)
-                        Row(
-                            Modifier.align(Alignment.End),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp),
-                        ) {
-                            Text(quand, color = if (m.fromMe) P.heureEnvoyee else P.heureRecue, fontSize = 11.sp)
-                            IconeCoche(c, surBulle = true)
-                        }
                     }
                 }
             }
@@ -517,10 +511,13 @@ private fun Message(
                 ) { qui = true }
             }
         }
-        // Sous les pièces seules : l'heure et la coche (toujours pour mes messages).
-        if (m.text.isEmpty() && (dernier || details || m.fromMe)) {
+        // Sous la bulle, comme au bureau : l'heure et la coche à la fin d'une
+        // suite de messages, ou partout avec « Afficher l'heure de chaque message »
+        // (toujours sous les pièces seules de mes messages).
+        if (dernier || details || echec || (m.text.isEmpty() && m.fromMe)) {
             Row(
                 Modifier.padding(horizontal = 6.dp)
+                    .padding(top = if (aReactions) 10.dp else 0.dp)
                     .let { if (echec) it.clickable(onClick = reessayer) else it },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(3.dp),

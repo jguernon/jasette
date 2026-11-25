@@ -36,11 +36,18 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-/** L'icône du service (les mêmes PNG que le bureau, assets/services). */
+/**
+ * L'icône du service : les mêmes PNG que le bureau (assets/services) pour
+ * Google, Messenger et Instagram ; des dessins vectoriels à nous pour
+ * WhatsApp, Signal et X (res/drawable/service_*.xml).
+ */
 fun iconeService(s: Service) = when (s) {
     Service.GOOGLE -> R.drawable.service_google
     Service.MESSENGER -> R.drawable.service_messenger
     Service.INSTAGRAM -> R.drawable.service_instagram
+    Service.WHATSAPP -> R.drawable.service_whatsapp
+    Service.SIGNAL -> R.drawable.service_signal
+    Service.X -> R.drawable.service_x
 }
 
 /** La forme des logos de services : un carré aux coins arrondis (30 % de la taille, comme `logo()` du bureau). */

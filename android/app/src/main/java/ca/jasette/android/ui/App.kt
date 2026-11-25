@@ -330,7 +330,7 @@ private fun Liste(
                     t("Aucun favori : ajoutez-en par un appui long sur une conversation.")
                 accueilVisible() -> null
                 source.isEmpty() -> {
-                    val connecte = Service.entries.any { Depot.etat(it).associe }
+                    val connecte = Depot.services.any { Depot.etat(it).associe }
                     if (connecte) t("Chargement des conversations…") else t("Aucun compte connecté.")
                 }
                 else -> t("Aucune conversation")
@@ -364,7 +364,7 @@ private fun Liste(
                     }
                 }
             }
-            // La recherche : aussi les personnes trouvées par Messenger et Instagram
+            // La recherche : aussi les personnes trouvées par Messenger, Instagram, WhatsApp et Signal
             // (la liste ne contient que les conversations récentes).
             if (f.length >= 2) {
                 // Les contacts du téléphone d'abord (avec leur photo), puis ceux des ponts sans doublon de numéro.
@@ -391,7 +391,7 @@ private fun Liste(
                             Depot.nouvelleConversation(s, id)
                         }
                     }
-                } else if (Service.entries.any { Depot.pret(it) } && visibles.isEmpty()) {
+                } else if (Depot.services.any { Depot.pret(it) } && visibles.isEmpty()) {
                     item { Text(t("Recherche…"), color = P.textePale, modifier = Modifier.padding(start = 16.dp, top = 8.dp)) }
                 }
             }
@@ -404,12 +404,15 @@ private fun Liste(
 
 /**
  * Le détail d'une personne trouvée : « Contact · numéro » pour un contact du
- * téléphone (Google Messages), sinon la nouvelle conversation Messenger ou Instagram.
+ * téléphone (Google Messages), sinon la nouvelle conversation dans son service.
  */
 private fun detailPersonne(s: Service, id: String): String = when (s) {
     Service.GOOGLE -> "${t("Contact")} · ${Depot.numerosContacts[id] ?: id}"
     Service.INSTAGRAM -> t("Nouvelle conversation Instagram")
     Service.MESSENGER -> t("Nouvelle conversation Messenger")
+    Service.WHATSAPP -> t("Nouvelle conversation WhatsApp")
+    Service.SIGNAL -> t("Nouvelle conversation Signal")
+    Service.X -> t("Nouvelle conversation X")
 }
 
 /**
@@ -464,8 +467,8 @@ private fun ChampFiltre(texte: String, changer: (String) -> Unit) {
 
 /**
  * Nouveau message (`suggestions()` du bureau) : « À : » propose les
- * conversations connues, les personnes trouvées par Messenger et Instagram
- * (commande `search`), et un SMS par Google Messages au numéro tapé. Chaque
+ * conversations connues, les personnes trouvées par Messenger, Instagram,
+ * WhatsApp et Signal (commande `search`), et un SMS par Google Messages au numéro tapé. Chaque
  * suggestion porte le logo de son service, pour choisir quand c'est ambigu.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -564,7 +567,7 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
                 }
                 if (existantes.isEmpty() && tel.isEmpty() && trouvees.isEmpty() && !numero) {
                     item {
-                        val cherche = q.length >= 2 && Service.entries.any { Depot.pret(it) }
+                        val cherche = q.length >= 2 && Depot.services.any { Depot.pret(it) }
                         Text(
                             if (cherche) t("Recherche…") else t("Aucun résultat"),
                             color = P.textePale, modifier = Modifier.padding(24.dp),
@@ -676,7 +679,7 @@ fun Bandeau(
 
 /** Aucun compte connecté (et tous les ponts ont dit leur état). */
 private fun aucunCompte() =
-    Service.entries.none { Depot.etat(it).associe || Depot.etat(it) == ca.jasette.android.Etat.DEMARRAGE }
+    Depot.services.none { Depot.etat(it).associe || Depot.etat(it) == ca.jasette.android.Etat.DEMARRAGE }
 
 /** L'accueil s'affiche tant qu'aucun compte n'est connecté, hors mode client. */
 private fun accueilVisible() = Depot.serveur == null && aucunCompte()
@@ -726,7 +729,7 @@ private fun Accueil(serveur: () -> Unit, connecter: (Service, String) -> Unit) {
         } else {
             Text(t("Connecte un premier service :"), color = P.texte, fontSize = 14.sp)
             Groupe {
-                for ((i, s) in Service.entries.withIndex()) {
+                for ((i, s) in Service.LOCAUX.withIndex()) {
                     if (i > 0) androidx.compose.material3.HorizontalDivider(color = P.filet)
                     Row(
                         Modifier.fillMaxWidth().clickable { connecter(s, s.cle) }.padding(horizontal = 16.dp, vertical = 12.dp),

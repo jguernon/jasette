@@ -340,6 +340,8 @@ private fun ouvrir(adresse: String, attendue: String?): Accueil {
 class ConnexionServeur(
     private val config: ConfigServeur,
     private val cache: File,
+    /** Reçoit la liste `services` de chaque `auth ok` (sur le fil de connexion). */
+    private val surServices: (List<String>) -> Unit = {},
     private val surMarques: (JSONObject?) -> Unit = {},
 ) {
     private val abonnes = ConcurrentHashMap<String, (JSONObject) -> Unit>()
@@ -533,6 +535,8 @@ class ConnexionServeur(
                 lien = l
                 ArrayList(enAttente).also { enAttente.clear() }
             }
+            // Après `lien` : un service ajouté maintenant redemande son état (« rejouer »).
+            surServices(services)
             for (svc in abonnes.keys) {
                 if (svc !in services) {
                     executer(traitement) {

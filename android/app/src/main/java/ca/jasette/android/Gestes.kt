@@ -60,6 +60,18 @@ object Gestes {
     }
 }
 
-/** Archiver et supprimer : Google Messages seulement pour l'instant (comme le menu). */
-val Conv.peutArchiver: Boolean get() = service == Service.GOOGLE
+/**
+ * Archiver : Google Messages et WhatsApp (commande `archive` de leur pont).
+ * Supprimer : Google Messages seulement. Le menu et les glissements suivent ces deux règles.
+ */
+val Conv.peutArchiver: Boolean get() = service == Service.GOOGLE || service == Service.WHATSAPP
 val Conv.peutSupprimer: Boolean get() = service == Service.GOOGLE
+
+/** Pourquoi archiver ou supprimer n'est pas offert pour cette conversation (null si tout l'est). */
+val Conv.refusArchiverSupprimer: String?
+    get() = when {
+        peutArchiver && peutSupprimer -> null
+        peutArchiver -> t("Supprimer : pas encore pour ce service.")
+        service == Service.MESSENGER || service == Service.INSTAGRAM -> t("Archiver et supprimer : bientôt pour Messenger.")
+        else -> t("Archiver et supprimer : pas encore pour ce service.")
+    }
