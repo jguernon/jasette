@@ -7,6 +7,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -108,9 +110,36 @@ fun servicesConnectes(): List<Service> = Service.entries.filter { Depot.etat(it)
 @Composable
 private fun AvecPastille(n: Int, contenu: @Composable () -> Unit) {
     BadgedBox(badge = {
-        if (n > 0) Badge(containerColor = P.accent, contentColor = P.texteFort) { Text(if (n > 99) "99+" else "$n") }
+        if (n > 0) Pastille(if (n > 99) "99+" else "$n")
     }) { contenu() }
 }
+
+/** La pastille d'un nombre (non-lus) : l'accent plein, texte blanc ; carrée en EGA. */
+@Composable
+fun Pastille(texte: String) {
+    Box(
+        Modifier.heightIn(min = 16.dp).widthIn(min = 16.dp).clip(formePilule).background(P.accentPlein)
+            .padding(horizontal = 4.dp),
+        contentAlignment = Alignment.Center,
+    ) { Text(texte, color = P.surAccent, fontSize = 11.sp, lineHeight = 16.sp) }
+}
+
+/**
+ * L'icône d'un élément du rail ou de la barre du bas. En EGA, l'indicateur de
+ * Material (une pilule) est remplacé par un rectangle bleu, carré comme le reste.
+ */
+@Composable
+private fun IconeNav(choisi: Boolean, contenu: @Composable () -> Unit) {
+    if (!P.ega) return contenu()
+    Box(
+        Modifier.background(if (choisi) P.choisi else androidx.compose.ui.graphics.Color.Transparent)
+            .padding(horizontal = 20.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center,
+    ) { contenu() }
+}
+
+/** Les couleurs du rail : l'indicateur de Material, sauf en EGA (voir [IconeNav]). */
+private fun indicateur() = if (P.ega) androidx.compose.ui.graphics.Color.Transparent else P.choisi
 
 @Composable
 fun LogoService(s: Service, taille: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
@@ -125,7 +154,7 @@ fun LogoService(s: Service, taille: androidx.compose.ui.unit.Dp, modifier: Modif
 fun Rail(vue: Vue, enReglages: Boolean, choisir: (Vue) -> Unit, reglages: () -> Unit) {
     val couleurs = NavigationRailItemDefaults.colors(
         selectedIconColor = P.texteFort, unselectedIconColor = P.icone,
-        selectedTextColor = P.texteFort, unselectedTextColor = P.textePale, indicatorColor = P.choisi,
+        selectedTextColor = P.texteFort, unselectedTextColor = P.textePale, indicatorColor = indicateur(),
     )
     NavigationRail(containerColor = P.liste, modifier = Modifier.width(76.dp)) {
         Spacer(Modifier.height(8.dp))
@@ -138,7 +167,7 @@ fun Rail(vue: Vue, enReglages: Boolean, choisir: (Vue) -> Unit, reglages: () -> 
             NavigationRailItem(
                 selected = !enReglages && vue == v,
                 onClick = { choisir(v) },
-                icon = { AvecPastille(nonLus(v)) { Icon(ic, nom) } },
+                icon = { IconeNav(!enReglages && vue == v) { AvecPastille(nonLus(v)) { Icon(ic, nom) } } },
                 colors = couleurs,
             )
         }
@@ -148,7 +177,7 @@ fun Rail(vue: Vue, enReglages: Boolean, choisir: (Vue) -> Unit, reglages: () -> 
             NavigationRailItem(
                 selected = !enReglages && vue == v,
                 onClick = { choisir(v) },
-                icon = { AvecPastille(nonLus(v)) { LogoService(s, 30.dp) } },
+                icon = { IconeNav(!enReglages && vue == v) { AvecPastille(nonLus(v)) { LogoService(s, 30.dp) } } },
                 colors = couleurs,
             )
         }
@@ -156,7 +185,7 @@ fun Rail(vue: Vue, enReglages: Boolean, choisir: (Vue) -> Unit, reglages: () -> 
         NavigationRailItem(
             selected = enReglages,
             onClick = reglages,
-            icon = { Icon(Icons.Filled.Settings, t("Réglages")) },
+            icon = { IconeNav(enReglages) { Icon(Icons.Filled.Settings, t("Réglages")) } },
             colors = couleurs,
         )
         // Mon avatar, en bas à gauche comme au bureau.
@@ -175,7 +204,7 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
     var choixService by remember { mutableStateOf(false) }
     val couleurs = NavigationBarItemDefaults.colors(
         selectedIconColor = P.texteFort, unselectedIconColor = P.icone,
-        selectedTextColor = P.texteFort, unselectedTextColor = P.textePale, indicatorColor = P.choisi,
+        selectedTextColor = P.texteFort, unselectedTextColor = P.textePale, indicatorColor = indicateur(),
     )
     NavigationBar(containerColor = P.liste) {
         val fixes = listOf(
@@ -187,7 +216,7 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
             NavigationBarItem(
                 selected = vue == v,
                 onClick = { choisir(v) },
-                icon = { AvecPastille(nonLus(v)) { Icon(ic, null) } },
+                icon = { IconeNav(vue == v) { AvecPastille(nonLus(v)) { Icon(ic, null) } } },
                 label = { Text(nom, maxLines = 1) },
                 colors = couleurs,
             )
@@ -197,10 +226,12 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
             selected = duService != null,
             onClick = { choixService = true },
             icon = {
-                if (duService != null) {
-                    AvecPastille(nonLus(duService)) { LogoService(duService.service, 24.dp) }
-                } else {
-                    Icon(Icones.services, null)
+                IconeNav(duService != null) {
+                    if (duService != null) {
+                        AvecPastille(nonLus(duService)) { LogoService(duService.service, 24.dp) }
+                    } else {
+                        Icon(Icones.services, null)
+                    }
                 }
             },
             label = { Text(duService?.service?.court ?: t("Services"), maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -218,7 +249,7 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
         if (menuAvatar) MenuAvatar { menuAvatar = false }
     }
     if (choixService) {
-        ModalBottomSheet(onDismissRequest = { choixService = false }, containerColor = P.surface) {
+        ModalBottomSheet(onDismissRequest = { choixService = false }, containerColor = P.menu) {
             Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
                 Text(
                     t("Services"), color = P.texteFort, fontWeight = FontWeight.Bold, fontSize = 18.sp,
@@ -241,7 +272,7 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
                         Spacer(Modifier.width(14.dp))
                         Text(s.titre, color = P.texteFort, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                         val n = nonLus(v)
-                        if (n > 0) Badge(containerColor = P.accent, contentColor = P.texteFort) { Text("$n") }
+                        if (n > 0) Pastille("$n")
                         if (vue == v) {
                             Spacer(Modifier.width(10.dp))
                             Icon(Icons.Filled.Check, null, tint = P.accent)
@@ -265,7 +296,7 @@ fun Head(favoris: List<Conv>, choisie: String?, ouvrir: (String) -> Unit, retire
                 val prenom = if (c.group) nom else nom.split(Regex("\\s+")).firstOrNull() ?: nom
                 Box {
                     Column(
-                        Modifier.width(80.dp).clip(RoundedCornerShape(14.dp))
+                        Modifier.width(80.dp).clip(forme(14.dp))
                             .background(if (c.id == choisie) P.choisi else androidx.compose.ui.graphics.Color.Transparent)
                             .combinedClickable(onClick = { ouvrir(c.id) }, onLongClick = { menu = true })
                             .padding(vertical = 8.dp),
@@ -275,8 +306,8 @@ fun Head(favoris: List<Conv>, choisie: String?, ouvrir: (String) -> Unit, retire
                             Avatar(c, 54.dp)
                             if (c.unread) {
                                 Box(
-                                    Modifier.align(Alignment.TopEnd).size(13.dp).clip(CircleShape).background(P.fond)
-                                        .padding(2.dp).clip(CircleShape).background(P.accent),
+                                    Modifier.align(Alignment.TopEnd).size(13.dp).clip(formeRonde).background(P.fond)
+                                        .padding(2.dp).clip(formeRonde).background(P.accent),
                                 )
                             }
                         }
@@ -344,7 +375,7 @@ fun Rangee(
                     )
                     if (c.unread) {
                         Spacer(Modifier.width(8.dp))
-                        Box(Modifier.size(10.dp).clip(CircleShape).background(P.accent))
+                        Box(Modifier.size(10.dp).clip(formeRonde).background(P.accent))
                     }
                 }
             }
@@ -403,7 +434,7 @@ fun MenuConversation(
 
     DropdownMenu(
         expanded = ouvert, onDismissRequest = fermer, containerColor = P.menu,
-        shape = RoundedCornerShape(16.dp),
+        shape = forme(16.dp), border = if (P.ega) androidx.compose.foundation.BorderStroke(1.dp, P.bordBulle) else null,
     ) {
         Item(if (dansHead) t("Retirer du Head") else t("Ajouter au Head"), Icones.grille) { Marques.basculerHead(c.id) }
         Item(if (favori) t("Retirer des favoris") else t("Ajouter aux favoris"), Icons.Filled.Star) { Marques.basculerFavori(c.id) }
@@ -432,7 +463,7 @@ fun MenuConversation(
     if (confirmer) {
         AlertDialog(
             onDismissRequest = { confirmer = false },
-            containerColor = P.surface,
+            containerColor = P.menu,
             title = { Text(t("Supprimer la conversation ?"), color = P.texteFort) },
             text = {
                 Text(
@@ -441,13 +472,13 @@ fun MenuConversation(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(shape = formeBouton, onClick = {
                     confirmer = false
                     Depot.supprimer(c.id)
                     retiree(c.id)
                 }) { Text(t("Supprimer"), color = P.danger) }
             },
-            dismissButton = { TextButton(onClick = { confirmer = false }) { Text(t("Annuler"), color = P.texte) } },
+            dismissButton = { TextButton(shape = formeBouton, onClick = { confirmer = false }) { Text(t("Annuler"), color = P.texte) } },
         )
     }
 }

@@ -52,6 +52,23 @@ object Langue {
 fun t(fr: String): String = if (!Langue.anglais) fr else ANGLAIS[fr] ?: fr
 
 private val ANGLAIS: Map<String, String> = mapOf(
+    // Réglages → Apparence : les thèmes et les teintes du verre (comme au bureau).
+    "Verre" to "Glass",
+    "EGA" to "EGA",
+    "Aplats gris et fil noir, bulles plates." to "Flat grays, black thread, flat bubbles.",
+    "Verre clair sur halos pastel." to "Light glass over pastel halos.",
+    "Seize couleurs et police IBM, comme un PC de 1984." to "Sixteen colors and the IBM font, like a 1984 PC.",
+    "Teinte du verre" to "Glass tint",
+    "Choisissez le thème Verre pour changer de teinte." to "Pick the Glass theme to change the tint.",
+    "Lavande" to "Lavender",
+    "Rose" to "Pink",
+    "Pêche" to "Peach",
+    "Citron" to "Lemon",
+    "Menthe" to "Mint",
+    "Ciel" to "Sky",
+    "Lilas" to "Lilac",
+    "Corail" to "Coral",
+    "Contact" to "Contact",
     " : " to ": ",
     "🎤 Message vocal" to "🎤 Voice message",
     "📎 Pièce jointe" to "📎 Attachment",

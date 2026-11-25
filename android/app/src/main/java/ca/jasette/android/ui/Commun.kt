@@ -44,7 +44,7 @@ fun iconeService(s: Service) = when (s) {
 }
 
 /** La forme des logos de services : un carré aux coins arrondis (30 % de la taille, comme `logo()` du bureau). */
-fun formeLogo(taille: Dp) = androidx.compose.foundation.shape.RoundedCornerShape(taille * 0.3f)
+fun formeLogo(taille: Dp) = forme(taille * 0.3f)
 
 fun couleurEtat(e: Etat) = when (e) {
     Etat.PRET -> P.succes
@@ -71,12 +71,12 @@ private fun initiales(nom: String): String? {
 fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true) {
     val photo = Depot.avatars[conv.id]
     Box(Modifier.size(taille)) {
-        val rond = Modifier.size(taille).clip(CircleShape)
+        val rond = Modifier.size(taille).clip(formeRonde)
         if (photo != null) {
             ImageFichier(photo, rond.background(P.surface), cote = 256)
         } else {
             val base = couleurHex(conv.color) ?: P.avatarDefaut
-            Box(rond.background(base), contentAlignment = Alignment.Center) {
+            Box(rond.background(fondAvatar(base)), contentAlignment = Alignment.Center) {
                 val i = if (conv.group) null else initiales(conv.name)
                 if (i != null) {
                     Text(i, color = Color.White, fontSize = (taille.value * 0.38f).sp, fontWeight = FontWeight.SemiBold)

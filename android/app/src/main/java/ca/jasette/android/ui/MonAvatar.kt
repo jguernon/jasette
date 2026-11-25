@@ -68,11 +68,11 @@ fun AvatarMoi(taille: Dp, source: String = Marques.avatarSource) {
         "fichier" -> Marques.avatarFichier?.takeIf { File(it).isFile }
         else -> null
     }
-    val rond = Modifier.size(taille).clip(CircleShape)
+    val rond = Modifier.size(taille).clip(formeRonde)
     if (photo != null) {
         ImageFichier(photo, rond.background(P.surface), cote = 256)
     } else {
-        Box(rond.background(P.avatarDefaut), contentAlignment = Alignment.Center) {
+        Box(rond.background(fondAvatar(P.avatarDefaut)), contentAlignment = Alignment.Center) {
             val i = initialeMoi()
             if (i != null) {
                 Text(i, color = Color.White, fontSize = (taille.value * 0.42f).sp, fontWeight = FontWeight.SemiBold)
@@ -87,7 +87,7 @@ fun AvatarMoi(taille: Dp, source: String = Marques.avatarSource) {
 @Composable
 fun BoutonAvatarMoi(taille: Dp) {
     var menu by remember { mutableStateOf(false) }
-    Box(Modifier.clip(CircleShape).clickable { menu = true }.padding(4.dp)) { AvatarMoi(taille) }
+    Box(Modifier.clip(formeRonde).clickable { menu = true }.padding(4.dp)) { AvatarMoi(taille) }
     if (menu) MenuAvatar { menu = false }
 }
 
@@ -110,7 +110,7 @@ fun MenuAvatar(fermer: () -> Unit) {
             }
         }
     }
-    ModalBottomSheet(onDismissRequest = fermer, containerColor = P.surface) {
+    ModalBottomSheet(onDismissRequest = fermer, containerColor = P.menu) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
             Text(
                 t("Votre avatar"), color = P.texteFort, fontWeight = FontWeight.Bold, fontSize = 18.sp,

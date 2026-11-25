@@ -44,6 +44,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
+import androidx.compose.foundation.border
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -72,7 +74,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: () -> Unit) {
     val ctx = LocalContext.current
     Scaffold(
-        containerColor = P.fond,
+        containerColor = P.ecran,
         topBar = {
             TopAppBar(
                 navigationIcon = { IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Filled.ArrowBack, t("Retour")) } },
@@ -98,13 +100,13 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
                     Carte(s) {
                         val etat = Depot.etat(s)
                         if (etat.associe || etat == Etat.ASSOCIATION) {
-                            OutlinedButton(onClick = { Depot.deconnecter(s) }) { Text(t("Déconnecter"), color = P.danger) }
+                            OutlinedButton(shape = formeBouton, onClick = { Depot.deconnecter(s) }) { Text(t("Déconnecter"), color = P.danger) }
                         } else {
                             when (s) {
                                 Service.GOOGLE -> BoutonAccent(t("Se connecter")) { connecter(s, "google") }
                                 Service.MESSENGER -> {
                                     BoutonAccent(t("Avec Messenger")) { connecter(s, "messenger") }
-                                    OutlinedButton(onClick = { connecter(s, "facebook") }) { Text(t("Avec Facebook")) }
+                                    OutlinedButton(shape = formeBouton, onClick = { connecter(s, "facebook") }) { Text(t("Avec Facebook")) }
                                 }
                                 Service.INSTAGRAM -> BoutonAccent(t("Se connecter")) { connecter(s, "instagram") }
                             }
@@ -135,8 +137,10 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
 
             Spacer(Modifier.height(12.dp))
             Text(t("Apparence"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            ChoixVolets()
+            ChoixTheme()
             ChoixHeures()
+            ChoixTeinte()
+            ChoixVolets()
 
             Spacer(Modifier.height(12.dp))
             Text(t("Icône de l'app"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -159,7 +163,7 @@ private fun BandeauEmoji(e: String) {
 @Composable
 private fun CarteServeur(adresse: String) {
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(P.surface).padding(16.dp),
+        Modifier.fillMaxWidth().carte(16.dp).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -178,7 +182,7 @@ private fun CarteServeur(adresse: String) {
             val etat = Depot.etat(s)
             Row(verticalAlignment = if (etroit) Alignment.Top else Alignment.CenterVertically) {
                 androidx.compose.foundation.layout.Box(
-                    Modifier.padding(top = if (etroit) 6.dp else 0.dp).size(8.dp).clip(CircleShape).background(couleurEtat(etat)),
+                    Modifier.padding(top = if (etroit) 6.dp else 0.dp).size(8.dp).clip(formeRonde).background(couleurEtat(etat)),
                 )
                 Spacer(Modifier.width(8.dp))
                 val nom = Depot.noms[s]?.takeIf { etat.associe }
@@ -200,7 +204,7 @@ private fun CarteServeur(adresse: String) {
 @Composable
 private fun BoutonQuitterServeur() {
     var confirmer by remember { mutableStateOf(false) }
-    OutlinedButton(onClick = { confirmer = true }) { Text(t("Ne plus l'utiliser"), color = P.danger) }
+    OutlinedButton(shape = formeBouton, onClick = { confirmer = true }) { Text(t("Ne plus l'utiliser"), color = P.danger) }
     if (confirmer) ConfirmerQuitterServeur { confirmer = false }
 }
 
@@ -208,7 +212,7 @@ private fun BoutonQuitterServeur() {
 private fun ConfirmerQuitterServeur(fermer: () -> Unit) {
     androidx.compose.material3.AlertDialog(
         onDismissRequest = fermer,
-        containerColor = P.surface,
+        containerColor = P.menu,
         title = { Text(t("Ne plus utiliser ce serveur ?"), color = P.texteFort) },
         text = {
             Text(
@@ -217,19 +221,19 @@ private fun ConfirmerQuitterServeur(fermer: () -> Unit) {
             )
         },
         confirmButton = {
-            androidx.compose.material3.TextButton(onClick = {
+            androidx.compose.material3.TextButton(shape = formeBouton, onClick = {
                 fermer()
                 Depot.utiliserCetAppareil()
             }) { Text(t("Ne plus l'utiliser"), color = P.danger) }
         },
-        dismissButton = { androidx.compose.material3.TextButton(onClick = fermer) { Text(t("Annuler"), color = P.texteFort) } },
+        dismissButton = { androidx.compose.material3.TextButton(shape = formeBouton, onClick = fermer) { Text(t("Annuler"), color = P.texteFort) } },
     )
 }
 
 /** Un groupe de rangées sur fond de carte. */
 @Composable
 fun Groupe(contenu: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(P.surface), content = contenu)
+    Column(Modifier.fillMaxWidth().carte(16.dp), content = contenu)
 }
 
 /** Une rangée à choisir : icône, titre, détail, coche si [actif]. */
@@ -256,8 +260,8 @@ fun ChoixRangee(
                 if (badge != null) {
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        badge, color = P.texteFort, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(P.accent)
+                        badge, color = P.surAccent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clip(forme(8.dp)).background(P.accentPlein)
                             .padding(horizontal = 7.dp, vertical = 2.dp),
                     )
                 }
@@ -303,18 +307,18 @@ private fun ChoixLangue() {
 fun SelecteurLangue() {
     val anglais = Langue.anglais
     Row(
-        Modifier.clip(RoundedCornerShape(999.dp)).background(P.fond).padding(3.dp),
+        Modifier.carte(999.dp, if (P.clair) P.champ else P.fond).padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         for ((en, nom) in listOf(false to "Français", true to "English")) {
             val actif = anglais == en
             Text(
                 nom,
-                color = if (actif) P.texteFort else P.texte,
+                color = if (actif) P.surAccent else P.texte,
                 fontWeight = if (actif) FontWeight.SemiBold else FontWeight.Normal,
                 fontSize = 14.sp,
-                modifier = Modifier.clip(RoundedCornerShape(999.dp))
-                    .background(if (actif) P.accent else androidx.compose.ui.graphics.Color.Transparent)
+                modifier = Modifier.clip(formePilule)
+                    .background(if (actif) P.accentPlein else androidx.compose.ui.graphics.Color.Transparent)
                     .clickable {
                         // La langue du téléphone reste « automatique ».
                         Langue.choisir(if (en != Langue.telephoneFrancais()) "auto" else if (en) "en" else "fr")
@@ -339,7 +343,7 @@ fun ServeurJasette(retour: () -> Unit) {
     val cfg = Depot.serveur
     val occupe = Depot.serveurOccupe
     Scaffold(
-        containerColor = P.fond,
+        containerColor = P.ecran,
         topBar = {
             TopAppBar(
                 navigationIcon = { IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Filled.ArrowBack, t("Retour")) } },
@@ -363,7 +367,7 @@ fun ServeurJasette(retour: () -> Unit) {
                     enabled = !occupe,
                 ) { if (cfg != null) confirmerQuitter = true else Depot.utiliserCetAppareil() }
                 if (confirmerQuitter) ConfirmerQuitterServeur { confirmerQuitter = false }
-                androidx.compose.material3.HorizontalDivider(color = P.fond)
+                androidx.compose.material3.HorizontalDivider(color = P.filet)
                 ChoixRangee(
                     icone = Icons.Filled.Home,
                     titre = t("Utiliser mon serveur Jasette"),
@@ -422,9 +426,10 @@ private fun FormulaireClient(occupe: Boolean) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
                         onClick = { Depot.jumelerClient() }, enabled = !occupe,
-                        colors = ButtonDefaults.buttonColors(containerColor = P.accent),
+                        colors = ButtonDefaults.buttonColors(containerColor = P.accentPlein, contentColor = P.surAccent),
+                        shape = formeBouton,
                     ) { Text(t("Oui, jumeler")) }
-                    OutlinedButton(onClick = { Depot.refuserVerification() }, enabled = !occupe) {
+                    OutlinedButton(shape = formeBouton, onClick = { Depot.refuserVerification() }, enabled = !occupe) {
                         Text(t("Non"), color = P.danger)
                     }
                 }
@@ -456,7 +461,8 @@ private fun FormulaireClient(occupe: Boolean) {
                 Button(
                     onClick = { Depot.verifierClient(adresse, code) },
                     enabled = !occupe && adresse.isNotBlank() && code.length == 6,
-                    colors = ButtonDefaults.buttonColors(containerColor = P.accent),
+                    colors = ButtonDefaults.buttonColors(containerColor = P.accentPlein, contentColor = P.surAccent),
+                        shape = formeBouton,
                 ) { Text(t("Continuer")) }
             }
         }
@@ -465,7 +471,10 @@ private fun FormulaireClient(occupe: Boolean) {
 
 @Composable
 private fun BoutonAccent(texte: String, onClick: () -> Unit) {
-    Button(onClick = onClick, colors = ButtonDefaults.buttonColors(containerColor = P.accent)) { Text(texte) }
+    Button(
+        onClick = onClick, shape = formeBouton,
+        colors = ButtonDefaults.buttonColors(containerColor = P.accentPlein, contentColor = P.surAccent),
+    ) { Text(texte) }
 }
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -473,7 +482,7 @@ private fun BoutonAccent(texte: String, onClick: () -> Unit) {
 private fun Carte(s: Service, boutons: @Composable () -> Unit) {
     val etat = Depot.etat(s)
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(P.surface).padding(16.dp),
+        Modifier.fillMaxWidth().carte(16.dp).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -484,7 +493,7 @@ private fun Carte(s: Service, boutons: @Composable () -> Unit) {
                 Depot.noms[s]?.let { if (etat.associe) Text(it, color = P.texte, fontSize = 13.sp) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     androidx.compose.foundation.layout.Box(
-                        Modifier.size(8.dp).clip(CircleShape).background(couleurEtat(etat)),
+                        Modifier.size(8.dp).clip(formeRonde).background(couleurEtat(etat)),
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(etat.texte, color = P.textePale, fontSize = 13.sp)
@@ -500,7 +509,7 @@ private fun Carte(s: Service, boutons: @Composable () -> Unit) {
 private fun Nip() {
     var nip by remember { mutableStateOf("") }
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(P.surface).padding(16.dp),
+        Modifier.fillMaxWidth().carte(16.dp).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(t("Historique chiffré de Messenger"), color = P.texteFort, fontWeight = FontWeight.SemiBold)
@@ -520,9 +529,10 @@ private fun Nip() {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = { Depot.envoyerNip(nip) }, enabled = nip.length == 6,
-                colors = ButtonDefaults.buttonColors(containerColor = P.accent),
+                colors = ButtonDefaults.buttonColors(containerColor = P.accentPlein, contentColor = P.surAccent),
+                        shape = formeBouton,
             ) { Text(t("Restaurer")) }
-            TextButton(onClick = { Depot.envoyerNip("") }) { Text(t("Pas maintenant"), color = P.textePale) }
+            TextButton(shape = formeBouton, onClick = { Depot.envoyerNip("") }) { Text(t("Pas maintenant"), color = P.textePale) }
         }
     }
 }
@@ -563,7 +573,7 @@ private fun ChoixIcone() {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(forme(16.dp))
                     .background(if (choisie) P.accent.copy(alpha = 0.18f) else androidx.compose.ui.graphics.Color.Transparent)
                     .clickable { choisirIcone(ctx, valeur); blanche = valeur }
                     .padding(12.dp),
@@ -600,7 +610,7 @@ private fun ChoixVolets() {
             detail = t("La liste et la conversation côte à côte quand l'écran est large (téléphone déplié, tablette)."),
             actif = oui,
         ) { ca.jasette.android.Marques.choisirDeuxVolets(true) }
-        androidx.compose.material3.HorizontalDivider(color = P.fond)
+        androidx.compose.material3.HorizontalDivider(color = P.filet)
         ChoixRangee(
             icone = Icones.pleinEcran,
             titre = t("Désactivé"),
@@ -625,18 +635,138 @@ private fun ChoixHeures() {
                 Text(t("Chaque bulle montre son heure, et sa date si ce n'est pas aujourd'hui."), color = P.textePale, fontSize = 13.sp)
             }
             Spacer(Modifier.width(12.dp))
-            androidx.compose.material3.Switch(
-                checked = oui,
-                onCheckedChange = { ca.jasette.android.Marques.choisirHeureChaqueMessage(it) },
-                // Éteint : piste et bordure visibles sur le fond sombre.
-                colors = androidx.compose.material3.SwitchDefaults.colors(
-                    checkedTrackColor = P.accent,
-                    checkedThumbColor = androidx.compose.ui.graphics.Color.White,
-                    uncheckedTrackColor = P.choisi,
-                    uncheckedThumbColor = P.textePale,
-                    uncheckedBorderColor = P.textePale,
+            // L'interrupteur du bureau : piste d'accent allumé, grise et visible éteint.
+            Interrupteur(oui) { ca.jasette.android.Marques.choisirHeureChaqueMessage(it) }
+        }
+    }
+}
+
+/**
+ * Réglages → Apparence : les trois thèmes du bureau (`Section::Apparence`),
+ * chacun avec sa vignette, son nom et son détail, la coche sur le thème choisi.
+ */
+@Composable
+private fun ChoixTheme() {
+    val bordVignette = when {
+        P.clair -> androidx.compose.ui.graphics.Color.White.copy(alpha = 0.9f)
+        P.ega -> couleur(EGA_GRIS)
+        else -> couleur(0x48484a)
+    }
+    val teinte = Apparence.teinte
+    Groupe {
+        LigneTheme(
+            Theme.SOMBRE, t("Sombre"), t("Aplats gris et fil noir, bulles plates."),
+            Modifier.border(1.dp, bordVignette, forme(14.dp)).background(
+                androidx.compose.ui.graphics.Brush.horizontalGradient(
+                    0f to couleur(0x252527), 0.5f to couleur(0x252527), 0.5f to couleur(0x000000), 1f to couleur(0x000000),
                 ),
-            )
+            ),
+        ) {}
+        androidx.compose.material3.HorizontalDivider(color = P.filet)
+        LigneTheme(
+            Theme.VERRE, t("Verre"), t("Verre clair sur halos pastel."),
+            Modifier.border(1.dp, bordVignette, forme(14.dp)).background(
+                androidx.compose.ui.graphics.Brush.linearGradient(
+                    listOf(couleur(teinte.accent).copy(alpha = 0.5f), couleur(teinte.halo).copy(alpha = 0.6f)),
+                    androidx.compose.ui.geometry.Offset.Zero, androidx.compose.ui.geometry.Offset.Infinite,
+                ),
+            ),
+        ) {}
+        androidx.compose.material3.HorizontalDivider(color = P.filet)
+        // L'aperçu EGA : une petite fenêtre DOS, barre bleue, lignes de texte.
+        LigneTheme(
+            Theme.EGA, t("EGA"), t("Seize couleurs et police IBM, comme un PC de 1984."),
+            Modifier.background(couleur(EGA_NOIR)).border(1.dp, couleur(EGA_GRIS_CLAIR), forme(14.dp)),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth().height(9.dp).background(couleur(EGA_BLEU)))
+                Column(Modifier.padding(start = 5.dp, top = 1.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    for ((l, c) in listOf(28 to EGA_JAUNE, 38 to EGA_GRIS_CLAIR, 22 to EGA_CYAN_VIF, 32 to EGA_MAGENTA_VIF)) {
+                        androidx.compose.foundation.layout.Box(Modifier.width(l.dp).height(3.dp).background(couleur(c)))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Une rangée du choix de thème : vignette 54 dp, nom, détail, coche. */
+@Composable
+private fun LigneTheme(
+    theme: Theme,
+    titre: String,
+    detail: String,
+    vignette: Modifier,
+    contenu: @Composable () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable { Apparence.choisirTheme(theme) }.padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Les coins de la vignette : 14 dp, carrés en EGA (`rayon(14.)` du bureau).
+        androidx.compose.foundation.layout.Box(Modifier.size(54.dp).clip(forme(14.dp)).then(vignette)) { contenu() }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(titre, color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(detail, color = P.textePale, fontSize = 13.sp)
+        }
+        if (Apparence.theme == theme) Icon(Icons.Filled.Check, null, tint = P.accent, modifier = Modifier.size(20.dp))
+    }
+}
+
+/**
+ * Réglages → Apparence → Teinte du verre : une pastille ronde par teinte, la
+ * choisie cerclée de son accent. Hors du thème Verre, les pastilles sont
+ * estompées et un mot explique comment les activer.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ChoixTeinte() {
+    val actif = Apparence.theme == Theme.VERRE
+    val choisie = Apparence.teinte
+    Text(
+        if (actif) "${t("Teinte du verre")} · ${t(choisie.nom)}" else t("Teinte du verre"),
+        color = P.textePale, fontSize = 13.sp,
+    )
+    Groupe {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            FlowRow(
+                Modifier.alpha(if (actif) 1f else 0.35f),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                for (te in TEINTES) {
+                    val elle = actif && te.id == choisie.id
+                    androidx.compose.foundation.layout.Box(
+                        Modifier.size(38.dp).clip(formeRonde)
+                            .border(2.dp, if (elle) couleur(te.accent) else androidx.compose.ui.graphics.Color.Transparent, formeRonde)
+                            .clickable(enabled = actif) { Apparence.choisirTeinte(te) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        androidx.compose.foundation.layout.Box(
+                            Modifier.size(28.dp).clip(formeRonde)
+                                .background(
+                                    androidx.compose.ui.graphics.Brush.linearGradient(
+                                        listOf(hsl(te.angle, 0.75f, 0.86f), couleur(te.accent)),
+                                        androidx.compose.ui.geometry.Offset.Zero, androidx.compose.ui.geometry.Offset.Infinite,
+                                    ),
+                                )
+                                .border(
+                                    1.dp,
+                                    when {
+                                        P.clair -> androidx.compose.ui.graphics.Color.White.copy(alpha = 0.9f)
+                                        P.ega -> couleur(EGA_GRIS)
+                                        else -> couleur(0x48484a)
+                                    },
+                                    formeRonde,
+                                ),
+                        )
+                    }
+                }
+            }
+            if (!actif) {
+                Text(t("Choisissez le thème Verre pour changer de teinte."), color = P.textePale, fontSize = 12.sp)
+            }
         }
     }
 }

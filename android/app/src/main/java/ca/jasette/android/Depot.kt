@@ -347,22 +347,11 @@ object Depot {
                 v.optBoolean("declined") -> besoinNip = false
                 v.chaine("text").isNotEmpty() -> erreurNip = v.chaine("text")
             }
-            "search" -> if (v.chaine("query") == requeteContacts) {
-                // Les résultats de chaque service s'ajoutent (ids préfixés), comme `resultats_meta`.
-                val items = v.optJSONArray("items")
-                val trouves = (0 until (items?.length() ?: 0)).mapNotNull { i ->
-                    val o = items!!.optJSONObject(i) ?: return@mapNotNull null
-                    val id = o.chaine("id")
-                    val nom = o.chaine("name")
-                    if (id.isEmpty() || nom.isEmpty()) null else id to nom
-                }
-                val autres = resultatsMeta.filter { Service.de(it.first) != service }
-                resultatsMeta.clear()
-                resultatsMeta.addAll(autres + trouves)
-            }
+            "search" -> recevoirRecherche(v, service)
             "hello", "e2ee", "typing" -> {}
             "error" -> {
                 val texte = v.chaine("text")
+                if (v.chaine("where") == "search") Log.d("jasette", "search ${service.court} : erreur (${texte.length} car.)")
                 if (v.chaine("where") == "react") annulerReactions()
                 if (texte.isNotEmpty()) erreur = "${service.court} : ${t(texte)}"
             }
@@ -478,8 +467,11 @@ object Depot {
                     }
                 }
             }
+            // Les contacts du téléphone trouvés par le pont Google (ids : les numéros, sans préfixe).
+            "search" -> recevoirRecherche(v, Service.GOOGLE)
             "error" -> {
                 val texte = v.chaine("text")
+                if (v.chaine("where") == "search") Log.d("jasette", "search ${service.court} : erreur (${texte.length} car.)")
                 if (v.chaine("where") == "react") annulerReactions()
                 if (texte.isNotEmpty()) erreur = t(texte)
                 if (v.chaine("where") == "messages") chargement = null
@@ -639,19 +631,58 @@ object Depot {
 
     // ---- Nouveau message ----
 
-    /** Les personnes trouvées par les ponts Meta pour « À : » : (id préfixé, nom). */
+    /**
+     * Les personnes trouvées pour « À : » : (id, nom). Les ids Meta sont préfixés ;
+     * ceux de Google sont des numéros (sans préfixe, donc `Service.de` vaut GOOGLE).
+     */
     val resultatsMeta = mutableStateListOf<Pair<String, String>>()
+    /** Le numéro affiché d'un contact trouvé par Google, par id. */
+    val numerosContacts = mutableStateMapOf<String, String>()
     private var requeteContacts = ""
 
-    /** « À : » a changé : Messenger et Instagram cherchent parmi les amis et contacts. */
+    /**
+     * « À : » a changé : Messenger et Instagram cherchent parmi les amis et
+     * contacts, Google parmi les contacts du téléphone (aussi par numéro).
+     */
     fun chercherContacts(texte: String) {
         val q = texte.trim()
         if (q == requeteContacts) return
         requeteContacts = q
         resultatsMeta.clear()
-        if (q.length >= 2 && !estNumero(q)) {
-            for (s in Service.META) if (pret(s)) commande(s, JSONObject().put("cmd", "search").put("text", q))
+        numerosContacts.clear()
+        if (q.length < 2) return
+        val cmd = { JSONObject().put("cmd", "search").put("text", q) }
+        if (!estNumero(q)) {
+            for (s in Service.META) if (pret(s)) commande(s, cmd())
         }
+        if (pret(Service.GOOGLE)) commande(Service.GOOGLE, cmd())
+    }
+
+    /**
+     * Les résultats d'une recherche de personnes : ceux de chaque service
+     * remplacent les siens (comme `resultats_meta`), si la requête est encore la bonne.
+     */
+    private fun recevoirRecherche(v: JSONObject, service: Service) {
+        val items = v.optJSONArray("items")
+        val q = v.chaine("query")
+        // Pour diagnostiquer par logcat, sans les noms : service, longueur, nombre.
+        Log.d(
+            "jasette",
+            "search ${service.court} : requête ${q.length} car., ${items?.length() ?: 0} résultat(s)" +
+                if (q == requeteContacts) "" else " (périmée)",
+        )
+        if (q != requeteContacts) return
+        val trouves = (0 until (items?.length() ?: 0)).mapNotNull { i ->
+            val o = items!!.optJSONObject(i) ?: return@mapNotNull null
+            val id = o.chaine("id")
+            val nom = o.chaine("name")
+            if (id.isEmpty() || nom.isEmpty()) return@mapNotNull null
+            if (service == Service.GOOGLE) numerosContacts[id] = o.chaine("number").ifEmpty { id }
+            id to nom
+        }
+        val autres = resultatsMeta.filter { Service.de(it.first) != service }
+        resultatsMeta.clear()
+        resultatsMeta.addAll(autres + trouves.distinctBy { it.first })
     }
 
     /**

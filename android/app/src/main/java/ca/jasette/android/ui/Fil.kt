@@ -202,7 +202,8 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit, volet: Boolean = fal
     }
 
     Scaffold(
-        containerColor = P.fil,
+        // En deux volets, le fond du volet est déjà posé (pas de double voile au verre).
+        containerColor = if (volet) Color.Transparent else P.fil,
         topBar = { Column {
             TopAppBar(
                 navigationIcon = {
@@ -212,14 +213,16 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit, volet: Boolean = fal
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (conv != null) Avatar(conv, 36.dp)
                         Spacer(Modifier.width(10.dp))
-                        Column {
+                        // Le nom et le service, serrés et centrés sur l'avatar : la barre donne
+                        // au titre l'interligne de titleLarge (28 sp), qui les poussait vers le haut.
+                        Column(verticalArrangement = Arrangement.Center) {
                             Text(
-                                conv?.name ?: "", fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                conv?.name ?: "", fontSize = 17.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, style = androidx.compose.material3.LocalTextStyle.current.merge(TITRE_SERRE),
                             )
                             Text(
                                 Service.de(id).court + if (conv?.rcs == true) " · RCS" else "",
-                                fontSize = 12.sp, color = P.textePale,
+                                fontSize = 12.sp, lineHeight = 15.sp, color = P.textePale, style = androidx.compose.material3.LocalTextStyle.current.merge(TITRE_SERRE),
                             )
                         }
                     }
@@ -267,7 +270,7 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit, volet: Boolean = fal
         LaunchedEffect(liste.lastOrNull()?.id) { if (liste.isNotEmpty()) etat.animateScrollToItem(0) }
         Box(Modifier.fillMaxSize().padding(marges).onGloballyPositioned { conteneur = it }) {
         LazyColumn(
-            Modifier.fillMaxSize().background(P.fil),
+            Modifier.fillMaxSize(),
             state = etat,
             reverseLayout = true,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 8.dp),
@@ -292,7 +295,7 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit, volet: Boolean = fal
                     when {
                         Depot.chargement == id -> CircularProgressIndicator(Modifier.size(24.dp), color = P.accent)
                         Depot.plusAnciens[id] == true ->
-                            TextButton(onClick = { Depot.plusVieux(id) }) { Text(t("Messages plus anciens")) }
+                            TextButton(shape = formeBouton, onClick = { Depot.plusVieux(id) }) { Text(t("Messages plus anciens"), color = P.accent) }
                     }
                 }
             }
@@ -362,7 +365,7 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit, volet: Boolean = fal
 
     plein?.let { chemin ->
         Dialog(onDismissRequest = { plein = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            Box(Modifier.fillMaxSize().background(P.fil).clickable { plein = null }, contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().background(Color.Black).clickable { plein = null }, contentAlignment = Alignment.Center) {
                 ImageFichier(chemin, Modifier.fillMaxSize(), cote = 2048, contentScale = ContentScale.Fit)
             }
         }
@@ -389,11 +392,20 @@ private fun BoutonsAppel(activite: Activity, conv: ca.jasette.android.Conv) {
 private fun Jour(ms: Long) {
     Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
         Text(
-            jour(ms), color = P.texteFort, fontSize = 12.sp,
-            modifier = Modifier.clip(RoundedCornerShape(50)).background(P.jourFond).padding(horizontal = 12.dp, vertical = 3.dp),
+            jour(ms), color = P.jourTexte, fontSize = 12.sp,
+            modifier = Modifier.carte(50.dp, P.jourFond, if (P.ega) Color.Transparent else P.bordCarte).padding(horizontal = 12.dp, vertical = 3.dp),
         )
     }
 }
+
+/** Le style des deux lignes du titre du fil : sans marge de police, centré dans sa ligne. */
+private val TITRE_SERRE = TextStyle(
+    platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false),
+    lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+        alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+        trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
+    ),
+)
 
 /** Les réactions rapides de la barre (appui long sur une bulle). */
 private val RAPIDES = listOf("❤️", "😂", "😮", "😢", "😡", "👍")
@@ -407,8 +419,6 @@ private val EMOJIS = (
         "👇 ☝️ 👍 👎 ✊ 👊 🤛 🤜 👏 🙌 👐 🤲 🙏 💪 🔥 ✨ 🎉 🎊 🎂 🎁 ⭐ 🌟 ☀️ 🌈 ⚡ ❄️ 🍕 🍔 🍟 🍺 🍷 ☕ ✅ ❌ ❓ ❗"
     ).split(" ").filter { it.isNotBlank() }
 
-/** Le bleu clair des coches « lu » sur une bulle déjà couleur accent. */
-private val ACCENT_SUR_BULLE = Color(0xFFA8DCFF)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -469,17 +479,25 @@ private fun Message(
                 if (m.text.isNotEmpty()) {
                     val rayon = 18.dp
                     val forme = if (m.fromMe) {
-                        RoundedCornerShape(rayon, rayon, if (dernier) 4.dp else rayon, rayon)
+                        formeBulle(rayon, rayon, if (dernier) 4.dp else rayon, rayon)
                     } else {
-                        RoundedCornerShape(rayon, rayon, rayon, if (dernier) 4.dp else rayon)
+                        formeBulle(rayon, rayon, rayon, if (dernier) 4.dp else rayon)
                     }
+                    // Envoyée : le dégradé d'accent (bleu EGA) ; reçue : la surface et son liseré.
                     Column(
-                        Modifier.widthIn(max = 300.dp).clip(forme).background(if (m.fromMe) P.accent else P.surface)
-                            .let { if (courant) it.border(2.dp, JAUNE, forme) else it }
+                        Modifier.widthIn(max = 300.dp).clip(forme)
+                            .let { if (m.fromMe) it.background(P.degrade) else it.background(P.surface) }
+                            .let {
+                                when {
+                                    courant -> it.border(2.dp, P.trouve, forme)
+                                    !m.fromMe && P.bordBulle.alpha > 0f -> it.border(1.dp, P.bordBulle, forme)
+                                    else -> it
+                                }
+                            }
                             .combinedClickable(onClick = { if (echec) reessayer() }, onLongClick = appuiLong)
                             .padding(horizontal = 13.dp, vertical = 8.dp),
                     ) {
-                        Text(surligner(m.text, surligne, courant), color = P.texteFort, fontSize = 15.sp)
+                        Text(surligner(m.text, surligne, courant), color = if (m.fromMe) P.surAccent else P.texteFort, fontSize = 15.sp)
                         Row(
                             Modifier.align(Alignment.End),
                             verticalAlignment = Alignment.CenterVertically,
@@ -514,7 +532,7 @@ private fun Message(
         if (echec && Depot.peutReessayer(m.tmpId)) {
             Text(
                 t("Échec de l'envoi · Réessayer"), color = P.danger, fontSize = 12.sp,
-                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = reessayer)
+                modifier = Modifier.clip(forme(8.dp)).clickable(onClick = reessayer)
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
@@ -529,14 +547,14 @@ private fun Message(
 @Composable
 private fun IconeCoche(c: Coche, surBulle: Boolean) {
     val pale = if (surBulle) P.heureEnvoyee else P.textePale
-    val lu = if (surBulle) ACCENT_SUR_BULLE else P.accent
+    val lu = if (surBulle) P.luSurBulle else P.accent
     val (icone, couleur, nom) = when (c) {
         Coche.AUCUNE -> return
         Coche.ENVOI -> Triple(Icones.horloge, pale, t("Envoi…"))
         Coche.ENVOYE -> Triple(Icons.Filled.Check, pale, t("Envoyé"))
         Coche.DISTRIBUE -> Triple(Icones.doubleCoche, pale, t("Distribué"))
         Coche.LU -> Triple(Icones.doubleCoche, lu, t("Lu"))
-        Coche.ECHEC -> Triple(Icons.Filled.Warning, if (surBulle) Color(0xFFFFB4AE) else P.danger, t("Échec"))
+        Coche.ECHEC -> Triple(Icons.Filled.Warning, if (surBulle) P.echecSurBulle else P.danger, t("Échec"))
     }
     Icon(icone, nom, tint = couleur, modifier = Modifier.size(14.dp))
 }
@@ -547,20 +565,20 @@ private fun BarreReactions(m: Msg, choisir: (String) -> Unit, plus: () -> Unit, 
     val mienne = m.reactions.firstOrNull { it.fromMe }?.emoji
     run {
         Row(
-            Modifier.shadow(8.dp, RoundedCornerShape(26.dp)).clip(RoundedCornerShape(26.dp)).background(P.menu)
+            Modifier.flottant(26.dp)
                 .padding(horizontal = 6.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             for (e in RAPIDES) {
                 Box(
-                    Modifier.size(42.dp).clip(CircleShape)
-                        .background(if (e == mienne) P.accent.copy(alpha = 0.35f) else Color.Transparent)
+                    Modifier.size(42.dp).clip(formeRonde)
+                        .background(if (e == mienne) (if (P.ega) P.choisi else P.accent.copy(alpha = 0.35f)) else Color.Transparent)
                         .clickable { choisir(e) },
                     contentAlignment = Alignment.Center,
                 ) { Text(e, fontSize = 24.sp) }
             }
             Box(
-                Modifier.size(38.dp).clip(CircleShape).background(P.choisi).clickable(onClick = plus),
+                Modifier.size(38.dp).clip(formeRonde).background(P.choisi).clickable(onClick = plus),
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.Filled.Add, t("Plus de réactions"), tint = P.texteFort, modifier = Modifier.size(20.dp)) }
             if (copier != null) {
@@ -574,14 +592,14 @@ private fun BarreReactions(m: Msg, choisir: (String) -> Unit, plus: () -> Unit, 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GrilleEmojis(fermer: () -> Unit, choisir: (String) -> Unit) {
-    ModalBottomSheet(onDismissRequest = fermer, containerColor = P.surface) {
+    ModalBottomSheet(onDismissRequest = fermer, containerColor = P.menu) {
         LazyVerticalGrid(
             GridCells.Adaptive(48.dp),
             Modifier.fillMaxWidth().heightIn(max = 420.dp).padding(horizontal = 8.dp),
         ) {
             items(EMOJIS) { e ->
                 Box(
-                    Modifier.size(48.dp).clip(CircleShape).clickable { choisir(e) },
+                    Modifier.size(48.dp).clip(formeRonde).clickable { choisir(e) },
                     contentAlignment = Alignment.Center,
                 ) { Text(e, fontSize = 26.sp) }
             }
@@ -594,7 +612,7 @@ private fun GrilleEmojis(fermer: () -> Unit, choisir: (String) -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun QuiAReagi(m: Msg, fermer: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = fermer, containerColor = P.surface) {
+    ModalBottomSheet(onDismissRequest = fermer, containerColor = P.menu) {
         Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
             Text(
                 t("Réactions"), color = P.texteFort, fontWeight = FontWeight.Bold, fontSize = 17.sp,
@@ -609,7 +627,7 @@ private fun QuiAReagi(m: Msg, fermer: () -> Unit) {
                         color = P.texteFort, modifier = Modifier.weight(1f),
                     )
                     if (r.fromMe) {
-                        TextButton(onClick = {
+                        TextButton(shape = formeBouton, onClick = {
                             fermer()
                             Depot.reagir(m.conv, m.id, r.emoji)
                         }) { Text(t("Retirer"), color = P.accent) }
@@ -627,9 +645,10 @@ private fun QuiAReagi(m: Msg, fermer: () -> Unit) {
 @Composable
 private fun Reactions(m: Msg, modifier: Modifier, toucher: () -> Unit) {
     val groupes = m.reactions.groupBy { it.emoji }
-    val forme = RoundedCornerShape(50)
+    val forme = formePilule
     Row(
-        modifier.clip(forme).background(P.surface).border(1.5.dp, P.fil, forme).clickable(onClick = toucher)
+        modifier.clip(forme).background(if (P.clair) P.menu else P.surface)
+            .border(if (P.ega) 1.dp else 1.5.dp, if (P.ega) P.bordBulle else if (P.clair) P.bordCarte else P.fil, forme).clickable(onClick = toucher)
             .padding(horizontal = 7.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -637,7 +656,7 @@ private fun Reactions(m: Msg, modifier: Modifier, toucher: () -> Unit) {
         for ((emoji, quiLaMis) in groupes) {
             val mienne = quiLaMis.any { it.fromMe }
             Row(
-                Modifier.clip(forme).background(if (mienne) P.accent.copy(alpha = 0.30f) else Color.Transparent)
+                Modifier.clip(forme).background(if (mienne) (if (P.ega) P.choisi else P.accent.copy(alpha = 0.30f)) else Color.Transparent)
                     .padding(horizontal = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -659,7 +678,7 @@ private fun PieceImage(p: Piece, envoi: Boolean, appuiLong: () -> Unit, agrandir
     val chemin = if (p.estImage) Depot.medias[p.mediaId] else vignette
     val ratio = if (p.w > 0 && p.h > 0) (p.w.toFloat() / p.h).coerceIn(0.5f, 2.5f) else 1.3f
     val cadre = Modifier.widthIn(max = 260.dp).fillMaxWidth(0.7f).aspectRatio(ratio)
-        .clip(RoundedCornerShape(16.dp)).background(P.surface)
+        .carte(16.dp)
     Box(contentAlignment = Alignment.Center) {
         if (chemin != null) {
             ImageFichier(
@@ -678,12 +697,12 @@ private fun PieceImage(p: Piece, envoi: Boolean, appuiLong: () -> Unit, agrandir
         if (vignette != null && !p.estImage) {
             Icon(
                 Icons.Filled.PlayArrow, null, tint = Color.White,
-                modifier = Modifier.size(44.dp).clip(CircleShape).background(Color(0x88000000)).padding(6.dp),
+                modifier = Modifier.size(44.dp).clip(formeRonde).background(Color(0x88000000)).padding(6.dp),
             )
         }
         // Envoi en cours : un voile et une roue (la progression n'est pas connue).
         if (envoi && chemin != null) {
-            Box(Modifier.matchParentSize().clip(RoundedCornerShape(16.dp)).background(Color(0x66000000)), contentAlignment = Alignment.Center) {
+            Box(Modifier.matchParentSize().clip(forme(16.dp)).background(Color(0x66000000)), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(Modifier.size(30.dp), color = Color.White, strokeWidth = 3.dp)
             }
         }
@@ -694,7 +713,7 @@ private fun PieceImage(p: Piece, envoi: Boolean, appuiLong: () -> Unit, agrandir
 private fun PieceAutre(nom: String, modifier: Modifier = Modifier) {
     Text(
         "📎 $nom", color = P.texte, fontSize = 13.sp,
-        modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(P.surface).then(modifier)
+        modifier = Modifier.carte(16.dp).then(modifier)
             .padding(horizontal = 12.dp, vertical = 8.dp),
     )
 }
@@ -724,7 +743,7 @@ private fun Saisie(conv: String, actif: Boolean) {
     val video = rememberLauncherForActivityResult(ActivityResultContracts.CaptureVideo()) { ok ->
         capture?.let { if (ok) ajouter(listOf(it)) }
     }
-    Column(Modifier.fillMaxWidth().background(P.fil).navigationBarsPadding().imePadding()) {
+    Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding()) {
         erreurEnvoi?.let {
             Text(it, color = P.danger, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
         }
@@ -747,7 +766,10 @@ private fun Saisie(conv: String, actif: Boolean) {
                 IconButton(onClick = { choix = true }, enabled = actif, modifier = Modifier.size(44.dp)) {
                     Icon(Icons.Filled.Add, t("Joindre"), tint = if (actif) P.icone else P.choisi)
                 }
-                DropdownMenu(expanded = choix, onDismissRequest = { choix = false }, containerColor = P.menu) {
+                DropdownMenu(
+                    expanded = choix, onDismissRequest = { choix = false }, containerColor = P.menu,
+                    shape = forme(16.dp), border = if (P.ega) androidx.compose.foundation.BorderStroke(1.dp, P.bordBulle) else null,
+                ) {
                     DropdownMenuItem(
                         text = { Text(t("Photos et vidéos")) },
                         leadingIcon = { Icon(Icones.images, null) },
@@ -789,7 +811,7 @@ private fun Saisie(conv: String, actif: Boolean) {
                 }
             }
             Box(
-                Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(22.dp)).background(P.surface)
+                Modifier.weight(1f).heightIn(min = 44.dp).carte(22.dp)
                     .padding(horizontal = 16.dp, vertical = 11.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
@@ -797,7 +819,7 @@ private fun Saisie(conv: String, actif: Boolean) {
                 BasicTextField(
                     texte, { texte = it },
                     enabled = actif,
-                    textStyle = TextStyle(color = P.texteFort, fontSize = 16.sp),
+                    textStyle = TextStyle(color = P.texteFort, fontSize = 16.sp, fontFamily = P.police),
                     cursorBrush = SolidColor(P.accent),
                     maxLines = 6,
                     modifier = Modifier.fillMaxWidth(),
@@ -819,9 +841,10 @@ private fun Saisie(conv: String, actif: Boolean) {
                     }
                 },
                 enabled = peut,
-                modifier = Modifier.size(44.dp).clip(CircleShape).background(if (peut) P.accent else P.surface),
+                modifier = Modifier.size(44.dp).clip(formeRonde)
+                    .let { if (peut) it.background(P.degrade) else it.carte(22.dp) },
             ) {
-                Icon(Icons.AutoMirrored.Filled.Send, t("Envoyer"), tint = if (peut) P.texteFort else P.textePale)
+                Icon(Icons.AutoMirrored.Filled.Send, t("Envoyer"), tint = if (peut) P.surAccent else P.textePale)
             }
         }
     }
@@ -835,7 +858,7 @@ private fun VignetteAEnvoyer(u: Uri, retirer: () -> Unit) {
     val nom = remember(u) { Envoi.nom(ctx, u) }
     val video = remember(u) { ctx.contentResolver.getType(u)?.startsWith("video/") == true }
     Box(Modifier.size(72.dp)) {
-        val cadre = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(P.surface)
+        val cadre = Modifier.fillMaxSize().carte(12.dp)
         val img = image
         if (img != null) {
             androidx.compose.foundation.Image(img, nom, cadre, contentScale = ContentScale.Crop)
@@ -847,19 +870,17 @@ private fun VignetteAEnvoyer(u: Uri, retirer: () -> Unit) {
         if (video) {
             Icon(
                 Icons.Filled.PlayArrow, null, tint = Color.White,
-                modifier = Modifier.align(Alignment.Center).size(26.dp).clip(CircleShape).background(Color(0x88000000)),
+                modifier = Modifier.align(Alignment.Center).size(26.dp).clip(formeRonde).background(Color(0x88000000)),
             )
         }
         Icon(
             Icons.Filled.Close, t("Retirer"), tint = Color.White,
-            modifier = Modifier.align(Alignment.TopEnd).padding(3.dp).size(20.dp).clip(CircleShape)
+            modifier = Modifier.align(Alignment.TopEnd).padding(3.dp).size(20.dp).clip(formeRonde)
                 .background(Color(0xAA000000)).clickable(onClick = retirer).padding(2.dp),
         )
     }
 }
 
-/** Le jaune des résultats de recherche. */
-private val JAUNE = Color(0xFFFFD60A)
 
 /**
  * Le texte avec les passages qui correspondent à [q] (déjà « plié ») surlignés,
@@ -876,7 +897,8 @@ private fun surligner(texte: String, q: String, courant: Boolean): AnnotatedStri
             origine.add(i)
         }
     }
-    val style = if (courant) SpanStyle(background = JAUNE, color = Color.Black) else SpanStyle(background = JAUNE.copy(alpha = 0.35f))
+    val jaune = P.trouve
+    val style = if (courant || P.ega) SpanStyle(background = jaune, color = Color.Black) else SpanStyle(background = jaune.copy(alpha = 0.35f))
     return buildAnnotatedString {
         append(texte)
         var d = plie.indexOf(q)
@@ -903,11 +925,11 @@ private fun BarreRecherche(
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
     Row(
-        Modifier.fillMaxWidth().background(P.fond).padding(start = 12.dp, end = 4.dp, bottom = 6.dp),
+        Modifier.fillMaxWidth().background(P.barre).padding(start = 12.dp, end = 4.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
-            Modifier.weight(1f).heightIn(min = 40.dp).clip(RoundedCornerShape(20.dp)).background(P.surface)
+            Modifier.weight(1f).heightIn(min = 40.dp).carte(20.dp)
                 .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -917,7 +939,7 @@ private fun BarreRecherche(
                 if (texte.isEmpty()) Text(t("Rechercher dans la conversation"), color = P.textePale, fontSize = 15.sp)
                 BasicTextField(
                     texte, changer, singleLine = true,
-                    textStyle = TextStyle(color = P.texteFort, fontSize = 15.sp),
+                    textStyle = TextStyle(color = P.texteFort, fontSize = 15.sp, fontFamily = P.police),
                     cursorBrush = SolidColor(P.accent),
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
                     keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { plusAncien() }),
@@ -949,7 +971,8 @@ private fun Galerie(liste: List<Msg>, fermer: () -> Unit, agrandir: (String) -> 
     LaunchedEffect(images.size) { images.forEach { Depot.telecharger(it) } }
     Dialog(onDismissRequest = fermer, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Scaffold(
-            containerColor = P.fond,
+            modifier = Modifier.fondFenetre(),
+            containerColor = P.ecran,
             topBar = {
                 TopAppBar(
                     navigationIcon = { IconButton(onClick = fermer) { Icon(Icons.Filled.Close, t("Fermer")) } },
@@ -972,7 +995,7 @@ private fun Galerie(liste: List<Msg>, fermer: () -> Unit, agrandir: (String) -> 
             ) {
                 items(images, key = { it.mediaId }) { p ->
                     val chemin = Depot.medias[p.mediaId]
-                    val cadre = Modifier.aspectRatio(1f).clip(RoundedCornerShape(6.dp)).background(P.surface)
+                    val cadre = Modifier.aspectRatio(1f).carte(6.dp)
                     if (chemin != null) {
                         ImageFichier(chemin, cadre.clickable { agrandir(chemin) }, cote = 384)
                     } else {

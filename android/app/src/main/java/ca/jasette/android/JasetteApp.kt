@@ -8,5 +8,6 @@ class JasetteApp : Application() {
         super.onCreate()
         Langue.charger(this)
         Marques.charger(this)
+        ca.jasette.android.ui.Apparence.charger(this)
     }
 }

@@ -139,7 +139,7 @@ fun App(activite: Activity) {
         )
     }
 
-    Row(Modifier.fillMaxSize().background(P.fond)) {
+    Row(Modifier.fillMaxSize().fondFenetre()) {
         if (large && ecran !is Ecran.Connexion) {
             Rail(
                 vue = vue,
@@ -226,7 +226,7 @@ private fun Liste(
         is Vue.DuService -> vue.service.titre
     }
     Scaffold(
-        containerColor = P.fond,
+        containerColor = P.ecran,
         topBar = {
             TopAppBar(
                 title = {
@@ -253,7 +253,10 @@ private fun Liste(
         bottomBar = { if (!large) BarreBas(vue, choisirVue) },
         floatingActionButton = {
             if (!reorganiser) {
-                FloatingActionButton(onClick = { nouveau = true }, containerColor = P.accent, contentColor = P.texteFort) {
+                FloatingActionButton(
+                    onClick = { nouveau = true }, containerColor = P.accentPlein, contentColor = P.surAccent,
+                    shape = forme(16.dp),
+                ) {
                     Icon(Icons.Filled.Add, t("Nouveau message"))
                 }
             }
@@ -335,13 +338,13 @@ private fun Liste(
                     }
                     items(trouvees, key = { "p-" + it.first }) { (id, nom) ->
                         val s = Service.de(id)
-                        val detail = if (s == Service.INSTAGRAM) t("Nouvelle conversation Instagram") else t("Nouvelle conversation Messenger")
+                        val detail = detailPersonne(s, id)
                         Suggestion(nom, detail, s, null) {
                             filtre = ""
                             Depot.nouvelleConversation(s, id)
                         }
                     }
-                } else if (Service.META.any { Depot.pret(it) } && visibles.isEmpty()) {
+                } else if (Service.entries.any { Depot.pret(it) } && visibles.isEmpty()) {
                     item { Text(t("Recherche…"), color = P.textePale, modifier = Modifier.padding(start = 16.dp, top = 8.dp)) }
                 }
             }
@@ -352,12 +355,22 @@ private fun Liste(
     if (nouveau) NouveauMessage(fermer = { nouveau = false }, ouvrir = ouvrir)
 }
 
+/**
+ * Le détail d'une personne trouvée : « Contact · numéro » pour un contact du
+ * téléphone (Google Messages), sinon la nouvelle conversation Messenger ou Instagram.
+ */
+private fun detailPersonne(s: Service, id: String): String = when (s) {
+    Service.GOOGLE -> "${t("Contact")} · ${Depot.numerosContacts[id] ?: id}"
+    Service.INSTAGRAM -> t("Nouvelle conversation Instagram")
+    Service.MESSENGER -> t("Nouvelle conversation Messenger")
+}
+
 /** La barre de recherche en haut de la liste. */
 @Composable
 private fun ChampFiltre(texte: String, changer: (String) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).clip(RoundedCornerShape(20.dp))
-            .background(P.surface).padding(horizontal = 12.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).carte(20.dp)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Filled.Search, null, tint = P.textePale, modifier = Modifier.size(18.dp))
@@ -366,7 +379,7 @@ private fun ChampFiltre(texte: String, changer: (String) -> Unit) {
             if (texte.isEmpty()) Text(t("Rechercher"), color = P.textePale, fontSize = 15.sp)
             BasicTextField(
                 texte, changer, singleLine = true,
-                textStyle = TextStyle(color = P.texteFort, fontSize = 15.sp),
+                textStyle = TextStyle(color = P.texteFort, fontSize = 15.sp, fontFamily = P.police),
                 cursorBrush = SolidColor(P.accent),
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -404,7 +417,8 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Scaffold(
-            containerColor = P.fond,
+            modifier = Modifier.fondFenetre(),
+            containerColor = P.ecran,
             topBar = {
                 TopAppBar(
                     navigationIcon = { IconButton(onClick = ::finir) { Icon(Icons.Filled.Close, t("Fermer")) } },
@@ -416,8 +430,8 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
             LazyColumn(Modifier.fillMaxSize().padding(marges).imePadding()) {
                 item {
                     Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(14.dp))
-                            .background(P.surface).padding(horizontal = 14.dp, vertical = 12.dp),
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).carte(14.dp)
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(t("À :"), color = P.textePale, fontSize = 16.sp)
@@ -426,7 +440,7 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
                             if (texte.isEmpty()) Text(t("Nom ou numéro de téléphone"), color = P.textePale, fontSize = 16.sp)
                             BasicTextField(
                                 texte, { texte = it }, singleLine = true,
-                                textStyle = TextStyle(color = P.texteFort, fontSize = 16.sp),
+                                textStyle = TextStyle(color = P.texteFort, fontSize = 16.sp, fontFamily = P.police),
                                 cursorBrush = SolidColor(P.accent),
                                 modifier = Modifier.fillMaxWidth().focusRequester(focus),
                             )
@@ -449,7 +463,7 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
                 val trouvees = Depot.resultatsMeta.filter { (id, _) -> Depot.conv(id) == null }.take(8)
                 items(trouvees, key = { "m-" + it.first }) { (id, nom) ->
                     val s = Service.de(id)
-                    val detail = if (s == Service.INSTAGRAM) t("Nouvelle conversation Instagram") else t("Nouvelle conversation Messenger")
+                    val detail = detailPersonne(s, id)
                     Suggestion(nom, detail, s, null) {
                         Depot.nouvelleConversation(s, id)
                         finir()
@@ -466,7 +480,7 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
                 }
                 if (existantes.isEmpty() && trouvees.isEmpty() && !numero) {
                     item {
-                        val cherche = q.length >= 2 && Service.META.any { Depot.pret(it) }
+                        val cherche = q.length >= 2 && Service.entries.any { Depot.pret(it) }
                         Text(
                             if (cherche) t("Recherche…") else t("Aucun résultat"),
                             color = P.textePale, modifier = Modifier.padding(24.dp),
@@ -503,8 +517,8 @@ private fun Suggestion(nom: String, detail: String, s: Service, conv: Conv?, onC
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun barreCouleurs() = TopAppBarDefaults.topAppBarColors(
-    containerColor = P.fond, scrolledContainerColor = P.fond,
-    titleContentColor = P.texteFort, navigationIconContentColor = P.icone, actionIconContentColor = P.icone,
+    containerColor = P.barre, scrolledContainerColor = P.barre,
+    titleContentColor = P.titre, navigationIconContentColor = P.icone, actionIconContentColor = P.icone,
 )
 
 /** Les bandeaux en haut de la liste : erreurs, association Google, NIP Messenger, aucun compte. */
@@ -556,12 +570,12 @@ fun Bandeau(
     contenu: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().padding(top = 4.dp).clip(RoundedCornerShape(14.dp)).background(P.surface)
+        Modifier.fillMaxWidth().padding(top = 4.dp).carte(14.dp)
             .let { if (onClick != null) it.clickable(onClick = onClick) else it }
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(8.dp).clip(CircleShape).background(couleur))
+        Box(Modifier.size(8.dp).clip(formeRonde).background(couleur))
         Spacer(Modifier.width(12.dp))
         contenu()
     }
@@ -582,7 +596,7 @@ private fun accueilVisible() = Depot.serveur == null && aucunCompte()
 @Composable
 private fun Accueil(serveur: () -> Unit, connecter: (Service, String) -> Unit) {
     Column(
-        Modifier.fillMaxWidth().padding(12.dp).clip(RoundedCornerShape(18.dp)).background(P.surface).padding(16.dp),
+        Modifier.fillMaxWidth().padding(12.dp).carte(18.dp).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -607,7 +621,7 @@ private fun Accueil(serveur: () -> Unit, connecter: (Service, String) -> Unit) {
                     Depot.erreurServeur = null
                     serveur()
                 }
-                androidx.compose.material3.HorizontalDivider(color = P.fond)
+                androidx.compose.material3.HorizontalDivider(color = P.filet)
                 ChoixRangee(
                     icone = Icons.Filled.Phone,
                     titre = t("Autonome"),
@@ -620,7 +634,7 @@ private fun Accueil(serveur: () -> Unit, connecter: (Service, String) -> Unit) {
             Text(t("Connecte un premier service :"), color = P.texte, fontSize = 14.sp)
             Groupe {
                 for ((i, s) in Service.entries.withIndex()) {
-                    if (i > 0) androidx.compose.material3.HorizontalDivider(color = P.fond)
+                    if (i > 0) androidx.compose.material3.HorizontalDivider(color = P.filet)
                     Row(
                         Modifier.fillMaxWidth().clickable { connecter(s, s.cle) }.padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -635,7 +649,7 @@ private fun Accueil(serveur: () -> Unit, connecter: (Service, String) -> Unit) {
                     }
                 }
             }
-            TextButton(onClick = { Depot.accueilAutonome = false }) { Text(t("Changer de mode"), color = P.textePale) }
+            TextButton(shape = formeBouton, onClick = { Depot.accueilAutonome = false }) { Text(t("Changer de mode"), color = P.textePale) }
         }
     }
 }
