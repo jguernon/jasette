@@ -219,6 +219,8 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Initiale" to "Initial",
     "Sans photo" to "No photo",
     "Moi" to "Me",
+    "Message à %s sur %s" to "Message %s on %s",
+    "ce contact" to "this contact",
     "Ne plus utiliser ce serveur ?" to "Stop using this server?",
     "Cet appareil se débranchera du serveur Jasette. Tes services restent connectés sur le serveur ; pour revenir, il faudra jumeler de nouveau avec un nouveau code." to "This device will disconnect from the Jasette server. Your services stay connected on the server; to come back, you will need to pair again with a new code.",
     "Aucun service connecté." to "No service connected.",

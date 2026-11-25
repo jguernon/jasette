@@ -829,8 +829,12 @@ private fun Saisie(conv: String, actif: Boolean) {
             verticalAlignment = Alignment.Bottom,
         ) {
             Box {
-                IconButton(onClick = { choix = true }, enabled = actif, modifier = Modifier.size(44.dp)) {
-                    Icon(Icons.Filled.Add, t("Joindre"), tint = if (actif) P.icone else P.choisi)
+                // Comme au bureau : le + dans un rond plein.
+                IconButton(
+                    onClick = { choix = true }, enabled = actif,
+                    modifier = Modifier.size(44.dp).carte(22.dp),
+                ) {
+                    Icon(Icons.Filled.Add, t("Joindre"), tint = if (actif) P.texteFort else P.textePale)
                 }
                 DropdownMenu(
                     expanded = choix, onDismissRequest = { choix = false }, containerColor = P.menu,
@@ -876,24 +880,39 @@ private fun Saisie(conv: String, actif: Boolean) {
                     )
                 }
             }
-            Box(
-                Modifier.weight(1f).heightIn(min = 44.dp).carte(22.dp)
-                    .padding(horizontal = 16.dp, vertical = 11.dp),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                if (texte.isEmpty()) Text(if (actif) t("Message") else t("Envoi impossible pour l'instant"), color = P.textePale)
-                BasicTextField(
-                    texte, { texte = it },
-                    enabled = actif,
-                    textStyle = TextStyle(color = P.texteFort, fontSize = 16.sp, fontFamily = P.police),
-                    cursorBrush = SolidColor(P.accent),
-                    maxLines = 6,
-                    modifier = Modifier.fillMaxWidth().focusRequester(focusSaisie),
-                )
-            }
             Spacer(Modifier.width(8.dp))
+            // Comme au bureau : une pastille avec le logo du service et
+            // « Message à <nom> sur <service> ».
+            val service = ca.jasette.android.Service.de(conv)
+            val nomConv = Depot.conv(conv)?.name?.ifEmpty { null } ?: t("ce contact")
+            Row(
+                Modifier.weight(1f).heightIn(min = 44.dp).carte(22.dp)
+                    .padding(start = 12.dp, end = 16.dp, top = 11.dp, bottom = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                LogoService(service, 20.dp)
+                Spacer(Modifier.width(10.dp))
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    if (texte.isEmpty()) {
+                        Text(
+                            if (actif) t("Message à %s sur %s").format(nomConv, service.court) else t("Envoi impossible pour l'instant"),
+                            color = P.textePale, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    BasicTextField(
+                        texte, { texte = it },
+                        enabled = actif,
+                        textStyle = TextStyle(color = P.texteFort, fontSize = 16.sp, fontFamily = P.police),
+                        cursorBrush = SolidColor(P.accent),
+                        maxLines = 6,
+                        modifier = Modifier.fillMaxWidth().focusRequester(focusSaisie),
+                    )
+                }
+            }
             val peut = actif && (texte.isNotBlank() || pieces.isNotEmpty())
-            IconButton(
+            // Le bouton d'envoi n'apparaît que lorsqu'il y a quelque chose à envoyer.
+            if (peut) Spacer(Modifier.width(8.dp))
+            if (peut) IconButton(
                 onClick = {
                     val l = pieces.toList()
                     val tx = texte.trim()
