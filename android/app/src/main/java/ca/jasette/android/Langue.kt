@@ -243,6 +243,8 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Sans photo" to "No photo",
     "Moi" to "Me",
     "Grosseur du texte des messages" to "Message text size",
+    "Liste des conversations plus grosse" to "Larger conversation list",
+    "Noms, aperçus, heures et titres des Head un peu plus gros." to "Slightly larger names, previews, times and Head titles.",
     "Texte des messages : %d %%" to "Message text: %d %%",
     "On se voit au chalet vendredi ?" to "See you at the cabin Friday?",
     "Oui ! J'apporte les guimauves." to "Yes! I'm bringing marshmallows.",
