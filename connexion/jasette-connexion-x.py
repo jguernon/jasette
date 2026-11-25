@@ -93,7 +93,27 @@ class Connexion(Gtk.ApplicationWindow):
         # X est une appli d'une seule page : l'adresse change sans nouveau
         # chargement. On vérifie aussi quand l'adresse change.
         self.vue.connect("notify::uri", lambda v, _p: self.verifier())
-        self.set_child(self.vue)
+        # Si X refuse la connexion dans cette fenêtre (« Something went
+        # wrong »), deux replis, seulement sur un clic : reprendre la session
+        # déjà ouverte dans Firefox, ou coller soi-même auth_token et ct0.
+        barre = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        for m in ("top", "bottom", "start", "end"):
+            getattr(barre, f"set_margin_{m}")(8)
+        self.aide = Gtk.Label(label="X refuse la connexion ici ?", xalign=0)
+        self.aide.set_hexpand(True)
+        self.aide.set_wrap(True)
+        barre.append(self.aide)
+        b1 = Gtk.Button(label="Prendre ma session Firefox")
+        b1.connect("clicked", lambda _b: self.depuis_firefox())
+        barre.append(b1)
+        b2 = Gtk.Button(label="Coller mes cookies")
+        b2.connect("clicked", lambda _b: self.coller())
+        barre.append(b2)
+        boite = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        boite.append(barre)
+        self.vue.set_vexpand(True)
+        boite.append(self.vue)
+        self.set_child(boite)
         self.connect("close-request", self.fermee)
         # Les cookies arrivent parfois après le dernier changement d'adresse :
         # on revérifie toutes les 2 secondes.
@@ -115,6 +135,75 @@ class Connexion(Gtk.ApplicationWindow):
         nouvelle.connect("ready-to-show", lambda _v: fen.present())
         nouvelle.connect("close", lambda _v: fen.destroy())
         return nouvelle
+
+    # ---- Replis : la session de Firefox, ou les cookies collés ----
+
+    def depuis_firefox(self):
+        """Lit, dans les profils Firefox de cet utilisateur, les cookies de
+        x.com du profil le plus récemment connecté. Lecture seule (immutable),
+        sur un clic ; rien n'est gardé ailleurs que dans le pont."""
+        import glob
+        import sqlite3
+        racines = [Path.home() / ".mozilla/firefox", Path.home() / "snap/firefox/common/.mozilla/firefox",
+                   Path.home() / ".var/app/org.mozilla.firefox/.mozilla/firefox"]
+        meilleur, quand = None, -1
+        for r in racines:
+            for f in glob.glob(str(r / "*" / "cookies.sqlite")):
+                try:
+                    c = sqlite3.connect(f"file:{f}?immutable=1", uri=True)
+                    lignes = c.execute(
+                        "SELECT name, value, lastAccessed FROM moz_cookies WHERE "
+                        "host IN ('x.com', '.x.com', 'twitter.com', '.twitter.com')").fetchall()
+                    c.close()
+                except sqlite3.Error:
+                    continue
+                vals = {n: v for n, v, _ in lignes if n in VOULUS and v}
+                if not REQUIS.issubset(vals):
+                    continue
+                recent = max(a for n, _, a in lignes if n == "auth_token")
+                if recent > quand:
+                    meilleur, quand = vals, recent
+        if meilleur is None:
+            self.aide.set_text("Aucune session X trouvée dans Firefox : connecte-toi à x.com dans Firefox, puis réessaie.")
+            return
+        self.connecte(meilleur)
+
+    def coller(self):
+        fen = Gtk.Window(title="Cookies de X — Jasette", transient_for=self, modal=True)
+        boite = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        for m in ("top", "bottom", "start", "end"):
+            getattr(boite, f"set_margin_{m}")(20)
+        info = Gtk.Label(label=(
+            "Dans ton navigateur, connecté à x.com : outils de développement (F12) → "
+            "Stockage / Application → Cookies → https://x.com. Copie les valeurs "
+            "de auth_token et de ct0."))
+        info.set_wrap(True)
+        info.set_max_width_chars(50)
+        boite.append(info)
+        champs = {}
+        for nom in ("auth_token", "ct0"):
+            e = Gtk.PasswordEntry()
+            e.set_show_peek_icon(True)
+            e.set_property("placeholder-text", nom)
+            champs[nom] = e
+            boite.append(e)
+        erreur = Gtk.Label()
+        boite.append(erreur)
+        ok = Gtk.Button(label="Continuer")
+        ok.add_css_class("suggested-action")
+
+        def valider(_b):
+            vals = {n: e.get_text().strip() for n, e in champs.items()}
+            if not all(vals.values()):
+                erreur.set_text("Les deux valeurs sont nécessaires.")
+                return
+            fen.destroy()
+            self.connecte(vals)
+
+        ok.connect("clicked", valider)
+        boite.append(ok)
+        fen.set_child(boite)
+        fen.present()
 
     def fermee(self, _fen):
         if not self.fini:
