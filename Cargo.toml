@@ -7,6 +7,7 @@ description = "Jasette : Google Messages (SMS + RCS) sur le bureau, en EGA, avec
 license = "AGPL-3.0-or-later"
 
 [dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 gpui = { package = "gpui-pre", version = "=0.3.14" }
 gpui-component = "0.11.0"
 gpui-kit-assets = "0.11.0"

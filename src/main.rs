@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 use gpui::{
     AnyElement, App, AppContext, BoxShadow, Bounds, Context, Div, Entity, FontWeight, Hsla, InteractiveElement,
     IntoElement, ObjectFit, ParentElement, PathPromptOptions, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, StyledImage, Svg, TitlebarOptions, Window, WindowBounds, WindowOptions, div,
+    StatefulInteractiveElement, Styled, StyledImage, Svg, Window, WindowBounds, WindowOptions, div,
     hsla, img, linear_color_stop, linear_gradient, point, prelude::FluentBuilder, px, rgb, rgba, size, svg,
 };
 use gpui_component::Root;
@@ -1064,6 +1064,46 @@ struct Jasette {
 /// quel pont envoyer une commande.
 const PREFIXE_META: &str = "m:";
 
+/// Un avatar recadré en carré (au centre) : GPUI arrondit l'image selon sa
+/// propre boîte, et une photo en hauteur dépasserait du rond.
+fn carre(chemin: PathBuf) -> PathBuf {
+    let Ok(img) = image::open(&chemin) else { return chemin };
+    let (w, h) = (img.width(), img.height());
+    if w == h {
+        return chemin;
+    }
+    let cote = w.min(h);
+    let sortie = chemin.with_file_name(format!(
+        "{}-carre.png",
+        chemin.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()
+    ));
+    if sortie.is_file() {
+        return sortie;
+    }
+    let rogne = img.crop_imm((w - cote) / 2, (h - cote) / 2, cote, cote).resize(256.min(cote), 256.min(cote), image::imageops::FilterType::Lanczos3);
+    match rogne.save(&sortie) {
+        Ok(()) => sortie,
+        Err(_) => chemin,
+    }
+}
+
+/// L'icône de Jasette : petite pour la barre de titre, grande pour l'accueil.
+fn icone_app() -> Arc<gpui::Image> {
+    static I: std::sync::OnceLock<Arc<gpui::Image>> = std::sync::OnceLock::new();
+    I.get_or_init(|| {
+        Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, include_bytes!("../assets/png/jasette-48.png").to_vec()))
+    })
+    .clone()
+}
+
+fn icone_app_grande() -> Arc<gpui::Image> {
+    static I: std::sync::OnceLock<Arc<gpui::Image>> = std::sync::OnceLock::new();
+    I.get_or_init(|| {
+        Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, include_bytes!("../assets/png/jasette-256.png").to_vec()))
+    })
+    .clone()
+}
+
 fn service_de(id: &str) -> Service {
     if id.starts_with(PREFIXE_META) { Service::Messenger } else { Service::GoogleMessages }
 }
@@ -1413,7 +1453,7 @@ impl Jasette {
             }
             "paired" => self.etat_meta = Etat::Connexion,
             "account" => self.nom_meta = v.get("name").and_then(Value::as_str).map(str::to_string),
-            "avatar_moi" => self.avatar_messenger = v.get("path").and_then(Value::as_str).map(PathBuf::from),
+            "avatar_moi" => self.avatar_messenger = v.get("path").and_then(Value::as_str).map(|p| carre(PathBuf::from(p))),
             "history_pin" => {
                 if v.get("needed").and_then(Value::as_bool) == Some(true) {
                     self.besoin_nip = true;
@@ -1682,7 +1722,7 @@ impl Jasette {
                         .map(|m| {
                             let champ = |k: &str| m.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
                             let chemin = champ("path");
-                            (champ("name"), champ("color"), (!chemin.is_empty()).then(|| PathBuf::from(chemin)))
+                            (champ("name"), champ("color"), (!chemin.is_empty()).then(|| carre(PathBuf::from(chemin))))
                         })
                         .collect::<Vec<_>>();
                     if !liste.is_empty() {
@@ -1692,7 +1732,7 @@ impl Jasette {
             }
             "avatar_moi" => {
                 if let Some(path) = v.get("path").and_then(Value::as_str) {
-                    self.avatar_google = Some(PathBuf::from(path));
+                    self.avatar_google = Some(carre(PathBuf::from(path)));
                     // Par défaut, dès qu'une photo existe, on la prend.
                     if self.reglages.avatar_source.is_empty() {
                         self.reglages.avatar_source = "google".into();
@@ -1704,7 +1744,7 @@ impl Jasette {
                 if let (Some(conv), Some(path)) =
                     (v.get("conv").and_then(Value::as_str), v.get("path").and_then(Value::as_str))
                 {
-                    self.avatars.insert(conv.to_string(), PathBuf::from(path));
+                    self.avatars.insert(conv.to_string(), carre(PathBuf::from(path)));
                 }
             }
             "media" => {
@@ -3738,7 +3778,12 @@ impl Jasette {
             )));
 
         let contenu: AnyElement = match section {
-            Section::Comptes if self.ajout_compte || (self.etat == Etat::NonAssocie && self.connexion_ouverte) => {
+            // L'écran de connexion Google seulement si Google n'est pas connecté ;
+            // sinon « Ajouter un compte » montre la liste (Messenger s'y connecte).
+            Section::Comptes
+                if (self.ajout_compte && !self.etat.associe())
+                    || (self.etat == Etat::NonAssocie && self.connexion_ouverte) =>
+            {
                 self.ecran_connexion(cx).into_any_element()
             }
             Section::Comptes => self.comptes(cx).into_any_element(),
@@ -4205,10 +4250,7 @@ impl Jasette {
             .px(px(40.))
             .py(px(38.))
             .child(
-                img(Arc::new(gpui::Image::from_bytes(
-                    gpui::ImageFormat::Png,
-                    include_bytes!("../assets/png/jasette-256.png").to_vec(),
-                )))
+                img(icone_app_grande())
                 .size(px(84.)),
             )
             .child(div().text_size(px(26.)).font_weight(FontWeight::BOLD).text_color(th().texte_fort).child("Jasette"))
@@ -4303,7 +4345,41 @@ impl Jasette {
 }
 
 impl Render for Jasette {
+    /// La fenêtre dessine sa propre barre de titre (GNOME ne la dessine pas
+    /// pour une app qui demande des décorations côté client) et son bord.
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let contenu = self.rendu(window, cx);
+        gpui_component::window_border().child(
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .bg(th().fond)
+                .child(
+                    gpui_component::TitleBar::new()
+                        .bg(th().rail)
+                        .border_color(ton(blanc(0.6), c(0x2c2c2e)))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap(px(8.))
+                                .font_family(police())
+                                .text_size(px(13.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(th().texte)
+                                .child(img(icone_app()).size(px(18.)))
+                                .child("Jasette"),
+                        ),
+                )
+                .child(div().flex_1().min_h(px(0.)).child(contenu)),
+        )
+    }
+}
+
+impl Jasette {
+    fn rendu(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         // L'indication du champ nomme la conversation ouverte.
         let nom = self.choisie.as_ref().and_then(|id| self.conv(id)).map(|c| c.name.clone()).filter(|n| !n.is_empty());
         let service = self.choisie.as_deref().map(service_de).unwrap_or(Service::GoogleMessages);
@@ -4870,9 +4946,10 @@ fn main() {
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
-                titlebar: Some(TitlebarOptions { title: Some("Jasette".into()), ..Default::default() }),
+                window_decorations: Some(gpui::WindowDecorations::Client),
+                window_background: gpui::WindowBackgroundAppearance::Transparent,
                 app_id: Some("jasette".into()),
-                ..Default::default()
+                ..gpui_component::TitleBar::window_options()
             },
             |window, cx| {
                 let vue = cx.new(|cx| Jasette::new(window, cx));
