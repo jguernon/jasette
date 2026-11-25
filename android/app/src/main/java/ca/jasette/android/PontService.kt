@@ -129,6 +129,18 @@ class PontService : ServiceAndroid() {
         }
     }
 
+    /** Découpe une image carrée en rond, comme les avatars de l'app (le reste transparent). */
+    private fun rond(src: android.graphics.Bitmap): android.graphics.Bitmap {
+        val cote = src.width
+        val sortie = android.graphics.Bitmap.createBitmap(cote, cote, android.graphics.Bitmap.Config.ARGB_8888)
+        val toile = android.graphics.Canvas(sortie)
+        val pinceau = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        toile.drawCircle(cote / 2f, cote / 2f, cote / 2f, pinceau)
+        pinceau.xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN)
+        toile.drawBitmap(src, 0f, 0f, pinceau)
+        return sortie
+    }
+
     /** Une photo d'avatar (fichier ou content://), réduite à 256 px, ou null. */
     private fun chargerAvatar(chemin: String): android.graphics.Bitmap? = try {
         val bmp = if (chemin.startsWith("content:")) {
@@ -139,7 +151,8 @@ class PontService : ServiceAndroid() {
         bmp?.let {
             val cote = minOf(it.width, it.height)
             val carre = android.graphics.Bitmap.createBitmap(it, (it.width - cote) / 2, (it.height - cote) / 2, cote, cote)
-            if (cote > 256) android.graphics.Bitmap.createScaledBitmap(carre, 256, 256, true) else carre
+            val reduit = if (cote > 256) android.graphics.Bitmap.createScaledBitmap(carre, 256, 256, true) else carre
+            rond(reduit)
         }
     } catch (_: Exception) {
         null
