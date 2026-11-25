@@ -869,6 +869,9 @@ struct Reglages {
     /// Les conversations favorites (ids, préfixés pour Messenger), dans l'ordre d'ajout.
     #[serde(default)]
     favoris: Vec<String>,
+    /// Les conversations épinglées en haut de la liste, dans l'ordre d'épinglage.
+    #[serde(default)]
+    epingles: Vec<String>,
     /// Le thème : "sombre" (ou vide, le défaut) ou "verre".
     #[serde(default)]
     theme: String,
@@ -894,6 +897,7 @@ impl Default for Reglages {
             teinte: String::new(),
             langue: String::new(),
             favoris: Vec::new(),
+            epingles: Vec::new(),
         }
     }
 }
@@ -3018,7 +3022,11 @@ impl Jasette {
         let badge = self.vue == Vue::Tout || self.vue == Vue::Archives;
         let mut col =
             div().id("convs").flex().flex_col().size_full().overflow_y_scroll().px(px(8.)).pt(px(haut)).pb(px(18.));
-        let visibles: Vec<&Conv> = source.iter().filter(|c| self.correspond(c)).collect();
+        let mut visibles: Vec<&Conv> = source.iter().filter(|c| self.correspond(c)).collect();
+        // Les épinglées d'abord, dans l'ordre où elles ont été épinglées.
+        let rang = |c: &Conv| self.reglages.epingles.iter().position(|x| x == &c.id).unwrap_or(usize::MAX);
+        visibles.sort_by_key(|c| rang(c));
+        let nb_epingles = visibles.iter().filter(|c| rang(c) != usize::MAX).count();
         if source.is_empty() {
             let t = if self.vue == Vue::Archives && !self.archives_chargees {
                 t("Chargement des archives…")
@@ -3096,6 +3104,11 @@ impl Jasette {
         }
         let n = visibles.len();
         for (i, conv) in visibles.into_iter().enumerate() {
+            // Un peu d'air sous les épinglées.
+            if nb_epingles > 0 && i == nb_epingles {
+                col = col.child(div().h(px(1.)).mx(px(10.)).my(px(8.)).bg(th().survol));
+            }
+            let epinglee = i < nb_epingles;
             let choisie = self.choisie.as_deref() == Some(conv.id.as_str());
             let id = conv.id.clone();
             let nom = if conv.name.is_empty() { t("Sans nom").to_string() } else { conv.name.clone() };
@@ -3158,8 +3171,13 @@ impl Jasette {
                                     .child(
                                         div()
                                             .flex_none()
+                                            .flex()
+                                            .flex_row()
+                                            .items_center()
+                                            .gap(px(4.))
                                             .text_size(px(12.))
                                             .text_color(if conv.unread { th().accent } else { th().texte_pale })
+                                            .when(epinglee, |d| d.child(icone("pin", 12., th().texte_pale)))
                                             .child(heure(conv.time, true)),
                                     ),
                             )
@@ -4150,6 +4168,8 @@ impl Jasette {
         let id_a = id.clone();
         let id_f = id.clone();
         let favori = self.reglages.favoris.contains(&id);
+        let epinglee = self.reglages.epingles.contains(&id);
+        let id_e = id.clone();
         let mut menu = verre(0.96, 16.)
             .shadow(ombre_verre())
             .w(px(240.))
@@ -4170,6 +4190,26 @@ impl Jasette {
                         f.retain(|x| x != &id_f);
                     } else {
                         f.push(id_f.clone());
+                    }
+                    this.reglages.garder();
+                    this.menu_conv = false;
+                    cx.notify();
+                })),
+            )
+            .child(
+                item(
+                    "menu-epingle",
+                    if epinglee { "pin-off" } else { "pin" },
+                    if epinglee { t("Désépingler") } else { t("Épingler en haut") }.into(),
+                    th().texte_fort,
+                    true,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    let e = &mut this.reglages.epingles;
+                    if epinglee {
+                        e.retain(|x| x != &id_e);
+                    } else {
+                        e.push(id_e.clone());
                     }
                     this.reglages.garder();
                     this.menu_conv = false;
@@ -5562,6 +5602,8 @@ fn t(fr: &'static str) -> &'static str {
         "Pour voir l'historique chiffré, entrez le NIP de Messenger (celui choisi dans l'app)." => "To see your encrypted history, enter your Messenger PIN (the one set in the app).",
         "Créé par" => "Created by",
         "Archiver" => "Archive",
+        "Épingler en haut" => "Pin to top",
+        "Désépingler" => "Unpin",
         "Ajouter aux favoris" => "Add to favorites",
         "Retirer des favoris" => "Remove from favorites",
         "Désarchiver" => "Unarchive",
