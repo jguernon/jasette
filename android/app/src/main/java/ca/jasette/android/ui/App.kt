@@ -58,6 +58,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ca.jasette.android.ContactTrouve
+import ca.jasette.android.Contacts
 import ca.jasette.android.Conv
 import ca.jasette.android.Depot
 import ca.jasette.android.Marques
@@ -108,6 +110,12 @@ fun App(activite: Activity) {
         if (pile.size > 1) pile = pile.dropLast(1) else if (ouverte != null && !volets) ouverte = null
     }
     BackHandler(enabled = pile.size > 1 || (ouverte != null && !volets)) { retour() }
+
+    // Les contacts du téléphone : relus à chaque retour au premier plan (sans
+    // jamais demander la permission ici ; seulement s'elle est déjà accordée).
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_START) {
+        Contacts.auPremierPlan(activite)
+    }
 
     fun choisirVue(v: Vue) {
         vue = v
@@ -359,13 +367,21 @@ private fun Liste(
             // La recherche : aussi les personnes trouvées par Messenger et Instagram
             // (la liste ne contient que les conversations récentes).
             if (f.length >= 2) {
-                val trouvees = Depot.resultatsMeta.filter { (id, _) -> Depot.conv(id) == null }.take(8)
-                if (trouvees.isNotEmpty()) {
+                // Les contacts du téléphone d'abord (avec leur photo), puis ceux des ponts sans doublon de numéro.
+                val tel = contactsTelephone(filtre)
+                val trouvees = personnesPonts(tel)
+                if (trouvees.isNotEmpty() || tel.isNotEmpty()) {
                     item(key = "personnes") {
                         Text(
                             t("Personnes"), color = P.textePale, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 4.dp),
                         )
+                    }
+                    items(tel, key = { "t-" + it.cle }) { c ->
+                        Suggestion(c.nom, "${t("Contact")} · ${c.numero}", Service.GOOGLE, null, image = { PhotoContact(c.photo, 42.dp) }) {
+                            filtre = ""
+                            Depot.nouvelleConversation(Service.GOOGLE, c.envoi)
+                        }
                     }
                     items(trouvees, key = { "p-" + it.first }) { (id, nom) ->
                         val s = Service.de(id)
@@ -394,6 +410,28 @@ private fun detailPersonne(s: Service, id: String): String = when (s) {
     Service.GOOGLE -> "${t("Contact")} · ${Depot.numerosContacts[id] ?: id}"
     Service.INSTAGRAM -> t("Nouvelle conversation Instagram")
     Service.MESSENGER -> t("Nouvelle conversation Messenger")
+}
+
+/**
+ * Les contacts du téléphone qui correspondent à [texte] (lus sur place, jamais
+ * envoyés) : seulement si Google Messages est connecté, et sans ceux qui ont
+ * déjà une conversation Google à deux.
+ */
+private fun contactsTelephone(texte: String): List<ContactTrouve> {
+    if (!Contacts.permis || !Depot.etat(Service.GOOGLE).associe) return emptyList()
+    val existants = (Depot.convs + Depot.archives)
+        .filter { !it.group && it.service == Service.GOOGLE }
+        .map { Contacts.cleDe(it.number) }.filter { it.isNotEmpty() }.toSet()
+    return Contacts.chercher(texte).filter { it.cle !in existants }
+}
+
+/** Les personnes trouvées par les ponts, sans conversation ici ni doublon (par numéro) d'un contact du téléphone. */
+private fun personnesPonts(tel: List<ContactTrouve>): List<Pair<String, String>> {
+    val cles = tel.map { it.cle }.toSet()
+    return Depot.resultatsMeta.filter { (id, _) ->
+        Depot.conv(id) == null &&
+            !(Service.de(id) == Service.GOOGLE && Contacts.cleDe(Depot.numerosContacts[id] ?: id) in cles)
+    }.take(8)
 }
 
 /** La barre de recherche en haut de la liste. */
@@ -435,7 +473,14 @@ private fun ChampFiltre(texte: String, changer: (String) -> Unit) {
 private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
     var texte by remember { mutableStateOf("") }
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
-    LaunchedEffect(Unit) { focus.requestFocus() }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    // La première ouverture propose l'accès aux contacts (avec une courte explication).
+    val demanderContacts = rememberDemandeContacts()
+    LaunchedEffect(Unit) {
+        focus.requestFocus()
+        Contacts.demarrer(ctx)
+        if (Contacts.proposerAuNouveau()) demanderContacts()
+    }
     LaunchedEffect(texte) { Depot.chercherContacts(texte) }
     fun finir() {
         Depot.chercherContacts("")
@@ -490,8 +535,16 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
                         ouvrir(c.id)
                     }
                 }
-                // Les personnes trouvées par Messenger ou Instagram, sans conversation ici.
-                val trouvees = Depot.resultatsMeta.filter { (id, _) -> Depot.conv(id) == null }.take(8)
+                // Les contacts du téléphone (« Contact · numéro », avec leur photo).
+                val tel = contactsTelephone(texte)
+                items(tel, key = { "t-" + it.cle }) { c ->
+                    Suggestion(c.nom, "${t("Contact")} · ${c.numero}", Service.GOOGLE, null, image = { PhotoContact(c.photo, 42.dp) }) {
+                        Depot.nouvelleConversation(Service.GOOGLE, c.envoi)
+                        finir()
+                    }
+                }
+                // Les personnes trouvées par les ponts, sans conversation ici ni doublon d'un contact du téléphone.
+                val trouvees = personnesPonts(tel)
                 items(trouvees, key = { "m-" + it.first }) { (id, nom) ->
                     val s = Service.de(id)
                     val detail = detailPersonne(s, id)
@@ -509,7 +562,7 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
                         }
                     }
                 }
-                if (existantes.isEmpty() && trouvees.isEmpty() && !numero) {
+                if (existantes.isEmpty() && tel.isEmpty() && trouvees.isEmpty() && !numero) {
                     item {
                         val cherche = q.length >= 2 && Service.entries.any { Depot.pret(it) }
                         Text(
@@ -524,12 +577,21 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
 }
 
 @Composable
-private fun Suggestion(nom: String, detail: String, s: Service, conv: Conv?, onClick: () -> Unit) {
+private fun Suggestion(
+    nom: String,
+    detail: String,
+    s: Service,
+    conv: Conv?,
+    image: (@Composable () -> Unit)? = null,
+    onClick: () -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (conv != null) {
+        if (image != null) {
+            image()
+        } else if (conv != null) {
             Avatar(conv, 42.dp)
         } else {
             androidx.compose.foundation.Image(

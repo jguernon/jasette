@@ -8,6 +8,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Les contacts du téléphone (photos, « Nouveau message ») : demandée seulement
+         quand l'utilisateur en a besoin, jamais au démarrage. Ils ne quittent pas le téléphone. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
 
     <application
         android:name=".JasetteApp"

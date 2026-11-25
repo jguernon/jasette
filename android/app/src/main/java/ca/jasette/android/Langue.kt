@@ -287,4 +287,17 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Rien" to "Nothing",
     "Conversation archivée" to "Conversation archived",
     "Conversation désarchivée" to "Conversation unarchived",
+    // Contacts du téléphone : permission, Réglages → Apparence.
+    "Accès aux contacts" to "Contacts access",
+    "Jasette peut montrer les photos de tes contacts et les proposer dans « Nouveau message ». Tes contacts restent sur ce téléphone : ils ne sont jamais envoyés au serveur ni aux services." to
+        "Jasette can show your contacts' photos and suggest them in “New message”. Your contacts stay on this phone: they are never sent to the server or to the services.",
+    "Plus tard" to "Not now",
+    "Paramètres" to "Settings",
+    "Accès aux contacts refusé" to "Contacts access denied",
+    "Utiliser les photos de mes contacts" to "Use my contacts' photos",
+    "La photo d'un contact du téléphone remplace celle de Google Messages, par le numéro." to
+        "A phone contact's photo replaces the Google Messages one, matched by number.",
+    "Aussi pour Messenger et Instagram (par le nom)" to "Also for Messenger and Instagram (by name)",
+    "Seulement quand un seul contact porte exactement le nom de la conversation." to
+        "Only when exactly one contact has the conversation's exact name.",
 )

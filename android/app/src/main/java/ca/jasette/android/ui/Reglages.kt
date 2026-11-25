@@ -139,6 +139,7 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
             Text(t("Apparence"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             ChoixTheme()
             ChoixHeures()
+            ChoixContacts()
             ChoixTeinte()
             ChoixVolets()
 

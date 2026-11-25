@@ -66,10 +66,14 @@ private fun initiales(nom: String): String? {
     return if (l.isEmpty() || l.all { it.isDigit() }) null else l
 }
 
-/** L'avatar d'une conversation, avec le petit badge de son service. */
+/**
+ * L'avatar d'une conversation, avec le petit badge de son service. La photo
+ * d'un contact du téléphone passe avant celle du service quand le réglage est
+ * actif (voir [ca.jasette.android.Contacts.photoPour]) ; la grande photo pour les gros avatars.
+ */
 @Composable
 fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true) {
-    val photo = Depot.avatars[conv.id]
+    val photo = ca.jasette.android.Contacts.photoPour(conv, grande = taille >= 48.dp) ?: Depot.avatars[conv.id]
     Box(Modifier.size(taille)) {
         val rond = Modifier.size(taille).clip(formeRonde)
         if (photo != null) {
