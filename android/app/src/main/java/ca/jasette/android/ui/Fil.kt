@@ -507,7 +507,7 @@ private fun Message(
                 Reactions(
                     m,
                     Modifier.align(if (m.fromMe) Alignment.BottomEnd else Alignment.BottomStart)
-                        .offset(x = if (m.fromMe) (-10).dp else 10.dp, y = 18.dp),
+                        .offset(x = if (m.fromMe) (-10).dp else 10.dp, y = 19.dp),
                 ) { qui = true }
             }
         }
