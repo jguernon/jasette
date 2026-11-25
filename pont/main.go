@@ -53,6 +53,7 @@ type Conversation struct {
 	Members  []string `json:"members"`
 	ReadOnly bool     `json:"read_only"`
 	Archived bool     `json:"archived"`
+	Number   string   `json:"number,omitempty"` // le numéro de l'autre (conversation à deux), pour appeler
 }
 
 type Message struct {
@@ -647,9 +648,16 @@ func (p *Pont) remember(c *gmproto.Conversation) {
 
 func convOut(c *gmproto.Conversation) Conversation {
 	members := []string{}
+	number := ""
 	for _, part := range c.GetParticipants() {
 		if part.GetIsMe() {
 			continue
+		}
+		if number == "" {
+			number = part.GetID().GetNumber()
+			if number == "" {
+				number = part.GetFormattedNumber()
+			}
 		}
 		n := part.GetFullName()
 		if n == "" {
@@ -670,6 +678,7 @@ func convOut(c *gmproto.Conversation) Conversation {
 		Members:  members,
 		ReadOnly: c.GetReadOnly(),
 		Archived: c.GetStatus() == gmproto.ConversationStatus_ARCHIVED || c.GetStatus() == gmproto.ConversationStatus_KEEP_ARCHIVED,
+		Number:   map[bool]string{true: "", false: number}[c.GetIsGroupChat()],
 	}
 }
 

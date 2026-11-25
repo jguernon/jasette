@@ -793,6 +793,12 @@ struct Conv {
     read_only: bool,
     #[serde(default)]
     archived: bool,
+    /// Le numéro de l'autre personne (Google, conversation à deux) : pour appeler.
+    #[serde(default)]
+    number: String,
+    /// Messenger : conversation chiffrée de bout en bout.
+    #[serde(default)]
+    e2ee: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1267,6 +1273,31 @@ fn script_connexion() -> Option<PathBuf> {
     }
     essais.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("connexion/jasette-connexion.py"));
     essais.into_iter().find(|p| p.is_file())
+}
+
+/// Ouvre une adresse (https:, tel:) avec l'application par défaut.
+fn ouvrir_adresse(adresse: &str) {
+    let _ = std::process::Command::new("xdg-open")
+        .arg(adresse)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
+/// L'appel d'une conversation : Jasette ne fait pas les appels elle-même, elle
+/// ouvre l'app « normale ». Google : le numéro (tel:, que NectarLink ou
+/// GSConnect fait composer au téléphone). Messenger et Instagram : la
+/// conversation sur leur site, où se trouvent les boutons d'appel.
+fn adresse_appel(conv: &Conv) -> Option<String> {
+    let svc = service_de(&conv.id);
+    let id = &conv.id[svc.prefixe().len()..];
+    match svc {
+        Service::GoogleMessages => (!conv.number.is_empty()).then(|| format!("tel:{}", conv.number.replace(' ', ""))),
+        Service::Messenger if conv.e2ee => Some(format!("https://www.messenger.com/e2ee/t/{id}")),
+        Service::Messenger => Some(format!("https://www.messenger.com/t/{id}")),
+        Service::Instagram => Some(format!("https://www.instagram.com/direct/t/{id}/")),
+    }
 }
 
 /// Ouvre un fichier avec l'application par défaut.
@@ -4104,6 +4135,25 @@ impl Jasette {
             }))
             .child(icone("info", 17., if details { th().accent } else { th().texte_pale }));
         let service = self.choisie.as_deref().map(service_de).unwrap_or(Service::GoogleMessages);
+        // Appel et vidéo : par l'app « normale » du service.
+        let appel = self.choisie.as_deref().and_then(|id| self.conv(id)).and_then(adresse_appel);
+        let bouton_appel = |cle: &'static str, ic: &'static str, adresse: String| {
+            div()
+                .id(cle)
+                .size(px(28.))
+                .rounded(rayon(999.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .hover(|s| s.bg(th().survol))
+                .on_click(move |_, _, _| ouvrir_adresse(&adresse))
+                .child(icone(ic, 17., th().texte_pale))
+        };
+        let boutons_appel = div().flex().flex_row().gap(px(2.)).when_some(appel, |d, adresse| {
+            d.child(bouton_appel("appel", "phone", adresse.clone()))
+                .when(service != Service::GoogleMessages, |d| d.child(bouton_appel("video", "video", adresse)))
+        });
         let menu_ouvert = self.menu_conv;
         let bouton_options = div()
             .id("options-conv")
@@ -4245,6 +4295,7 @@ impl Jasette {
                                 .child(div().truncate().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(nom))
                                 .child(div().truncate().text_size(px(12.)).text_color(th().texte_pale).child(detail)),
                         )
+                        .child(boutons_appel)
                         .child(bouton_medias)
                         .child(bouton_info)
                         .child(bouton_options)
