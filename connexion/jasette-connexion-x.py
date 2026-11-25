@@ -99,11 +99,12 @@ class Connexion(Gtk.ApplicationWindow):
     def surgissante(self, vue, _action):
         """Une fenêtre surgissante (connexion Google ou Apple), liée à la vue
         principale : même session, et X reçoit la réponse par window.opener."""
-        nouvelle = WebKit.WebView(related_view=vue)
         # Google refuse les navigateurs « intégrés » qui se disent Chrome :
         # comme la fenêtre de Google Messages, on se présente comme Firefox.
-        nouvelle.get_settings().set_user_agent(
-            "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0")
+        # Des réglages à elle : ceux de la vue de X ne changent pas.
+        reglages = WebKit.Settings()
+        reglages.set_user_agent("Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0")
+        nouvelle = WebKit.WebView(related_view=vue, settings=reglages)
         fen = Gtk.Window(title="Connexion — Jasette", transient_for=self)
         fen.set_default_size(500, 680)
         fen.set_child(nouvelle)
