@@ -246,7 +246,7 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Liste des conversations plus grosse" to "Larger conversation list",
     "Les services décochés sont cachés de la boîte de réception, des Head et des favoris. Rien n'est oublié : recochez-les pour les retrouver." to
         "Unchecked services are hidden from the inbox, the Head and favorites. Nothing is forgotten: check them again to bring them back.",
-    "Noms, aperçus, heures et titres des Head un peu plus gros." to "Slightly larger names, previews, times and Head titles.",
+    "Noms, aperçus et Head plus gros" to "Bigger names, previews and Heads",
     "Texte des messages : %d %%" to "Message text: %d %%",
     "On se voit au chalet vendredi ?" to "See you at the cabin Friday?",
     "Oui ! J'apporte les guimauves." to "Yes! I'm bringing marshmallows.",

@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -976,14 +977,21 @@ private fun ChoixTailleMessages() {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 androidx.compose.material3.Checkbox(
+                    modifier = Modifier.padding(end = 4.dp),
                     checked = Taille.listeGrosse, onCheckedChange = { Taille.choisir(ctx, it) },
                     colors = androidx.compose.material3.CheckboxDefaults.colors(
                         checkedColor = P.accent, uncheckedColor = P.textePale, checkmarkColor = P.surAccent,
                     ),
                 )
-                Column(Modifier.weight(1f)) {
-                    Text(t("Liste des conversations plus grosse"), color = P.texteFort, fontSize = 15.sp)
-                    Text(t("Noms, aperçus, heures et titres des Head un peu plus gros."), color = P.textePale, fontSize = 12.sp)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        t("Liste des conversations plus grosse"), color = P.texteFort, fontSize = 15.sp,
+                        lineHeight = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        t("Noms, aperçus et Head plus gros"), color = P.textePale, fontSize = 12.sp,
+                        lineHeight = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }
