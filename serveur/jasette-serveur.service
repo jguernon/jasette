@@ -1,0 +1,31 @@
+# Jasette — le serveur, comme service systemd de l'utilisateur.
+#
+# Installation (exemple) :
+#   install -Dm755 .cache/bin/jasette-serveur .cache/bin/jasette-pont .cache/bin/jasette-meta \
+#       .cache/bin/jasette-ig -t ~/.local/bin/
+#   install -Dm644 serveur/jasette-serveur.service -t ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now jasette-serveur
+#   loginctl enable-linger "$USER"      # pour qu'il tourne sans session ouverte
+#
+# Jumeler un appareil :   ~/.local/bin/jasette-serveur --jumeler
+# Journaux :              journalctl --user -u jasette-serveur -f
+
+[Unit]
+Description=Jasette, serveur de messagerie (Google Messages, Messenger, Instagram)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/jasette-serveur --port 47800
+# Les ponts sont cherchés à côté de jasette-serveur ; sinon : --bin DOSSIER.
+# Environment=JASETTE_MEDIA=%h/.local/share/jasette/media
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

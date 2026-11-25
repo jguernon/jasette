@@ -4,6 +4,10 @@
 //! JSON sur sa sortie standard, lue par un fil à part et gardée jusqu'à ce que
 //! l'interface la prenne ([`Pont::recevoir`]). Ses journaux passent tels quels
 //! dans la sortie d'erreur de Jasette.
+//!
+//! Ou bien le même service servi par un serveur Jasette ([`Pont::distant`],
+//! voir `distant.rs`) : même interface, l'interface n'a qu'à choisir lequel
+//! créer.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -13,10 +17,21 @@ use std::sync::mpsc::{Receiver, channel};
 
 use serde_json::{Value, json};
 
+#[path = "distant.rs"]
+pub mod distant;
+
+#[allow(unused_imports)] // utilisés par l'interface (réglages « serveur Jasette »)
+pub use distant::{ConfigServeur, PORT_PAR_DEFAUT, Verification, code_verification, jumeler, verifier_serveur};
+
 pub struct Pont {
-    enfant: Mutex<Child>,
-    entree: Mutex<ChildStdin>,
-    nouvelles: Mutex<Receiver<Value>>,
+    genre: Genre,
+}
+
+enum Genre {
+    /// Un processus enfant sur cette machine.
+    Local { enfant: Mutex<Child>, entree: Mutex<ChildStdin>, nouvelles: Mutex<Receiver<Value>> },
+    /// Un service d'un serveur Jasette.
+    Distant(distant::PontDistant),
 }
 
 /// La variable d'environnement `var`, sinon `nom` à côté de l'exécutable,
@@ -90,27 +105,50 @@ impl Pont {
                 let _ = tx.send(json!({"ev": "pont_ferme"}));
             })
             .map_err(|e| e.to_string())?;
-        Ok(Self { enfant: Mutex::new(enfant), entree: Mutex::new(entree), nouvelles: Mutex::new(rx) })
+        Ok(Self {
+            genre: Genre::Local { enfant: Mutex::new(enfant), entree: Mutex::new(entree), nouvelles: Mutex::new(rx) },
+        })
+    }
+
+    /// Le service `service` (« google », « messenger » ou « instagram ») d'un
+    /// serveur Jasette jumelé. Ne bloque pas : la connexion (une seule par
+    /// serveur, partagée entre les services) se fait en arrière-plan, et
+    /// l'interface reçoit `state: connecting` puis l'état réel du pont du
+    /// serveur.
+    #[allow(dead_code)] // appelé par l'interface en mode « Utiliser un serveur Jasette »
+    pub fn distant(config: &ConfigServeur, service: &str) -> Self {
+        Self { genre: Genre::Distant(distant::PontDistant::brancher(config, service)) }
     }
 
     pub fn envoyer(&self, commande: &Value) {
-        if let Ok(mut e) = self.entree.lock() {
-            let _ = writeln!(e, "{commande}");
-            let _ = e.flush();
+        match &self.genre {
+            Genre::Local { entree, .. } => {
+                if let Ok(mut e) = entree.lock() {
+                    let _ = writeln!(e, "{commande}");
+                    let _ = e.flush();
+                }
+            }
+            Genre::Distant(d) => d.envoyer(commande),
         }
     }
 
     /// Tout ce qui est arrivé depuis la dernière fois.
     pub fn recevoir(&self) -> Vec<Value> {
-        self.nouvelles.lock().map(|rx| rx.try_iter().collect()).unwrap_or_default()
+        match &self.genre {
+            Genre::Local { nouvelles, .. } => nouvelles.lock().map(|rx| rx.try_iter().collect()).unwrap_or_default(),
+            Genre::Distant(d) => d.recevoir(),
+        }
     }
 }
 
 impl Drop for Pont {
     fn drop(&mut self) {
-        self.envoyer(&json!({"cmd": "quit"}));
-        if let Ok(mut e) = self.enfant.lock() {
-            let _ = e.wait();
+        // Un pont distant appartient au serveur : on se débranche seulement.
+        if let Genre::Local { enfant, .. } = &self.genre {
+            self.envoyer(&json!({"cmd": "quit"}));
+            if let Ok(mut e) = enfant.lock() {
+                let _ = e.wait();
+            }
         }
     }
 }

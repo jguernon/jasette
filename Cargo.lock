@@ -3231,6 +3231,7 @@ checksum = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4"
 name = "jasette"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "gpui-component",
  "gpui-kit-assets",
@@ -3238,6 +3239,8 @@ dependencies = [
  "gpui-pre-platform",
  "image",
  "qrcode",
+ "ring",
+ "rustls",
  "serde",
  "serde_json",
 ]
