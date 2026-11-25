@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Jasette</title>
+  <defs>
+    <!-- tuile squircle -->
+    <path id="tuile" d="M156 40H356C440 40 472 72 472 156V356C472 440 440 472 356 472H156C72 472 40 440 40 356V156C40 72 72 40 156 40Z"/>
+    <linearGradient id="gTuile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#232327"/>
+      <stop offset="1" stop-color="#141416"/>
+    </linearGradient>
+    <!-- bulle reçue (saumon, derrière) -->
+    <g id="arriere">
+      <rect x="96" y="108" width="224" height="172" rx="86"/>
+      <path d="M190 280Q130 280 90 302Q102 270 102 226Z"/>
+    </g>
+    <!-- bulle envoyée (bleue, devant) -->
+    <g id="avant">
+      <rect x="192" y="212" width="228" height="176" rx="88"/>
+      <path d="M324 388Q388 388 426 408Q414 380 414 334Z"/>
+    </g>
+    <!-- découpe : la bulle avant creuse un liseré dans la bulle arrière -->
+    <mask id="mDecoupe" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <rect width="512" height="512" fill="#fff"/>
+      <use href="#avant" fill="#000" stroke="#000" stroke-width="28" stroke-linejoin="round"/>
+    </mask>
+  </defs>
+  <use href="#tuile" fill="url(#gTuile)"/>
+  <use href="#tuile" fill="none" stroke="#fff" stroke-opacity="0.1" stroke-width="4"/>
+  <use href="#arriere" fill="#f08a6c" mask="url(#mDecoupe)"/>
+  <use href="#avant" fill="#2f6bff"/>
+  <g fill="#fff">
+    <circle cx="256" cy="300" r="17"/>
+    <circle cx="306" cy="300" r="17"/>
+    <circle cx="356" cy="300" r="17"/>
+  </g>
+</svg>

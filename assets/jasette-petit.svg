@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <path id="tuile" d="M112 0H400C480 0 512 32 512 112V400C512 480 480 512 400 512H112C32 512 0 480 0 400V112C0 32 32 0 112 0Z"/>
+    <g id="arriere">
+      <rect x="64" y="64" width="256" height="192" rx="96"/>
+      <path d="M168 256Q96 256 52 294Q70 260 70 200Z"/>
+    </g>
+    <g id="avant">
+      <rect x="192" y="224" width="256" height="192" rx="96"/>
+      <path d="M344 416Q416 416 458 454Q442 416 442 356Z"/>
+    </g>
+    <mask id="mDecoupe" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <rect width="512" height="512" fill="#fff"/>
+      <use href="#avant" fill="#000" stroke="#000" stroke-width="64" stroke-linejoin="round"/>
+    </mask>
+  </defs>
+  <use href="#tuile" fill="#1c1c1f"/>
+  <use href="#arriere" fill="#f08a6c" mask="url(#mDecoupe)"/>
+  <use href="#avant" fill="#2f6bff"/>
+</svg>

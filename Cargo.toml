@@ -1,0 +1,16 @@
+[package]
+name = "jasette"
+version = "0.1.0"
+edition = "2024"
+description = "Jasette : Google Messages (SMS + RCS) sur le bureau, en EGA, avec GPUI"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+gpui = { package = "gpui-pre", version = "=0.3.14" }
+gpui-component = "0.11.0"
+gpui-kit-assets = "0.11.0"
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.14", features = ["wayland", "x11", "font-kit"] }
+qrcode = { version = "0.14", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

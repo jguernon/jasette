@@ -1,0 +1,5 @@
+.cache/
+target/
+*.tmp
+session.json
+__pycache__/
