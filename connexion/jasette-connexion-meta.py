@@ -38,8 +38,8 @@ ARRIVEE = {
     "facebook": re.compile(r"^https://www\.facebook\.com/(?:messages/(?:e2ee/)?(?:t/[0-9]+/?)?)?(?:\?.*)?$"),
 }
 DOMAINES = {
-    "messenger": ["https://www.messenger.com/", "https://messenger.com/"],
-    "facebook": ["https://www.facebook.com/", "https://facebook.com/"],
+    "messenger": ["https://www.messenger.com/", "https://messenger.com/", "https://www.facebook.com/"],
+    "facebook": ["https://www.facebook.com/", "https://facebook.com/", "https://www.messenger.com/"],
 }
 VOULUS = {"c_user", "xs", "datr", "fr", "sb", "wd", "dpr", "presence"}
 REQUIS = {"c_user", "xs", "datr"}
@@ -106,9 +106,11 @@ class Connexion(Gtk.ApplicationWindow):
     def verifier(self):
         if self.fini or self.lecture:
             return
+        # Connecté = les cookies c_user et xs existent, quelle que soit la page
+        # affichée (Messenger change souvent ses adresses).
         uri = self.vue.get_uri() or ""
         plat = plateforme_de(uri)
-        if plat is None or not ARRIVEE[plat].match(uri):
+        if plat is None:
             return
         self.lire_cookies(plat)
 
