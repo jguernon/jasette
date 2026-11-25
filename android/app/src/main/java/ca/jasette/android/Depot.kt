@@ -891,6 +891,8 @@ object Depot {
         // Les conversations marquées (Head, favoris, épingles) : gardées pour quand leur service sera absent.
         CacheMarques.noter(triee)
         CacheConvs.noterListes()
+        // Le partage direct : les conversations récentes, republiées (groupé).
+        Raccourcis.noter()
     }
 
     private fun remplacerArchives(liste: List<Conv>) {
@@ -1132,9 +1134,10 @@ object Depot {
         Marques.oublier(id)
     }
 
-    fun envoyer(conv: String, texte: String) {
+    /** Envoie un texte ; rend le tmp_id de la bulle locale (pour suivre l'envoi), ou null s'il n'y a rien à envoyer. */
+    fun envoyer(conv: String, texte: String): String? {
         val t = texte.trim()
-        if (t.isEmpty()) return
+        if (t.isEmpty()) return null
         envoiSeq++
         val maintenant = System.currentTimeMillis()
         val tmp = "jasette_${maintenant}_$envoiSeq"
@@ -1146,6 +1149,7 @@ object Depot {
         val cmd = JSONObject().put("cmd", "send").put("conv", conv).put("text", t).put("tmp_id", tmp)
         envois[tmp] = cmd.toString()
         commande(cmd)
+        return tmp
     }
 
     // ---- Envoyer des fichiers ----
@@ -1156,7 +1160,7 @@ object Depot {
      * de suite. En mode client, le serveur reçoit d'abord le fichier (`put`).
      * [texte] part avec le fichier (ponts Meta seulement ; Google l'envoie à part).
      */
-    fun envoyerFichier(conv: String, fichier: File, mime: String, nom: String, texte: String, vignette: String?) {
+    fun envoyerFichier(conv: String, fichier: File, mime: String, nom: String, texte: String, vignette: String?): String {
         envoiSeq++
         val maintenant = System.currentTimeMillis()
         val tmp = "jasette_${maintenant}_$envoiSeq"
@@ -1183,6 +1187,7 @@ object Depot {
         // commande() retire les préfixes sur place : on garde une copie intacte.
         envois[tmp] = cmd.toString()
         commande(cmd)
+        return tmp
     }
 
     fun peutReessayer(tmp: String) = envois.containsKey(tmp)

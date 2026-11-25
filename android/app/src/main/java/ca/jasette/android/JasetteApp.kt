@@ -7,6 +7,7 @@ class JasetteApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Langue.charger(this)
+        Raccourcis.initialiser(this)
         Marques.charger(this)
         Prive.charger(this)
         CacheMarques.charger(this)

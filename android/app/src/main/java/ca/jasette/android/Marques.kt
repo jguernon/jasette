@@ -205,6 +205,8 @@ object Marques {
         if (oui == (id in privees)) return
         if (oui) privees.add(id) else privees.remove(id)
         changement()
+        // Le partage direct : une privée n'y apparaît jamais.
+        Raccourcis.privees()
     }
 
     /** Toutes les privées redeviennent normales (désactivation de la Liste privée). */
@@ -212,6 +214,7 @@ object Marques {
         if (privees.isEmpty()) return
         privees.clear()
         changement()
+        Raccourcis.privees()
     }
 
     /** Archive par Jasette (à la fin de la liste) ou désarchive ; rien si c'est déjà fait. */
@@ -310,7 +313,11 @@ object Marques {
         if (favoris.toList() != l.favoris) { favoris.clear(); favoris.addAll(l.favoris) }
         if (epingles.toList() != l.epingles) { epingles.clear(); epingles.addAll(l.epingles) }
         if (archives.toList() != l.archives) { archives.clear(); archives.addAll(l.archives); majDepuis() }
-        if (privees.toList() != l.privees) { privees.clear(); privees.addAll(l.privees) }
+        if (privees.toList() != l.privees) {
+            privees.clear()
+            privees.addAll(l.privees)
+            Raccourcis.privees()
+        }
     }
 
     /** Envoie une trame au serveur ; faux si la connexion est coupée. Posé par [Depot] en mode client. */

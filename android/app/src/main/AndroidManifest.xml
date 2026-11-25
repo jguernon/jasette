@@ -38,6 +38,10 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Le partage direct : les conversations récentes (Raccourcis.kt). -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity-alias>
         <activity-alias
             android:name=".LanceurBlanc"
@@ -49,6 +53,10 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Le partage direct : les conversations récentes (Raccourcis.kt). -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity-alias>
 
         <!-- La Liste privée : sa propre activité, dans une tâche à part (l'icône
@@ -73,6 +81,39 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity-alias>
+
+        <!-- Le menu de partage d'Android : une fenêtre légère par-dessus l'app
+             d'origine (PartageActivity), texte, liens, images, vidéos, sons et
+             fichiers. Une tâche à part, hors des apps récentes : la fermer
+             ramène l'app d'origine. -->
+        <activity
+            android:name=".PartageActivity"
+            android:exported="true"
+            android:label="Jasette"
+            android:theme="@style/Theme.Jasette.Partage"
+            android:taskAffinity="ca.jasette.partage"
+            android:excludeFromRecents="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|density|keyboardHidden"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="audio/*" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="audio/*" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
 
         <!-- L'appareil photo écrit ses photos et vidéos dans le cache de l'app. -->
         <provider

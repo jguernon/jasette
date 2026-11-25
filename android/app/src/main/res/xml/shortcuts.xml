@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Le partage direct : les raccourcis de conversation publiés par Raccourcis.kt
+     (catégorie ca.jasette.CATEGORIE_PARTAGE) ouvrent PartageActivity avec la
+     conversation déjà choisie. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <share-target android:targetClass="ca.jasette.android.PartageActivity">
+        <data android:mimeType="text/*" />
+        <data android:mimeType="image/*" />
+        <data android:mimeType="video/*" />
+        <data android:mimeType="audio/*" />
+        <data android:mimeType="*/*" />
+        <category android:name="ca.jasette.CATEGORIE_PARTAGE" />
+    </share-target>
+</shortcuts>

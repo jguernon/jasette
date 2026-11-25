@@ -52,6 +52,9 @@ enum class Service(val titre: String, val court: String, val prefixe: String, va
      */
     val limiteEnvoi: Long get() = if (this == GOOGLE || this == WHATSAPP || this == SIGNAL || this == TELEGRAM) 100L shl 20 else 25L shl 20
 
+    /** Le service prend-il des fichiers ? Bluesky refuse les pièces jointes en message privé. */
+    val fichiers get() = this != BLUESKY
+
     /** Le texte peut-il partir avec un fichier (champ `text` de `send_media`) ? */
     val texteAvecFichier get() = meta
 

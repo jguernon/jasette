@@ -450,4 +450,26 @@ private val ANGLAIS: Map<String, String> = mapOf(
         "conversation(s) made private on another device stay hidden here. Turn on the private list to see them.",
     "« Rendre privée » apparaît dans le menu d'une conversation. Une conversation privée ne donne aucune notification. La vue se reverrouille en arrière-plan, ou après 1 minute sans toucher l'écran. La liste des privées est partagée par le serveur Jasette ; le code, jamais." to
         "“Make private” appears in a conversation's menu. A private conversation never notifies. The view locks again in the background, or after 1 minute without touching the screen. The private list is shared by the Jasette server; the code never is.",
+    // Le menu de partage d'Android (PartageActivity, ui/Partage.kt).
+    "Partager dans Jasette" to "Share in Jasette",
+    "Ajouter un message (facultatif)" to "Add a message (optional)",
+    "Rechercher une conversation" to "Search a conversation",
+    "Conversations récentes" to "Recent conversations",
+    "Résultats" to "Results",
+    "Aucune conversation pour l'instant. Ouvre Jasette pour connecter tes messageries." to
+        "No conversations yet. Open Jasette to connect your messaging apps.",
+    "Bluesky ne permet pas d'envoyer des fichiers en message privé. Choisis une autre conversation." to
+        "Bluesky doesn't allow sending files in private messages. Choose another conversation.",
+    "%s ne prend pas les fichiers" to "%s doesn't accept files",
+    "Choisie" to "Selected",
+    "Choisis une conversation" to "Choose a conversation",
+    "Envoyer à %s" to "Send to %s",
+    "Envoyer à %d conversations" to "Send to %d conversations",
+    "Rien à partager : écris un message." to "Nothing to share: write a message.",
+    "Envoi en cours…" to "Sending…",
+    "Échec de l'envoi" to "Sending failed",
+    "Préparation…" to "Preparing…",
+    "Connexion à %s…" to "Connecting to %s…",
+    "%s n'est pas connecté pour l'instant." to "%s isn't connected right now.",
+    "Tu peux fermer : l'envoi continue en arrière-plan." to "You can close this: sending continues in the background.",
 )

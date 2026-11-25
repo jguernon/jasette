@@ -98,7 +98,10 @@ class PontService : ServiceAndroid() {
         val texte = if (conv?.group == true && m.sender.isNotEmpty()) "${m.sender}${t(" : ")}${m.apercu()}" else m.apercu()
         // L'avatar de la personne : photo du contact si on l'utilise, sinon celle du service.
         val photo = conv?.let { Contacts.photoPour(it, grande = true) } ?: Depot.avatars[m.conv]
-        val image = photo?.let { chargerAvatar(it) }
+        val image = avatarRond(this, photo)
+        // Le raccourci de la conversation (partage direct) : Android traite alors
+        // la notification en conversation (priorité, bulles). Jamais pour une privée.
+        val raccourci = conv?.let { Raccourcis.pourNotification(this, it, image) }
         // MessagingStyle : Android montre la photo ronde de l'expéditeur à côté du message.
         val personne = androidx.core.app.Person.Builder()
             .setName(if (conv?.group == true && m.sender.isNotEmpty()) m.sender else titre)
@@ -122,40 +125,17 @@ class PontService : ServiceAndroid() {
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(ouvrir(m.conv))
+            .apply {
+                if (raccourci != null) {
+                    setShortcutId(raccourci)
+                    setLocusId(androidx.core.content.LocusIdCompat(raccourci))
+                }
+            }
             .build()
         try {
             NotificationManagerCompat.from(this).notify(idNotification(m.conv), n)
         } catch (_: SecurityException) {
         }
-    }
-
-    /** Découpe une image carrée en rond, comme les avatars de l'app (le reste transparent). */
-    private fun rond(src: android.graphics.Bitmap): android.graphics.Bitmap {
-        val cote = src.width
-        val sortie = android.graphics.Bitmap.createBitmap(cote, cote, android.graphics.Bitmap.Config.ARGB_8888)
-        val toile = android.graphics.Canvas(sortie)
-        val pinceau = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-        toile.drawCircle(cote / 2f, cote / 2f, cote / 2f, pinceau)
-        pinceau.xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN)
-        toile.drawBitmap(src, 0f, 0f, pinceau)
-        return sortie
-    }
-
-    /** Une photo d'avatar (fichier ou content://), réduite à 256 px, ou null. */
-    private fun chargerAvatar(chemin: String): android.graphics.Bitmap? = try {
-        val bmp = if (chemin.startsWith("content:")) {
-            contentResolver.openInputStream(android.net.Uri.parse(chemin))?.use { android.graphics.BitmapFactory.decodeStream(it) }
-        } else {
-            android.graphics.BitmapFactory.decodeFile(chemin.removePrefix("file://"))
-        }
-        bmp?.let {
-            val cote = minOf(it.width, it.height)
-            val carre = android.graphics.Bitmap.createBitmap(it, (it.width - cote) / 2, (it.height - cote) / 2, cote, cote)
-            val reduit = if (cote > 256) android.graphics.Bitmap.createScaledBitmap(carre, 256, 256, true) else carre
-            rond(reduit)
-        }
-    } catch (_: Exception) {
-        null
     }
 
     companion object {

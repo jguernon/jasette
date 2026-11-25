@@ -110,8 +110,12 @@ object Envoi {
      * Copie les [uris] (hors du fil principal) puis les envoie dans [conv].
      * [texte] part avec la première pièce si le service le permet (Meta),
      * sinon en message séparé (Google). [erreur] reçoit les refus (taille, lecture).
+     * [envoyes] reçoit les tmp_id des envois lancés (le partage suit leur état).
      */
-    fun envoyer(ctx: Context, conv: String, uris: List<Uri>, texte: String, erreur: (String) -> Unit) {
+    fun envoyer(
+        ctx: Context, conv: String, uris: List<Uri>, texte: String,
+        envoyes: (List<String>) -> Unit = {}, erreur: (String) -> Unit,
+    ) {
         val appli = ctx.applicationContext
         val service = Service.de(conv)
         val limite = if (Depot.serveur != null) minOf(service.limiteEnvoi, LIMITE_SERVEUR) else service.limiteEnvoi
@@ -178,12 +182,14 @@ object Envoi {
             }
             principal.post {
                 Log.i(JOURNAL, "envoi de ${pretes.size} pièce(s) dans $conv (${service.court})")
+                val tmps = ArrayList<String>()
                 pretes.forEachIndexed { i, p ->
                     val avec = if (i == 0 && service.texteAvecFichier) texte else ""
-                    Depot.envoyerFichier(conv, p.fichier, p.mime, p.nom, avec, p.vignette)
+                    tmps.add(Depot.envoyerFichier(conv, p.fichier, p.mime, p.nom, avec, p.vignette))
                 }
                 // Google (ou plus aucune pièce) : le texte part en message séparé.
-                if (!service.texteAvecFichier || pretes.isEmpty()) Depot.envoyer(conv, texte)
+                if (!service.texteAvecFichier || pretes.isEmpty()) Depot.envoyer(conv, texte)?.let { tmps.add(it) }
+                envoyes(tmps)
                 if (erreurs.isNotEmpty()) erreur(erreurs.joinToString("\n"))
             }
         }, "jasette-envoi").start()
