@@ -369,6 +369,10 @@ type trame struct {
 		Action string `json:"action"`
 		Envoi  *bool  `json:"envoi"`
 	} `json:"mcp"`
+	Apercu *struct {
+		ID  int64  `json:"id"`
+		URL string `json:"url"`
+	} `json:"apercu"`
 	Get *struct {
 		ID     int64  `json:"id"`
 		Chemin string `json:"chemin"`
@@ -399,6 +403,9 @@ func (c *Client) trame(ligne []byte) {
 	case t.Mcp != nil:
 		m := *t.Mcp
 		go c.trameMCP(m.ID, m.Action, m.Envoi)
+	case t.Apercu != nil:
+		a := *t.Apercu
+		go c.trameApercu(a.ID, a.URL)
 	case t.Rejouer != "":
 		c.srv.rejouer(c, t.Rejouer)
 	case t.Get != nil:

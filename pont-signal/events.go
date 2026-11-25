@@ -276,6 +276,9 @@ func (p *Pont) convertData(conv string, sender uuid.UUID, dm *signalpb.DataMessa
 	if dm.GetRequiredProtocolVersion() > uint32(signalpb.DataMessage_CURRENT) && r.Text == "" && len(r.Attachments) == 0 {
 		r.Text = "(message non pris en charge : ouvre Signal)"
 	}
+	if r.Text != "" {
+		r.LinkPreview = p.apercuSignal(dm)
+	}
 	r.Media = mediaSummary(r.Attachments)
 	if r.Text == "" && len(r.Attachments) == 0 {
 		// Mise à jour du groupe, clé de profil, fin d'appel… : rien à montrer.

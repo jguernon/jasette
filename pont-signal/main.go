@@ -81,6 +81,9 @@ type Message struct {
 
 	// Mes messages dans un groupe : qui les a lus (noms), selon les accusés.
 	ReadBy []string `json:"read_by,omitempty"`
+
+	// L'aperçu du lien, tel que Signal l'envoie (apercu.go).
+	LinkPreview *LinkPreview `json:"link_preview,omitempty"`
 }
 
 type Attachment struct {

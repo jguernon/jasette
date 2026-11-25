@@ -565,6 +565,73 @@ Côté client (référence : `fusionner_copie` et `fusionner_page` de
 remplace sa liste par la copie, puis par la réponse du pont ; les listes
 rejouées sont des `conversations` ordinaires.
 
+### 5.9 Aperçus de liens
+
+**Fournis par le service.** Un message peut porter un champ facultatif
+`link_preview`, que le pont remplit quand le service envoie l'aperçu avec le
+message (WhatsApp, Signal, Telegram, Messenger et Instagram ; Google Messages,
+X et Bluesky n'en envoient pas) :
+
+```json
+{"id":"…","conv":"…","text":"Regarde https://exemple.com/page",
+ "link_preview":{"url":"https://exemple.com/page","title":"…","description":"…","site":"…",
+                 "image":"/…/media/apercus/ab12….jpg"}}
+```
+
+- `url` (obligatoire), `title`, `description`, `site` : du texte brut.
+- La vignette, au plus un des trois : `image`, un fichier du dossier des
+  médias écrit par le pont (WhatsApp, Signal : réécrit comme tout chemin,
+  §6) ; `image_url`, une adresse https que le client va chercher lui-même
+  (mêmes garde-fous qu'au-dessous) ; `image_media`, une pièce jointe au
+  format de `attachments` (`media_id`, `key`, `mime`…), à demander au pont
+  par `download` (Telegram, Messenger, Instagram).
+- Un client qui ignore le champ n'y perd que la carte : l'adresse reste dans
+  `text` (Messenger et Instagram l'y ajoutent si elle n'y était pas).
+
+**Demandés au serveur.** Pour une adresse du texte sans `link_preview`, le
+client peut demander l'aperçu au serveur (une trame à part, comme `mcp`) :
+
+```json
+{"apercu":{"id":12,"url":"https://fr.wikipedia.org/wiki/Cornichon"}}
+```
+
+Réponse, **à ce client seulement** (le même `id`, l'`url` telle que reçue) :
+
+```json
+{"apercu":{"id":12,"url":"…","title":"Cornichon — Wikipédia","description":"…","site":"fr.wikipedia.org","image":"/…/media/apercus/d171….jpg"}}
+{"apercu":{"id":12,"url":"…","erreur":"HTTP 400"}}
+```
+
+- `url` : `http`, `https`, ou sans schéma (`www.exemple.com` → `https://`).
+- Le serveur lit la page : **5 s** au plus par requête, **2 Mio** de HTML au
+  plus, **5** redirections au plus, User-Agent d'un navigateur courant. Il
+  prend `og:title`, `og:description`, `og:site_name`, `og:image`, puis les
+  `twitter:*`, puis `<title>` et `<meta name="description">` ; sans titre
+  ni description : pas d'aperçu (`erreur`). Un site qui refuse (Facebook,
+  Instagram…) donne une `erreur`, rien d'autre.
+- **Jamais d'adresse privée ou locale** : 127.0.0.0/8, 10.0.0.0/8,
+  172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 0.0.0.0/8,
+  ::1, fc00::/7, fe80::/10 et les autres plages réservées, `localhost`,
+  `*.local`, `*.internal`. Vérifié sur l'adresse réellement jointe, après
+  la résolution du nom et à chaque redirection : un nom qui se résout vers
+  une telle adresse est refusé.
+- L'image (`og:image`, 8 Mio au plus) est réduite à **640 px** de large et
+  gardée en JPEG dans `<médias>/apercus/` : un chemin du serveur, à
+  télécharger par `get` (§6.1). Absente si elle n'a pas pu être lue.
+- **Cache** sur le disque : `<données>/serveur/apercus/<clé>.json` (0600),
+  7 jours pour un aperçu, 6 heures pour un échec. Deux demandes de la même
+  adresse en même temps n'en font qu'une ; 4 pages au plus en même temps.
+- Un serveur d'avant cette trame ne répond pas : le client attend 12 s au
+  plus, puis fait comme sans serveur.
+- `jasette-serveur --apercu <url>` affiche l'aperçu d'une adresse (essai).
+
+**Côté client.** Les adresses du texte sont cliquables (`http(s)://…` et
+`www.…`, sans la ponctuation finale `.`, `,`, `)`, `!`, `?`…). L'aperçu du
+service passe en premier ; sinon, si le réglage « Aperçus des liens » est
+activé (il l'est par défaut), le client demande celui de la **première**
+adresse au serveur, ou, sans serveur, va chercher la page lui-même avec les
+mêmes garde-fous. Rien n'attend : la carte apparaît quand l'aperçu arrive.
+
 ## 6. Fichiers
 
 Les événements contiennent des chemins de fichiers **du serveur** :
@@ -671,6 +738,8 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"fichier":{"id",…}}` | morceaux ou erreur |
 | C→S | `{"put":{"id","nom","donnees","fin"}}` | téléverser |
 | S→C | `{"depose":{"id","chemin"|"erreur"}}` | fin du dépôt |
+| C→S | `{"apercu":{"id","url"}}` | aperçu d'un lien (§5.9) |
+| S→C | `{"apercu":{"id","url","title","description","site","image"|"erreur"}}` | réponse, à ce client seul |
 | C→S | `{"mcp":{"id","action"[,"envoi"]}}` | connexion MCP pour Claude (§9) |
 | S→C | `{"mcp":{"id","ouvert","jeton","port","adresses",…}}` | état de la connexion MCP |
 

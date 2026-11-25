@@ -447,6 +447,7 @@ func (p *Pont) waRow(cli *whatsmeow.Client, conv string, evt *events.Message) *m
 		if x.GetMatchedText() != "" && !strings.Contains(text, x.GetMatchedText()) {
 			text += "\n" + x.GetMatchedText()
 		}
+		r.LinkPreview = apercuWA(x)
 	case m.ImageMessage != nil:
 		x := m.GetImageMessage()
 		text = x.GetCaption()

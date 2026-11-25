@@ -106,6 +106,9 @@ type Message struct {
 	// Le message cité (comme WhatsApp) ; le texte cité est aussi en tête de « text ».
 	ReplyTo   string `json:"reply_to,omitempty"`
 	ReplyText string `json:"reply_text,omitempty"`
+
+	// L'aperçu du lien, tel que Telegram l'envoie (apercu.go).
+	LinkPreview *LinkPreview `json:"link_preview,omitempty"`
 }
 
 type Attachment struct {

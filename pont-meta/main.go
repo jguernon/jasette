@@ -68,6 +68,8 @@ type Message struct {
 	Attachments []Attachment `json:"attachments,omitempty"`
 	// Propre à Messenger : les réactions (emoji + qui).
 	Reactions []Reaction `json:"reactions,omitempty"`
+	// L'aperçu du lien, tel que Messenger l'envoie (apercu.go).
+	LinkPreview *LinkPreview `json:"link_preview,omitempty"`
 }
 
 type Attachment struct {

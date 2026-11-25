@@ -410,6 +410,7 @@ func (p *Pont) convertMsg(m *tg.Message) *msgRow {
 			r.Body = strings.TrimSpace(r.Body + "\n" + extra)
 		}
 		r.Media = mediaSummary(atts)
+		r.LinkPreview = apercuTG(conv, m.ID, m.Media)
 	}
 	if rs, ok := m.GetReactions(); ok {
 		r.Reactions = p.reactionsOf(rs)

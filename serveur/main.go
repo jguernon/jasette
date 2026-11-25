@@ -16,6 +16,7 @@
 //	jasette-serveur --empreinte       affiche l'empreinte du certificat
 //	jasette-serveur --mcp ACTION      connexion MCP pour Claude : etat, ouvrir, fermer,
 //	                                  regenerer, envoi-oui, envoi-non (mcp.go)
+//	jasette-serveur --apercu URL      essai : l'aperçu d'un lien (apercus.go)
 //
 // Les données vivent dans <données Jasette>/serveur (JASETTE_DATA, sinon
 // ~/.local/share/jasette). Les journaux vont dans la sortie d'erreur ; on n'y
@@ -54,9 +55,12 @@ func main() {
 	empreinte := flag.Bool("empreinte", false, "afficher l'empreinte SHA-256 du certificat")
 	mcpPort := flag.Int("mcp-port", portMCPDefaut(), "port HTTP du serveur MCP (s'il est ouvert)")
 	mcpAction := flag.String("mcp", "", "connexion MCP : etat, ouvrir, fermer, regenerer, envoi-oui, envoi-non")
+	apercu := flag.String("apercu", "", "essai : afficher l'aperçu (OpenGraph) d'une adresse")
 	flag.Parse()
 
 	switch {
+	case *apercu != "":
+		os.Exit(cmdApercu(*apercu))
 	case *mcpAction != "":
 		os.Exit(cmdMCP(*mcpAction, *mcpPort))
 	case *jumeler:

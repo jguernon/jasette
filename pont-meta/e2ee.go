@@ -396,7 +396,9 @@ func (p *Pont) waConsumer(r *msgRow, c *waConsumerApplication.ConsumerApplicatio
 	case *waConsumerApplication.ConsumerApplication_Content_MessageText:
 		r.Text = p.waText(content.MessageText)
 	case *waConsumerApplication.ConsumerApplication_Content_ExtendedTextMessage:
-		r.Text = p.waText(content.ExtendedTextMessage.GetText())
+		x := content.ExtendedTextMessage
+		r.Text = p.waText(x.GetText())
+		r.LinkPreview = nouvelApercu(firstOf(x.GetCanonicalURL(), x.GetMatchedText()), x.GetTitle(), x.GetDescription(), "")
 	case *waConsumerApplication.ConsumerApplication_Content_ImageMessage:
 		if t, err := content.ImageMessage.Decode(); err == nil {
 			p.waAttach(r, t.GetIntegral().GetTransport(), whatsmeow.MediaImage, "image", int64(t.GetAncillary().GetWidth()), int64(t.GetAncillary().GetHeight()))
@@ -462,7 +464,20 @@ func (p *Pont) waArmadillo(r *msgRow, c *waArmadilloApplication.Armadillo_Conten
 		x := content.ExtendedContentMessage
 		text := x.GetMessageText()
 		var extra []string
+		// Un lien partagé : son aperçu va dans link_preview (apercu.go).
 		if x.GetTargetType() != waArmadilloXMA.ExtendedContentMessage_MSG_LOCATION_SHARING_V2 {
+			for _, cta := range x.GetCtas() {
+				if lp := apercuXMA(x.GetTitleText(), x.GetSubtitleText(), firstOf(cta.GetNativeURL(), cta.GetActionURL()), nil); lp != nil {
+					r.LinkPreview = lp
+					break
+				}
+			}
+		}
+		if r.LinkPreview != nil {
+			if !contientLien(text) {
+				text = joindre(text, r.LinkPreview.URL)
+			}
+		} else if x.GetTargetType() != waArmadilloXMA.ExtendedContentMessage_MSG_LOCATION_SHARING_V2 {
 			if t := x.GetTitleText(); t != "" && !strings.Contains(text, t) {
 				extra = append(extra, t)
 			}
@@ -473,6 +488,9 @@ func (p *Pont) waArmadillo(r *msgRow, c *waArmadilloApplication.Armadillo_Conten
 			extra = append(extra, "📍 "+x.GetTitleText())
 		}
 		for _, cta := range x.GetCtas() {
+			if r.LinkPreview != nil {
+				break
+			}
 			for _, u := range []string{cta.GetNativeURL(), cta.GetActionURL()} {
 				if strings.HasPrefix(u, "http") && !strings.Contains(text, u) {
 					extra = append(extra, u)

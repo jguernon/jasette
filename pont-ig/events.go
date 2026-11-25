@@ -390,7 +390,23 @@ func (p *Pont) igRow(conv string, m *slidetypes.Message) *msgRow {
 		add(content.MediaContentFBID, content.AudioTrack.Web30SPreviewDownloadURL, "audio/mpeg", content.AudioTrack.Title, 0, 0)
 	case *slidetypes.MessageContentXMA:
 		r.Text = content.XMATextBody
-		if x := content.XMA; x != nil {
+		// Un partage avec un lien (publication, reel, lien externe) : son
+		// aperçu va dans link_preview, le texte ne garde que l'adresse (apercu.go).
+		if lp := apercuIG(content.XMA); lp != nil {
+			if !contientLien(r.Text) {
+				r.Text = joindre(r.Text, lp.URL)
+			}
+			if img := cmp.Or(content.XMA.PreviewImage, content.XMA.XMAPreviewImage); img != nil && img.URL != "" {
+				n := len(r.Attachments)
+				add("", img.URL, "image/jpeg", "", img.Width, img.Height)
+				if len(r.Attachments) > n {
+					a := r.Attachments[n]
+					lp.ImageMedia = &a
+					r.Attachments = r.Attachments[:n]
+				}
+			}
+			r.LinkPreview = lp
+		} else if x := content.XMA; x != nil {
 			var parts []string
 			title := cmp.Or(x.TitleText, x.XMATitle)
 			if x.HeaderTitleText != "" && x.HeaderTitleText != title {

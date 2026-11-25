@@ -74,6 +74,9 @@ type Message struct {
 
 	Attachments []Attachment `json:"attachments,omitempty"`
 	Reactions   []Reaction   `json:"reactions,omitempty"`
+
+	// L'aperçu du lien, tel qu'Instagram l'envoie (apercu.go).
+	LinkPreview *LinkPreview `json:"link_preview,omitempty"`
 }
 
 type Attachment struct {

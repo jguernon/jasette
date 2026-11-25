@@ -456,6 +456,24 @@ func (p *Pont) fbRow(wm *table.WrappedMessage) *msgRow {
 		add(s.AttachmentFbid, url, mime, "autocollant", 0, s.PreviewWidth, s.PreviewHeight, table.AttachmentTypeSticker)
 	}
 	for _, x := range wm.XMAAttachments {
+		// Un lien partagé : son aperçu (titre, description, vignette) va dans
+		// link_preview, et le texte ne garde que l'adresse (apercu.go).
+		if lp := apercuXMA(x.TitleText, x.SubtitleText, x.ActionUrl, x.CTA); lp != nil && r.LinkPreview == nil {
+			if !contientLien(r.Text) {
+				r.Text = joindre(r.Text, lp.URL)
+			}
+			if x.PreviewUrl != "" {
+				n := len(r.Attachments)
+				add(x.AttachmentFbid, x.PreviewUrl, firstOf(x.PreviewUrlMimeType, "image/jpeg"), "", 0, x.PreviewWidth, x.PreviewHeight, table.AttachmentTypeImage)
+				if len(r.Attachments) > n {
+					a := r.Attachments[n]
+					lp.ImageMedia = &a
+					r.Attachments = r.Attachments[:n]
+				}
+			}
+			r.LinkPreview = lp
+			continue
+		}
 		var parts []string
 		if x.TitleText != "" {
 			parts = append(parts, x.TitleText)
