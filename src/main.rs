@@ -3051,7 +3051,12 @@ impl Jasette {
         let en_cours = self.lecture.as_ref().filter(|l| l.media_id == p.media_id);
         let pos = en_cours.map(|l| l.position()).or_else(|| self.pauses.get(&p.media_id).copied()).unwrap_or(0.);
         let fraction = if duree > 0. { (pos / duree).clamp(0., 1.) } else { 0. };
-        let (fort, pale, fond_bouton, icone_bouton) = if m.from_me {
+        let (fort, pale, fond_bouton, icone_bouton) = if th().ega {
+            // Couleurs EGA pleines : bouton gris clair à triangle noir, barres
+            // jouées en blanc, les autres en cyan vif (sur le bleu) ou en gris.
+            let pale = if m.from_me { c(EGA_CYAN_VIF) } else { c(EGA_GRIS) };
+            (c(EGA_BLANC), pale, gpui::Background::from(c(EGA_GRIS_CLAIR)), c(EGA_NOIR))
+        } else if m.from_me {
             (blanc(1.), blanc(0.45), gpui::Background::from(blanc(0.95)), th().accent)
         } else if th().sombre {
             (blanc(1.), blanc(0.3), gpui::Background::from(blanc(1.)), c(0x2c2c2e))
@@ -3106,7 +3111,12 @@ impl Jasette {
                 div()
                     .w(px(34.))
                     .text_size(px(12.))
-                    .text_color(if m.from_me { blanc(0.9) } else { ton(th().texte, th().heure_recue) })
+                    .text_color(match (th().ega, m.from_me) {
+                        (true, true) => c(EGA_BLANC),
+                        (true, false) => th().texte,
+                        (false, true) => blanc(0.9),
+                        (false, false) => ton(th().texte, th().heure_recue),
+                    })
                     .child(if duree > 0. || pos > 0. {
                         format!("{}:{:02}", temps as u32 / 60, temps as u32 % 60)
                     } else {
@@ -3572,6 +3582,11 @@ impl Jasette {
             .child(div().absolute().top(px(MARGE_FIL)).left_0().right_0().bottom(px(MARGE_FIL)).child(fil))
             .child(entete)
             .child(composeur)
+            // En EGA, le fil est une boîte de dialogue DOS à double trait (╔═╗) :
+            // un second cadre en retrait par-dessus le contenu, sans clic.
+            .when(ega, |d| {
+                d.child(div().absolute().top(px(3.)).left(px(3.)).right(px(3.)).bottom(px(3.)).border_1().border_color(c(EGA_GRIS_CLAIR)))
+            })
             .when(self.emojis_ouverts, |d| {
                 d.child(div().absolute().right(px(70.)).bottom(px(HAUT_COMPOSEUR + 4.)).child(self.panneau_emojis(cx)))
             })
@@ -4459,12 +4474,19 @@ fn bouton_texte(id: &'static str, texte: &'static str, couleur: u32) -> gpui::St
         .px(px(14.))
         .py(px(6.))
         .rounded(rayon(999.))
-        .bg(ca(couleur, 0.1))
         .text_size(px(13.))
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(c(couleur))
         .cursor_pointer()
-        .hover(|s| s.bg(ca(couleur, 0.18)))
+        .when(!th().ega, |d| {
+            d.bg(ca(couleur, 0.1)).text_color(c(couleur)).hover(|s| s.bg(ca(couleur, 0.18)))
+        })
+        // En EGA, un bouton DOS : aplat EGA foncé, texte blanc, ombre portée dure.
+        .when(th().ega, |d| {
+            d.bg(ega_fond(c(couleur)))
+                .text_color(c(EGA_BLANC))
+                .shadow(ombre_flottante())
+                .hover(|s| s.bg(ega_snap(c(couleur))))
+        })
         .child(texte)
 }
 
@@ -4773,6 +4795,7 @@ fn t(fr: &'static str) -> &'static str {
         "Connectez-vous dans la fenêtre Facebook…" => "Sign in in the Facebook window…",
         "Pour voir l'historique chiffré, entrez le NIP de Messenger (celui choisi dans l'app)." => "To see your encrypted history, enter your Messenger PIN (the one set in the app).",
         "Créé par" => "Created by",
+        "Seize couleurs et police IBM, comme un PC de 1984." => "Sixteen colors and the IBM font, like a 1984 PC.",
         "Interface" => "Interface",
         _ => fr,
     }
