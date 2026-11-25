@@ -309,8 +309,9 @@ private val ANGLAIS: Map<String, String> = mapOf(
         "Only when exactly one contact has the conversation's exact name.",
     // Réglages → Apparence → Grille du Head.
     "Grille du Head" to "Head grid",
-    "Automatique : autant d'avatars que la largeur en permet. Sinon, colonnes × rangées ; les avatars rapetissent au besoin, et ceux en trop sont cachés (pas retirés du Head)." to
-        "Automatic: as many avatars as the width allows. Otherwise, columns × rows; avatars shrink when needed, and extra ones are hidden (not removed from the Head).",
+    "Le nombre d'avatars par rangée ; il y a autant de rangées qu'il faut pour tout le Head." to
+        "Avatars per row; there are as many rows as the whole Head needs.",
+    "%d de large" to "%d wide",
     // WhatsApp, Signal et X sur cet appareil (Association.kt, Connexion.kt).
     "Avec un numéro de téléphone" to "With a phone number",
     "Code QR" to "QR code",

@@ -72,27 +72,23 @@ object Marques {
     }
 
     /**
-     * La grille du Head : « auto » (le défaut, autant d'avatars de 80 dp que la
-     * largeur en permet) ou « CxR » (colonnes × rangées, ex. « 6x2 »). Propre à
-     * l'appareil : jamais envoyé au serveur (pas dans [listes]).
+     * La grille du Head : le nombre de colonnes (3 à 6, 4 par défaut) ; autant
+     * de rangées qu'il faut pour tous les Head. Propre à l'appareil : jamais
+     * envoyé au serveur (pas dans [listes]).
      */
-    var headGrille by mutableStateOf("auto")
+    var headGrille by mutableStateOf("4")
         private set
 
-    /** Les choix offerts dans Réglages → Apparence (téléphone, puis Fold ouvert). */
-    val GRILLES = listOf("auto", "3x2", "4x1", "4x2", "4x3", "5x2", "5x3", "6x2", "6x3", "7x2", "8x2", "8x3")
+    /** Les choix offerts dans Réglages → Apparence. */
+    val GRILLES = listOf("3", "4", "5", "6")
 
-    /** (colonnes, rangées) d'une grille « CxR », ou null pour « auto ». */
-    fun dimensions(grille: String): Pair<Int, Int>? {
-        val m = Regex("^(\\d+)x(\\d+)$").find(grille) ?: return null
-        val c = m.groupValues[1].toInt()
-        val r = m.groupValues[2].toInt()
-        return if (c in 1..12 && r in 1..6) c to r else null
-    }
+    /** Le nombre de colonnes d'un choix ; une ancienne valeur (« auto », « 6x2 »…) devient 3 à 6. */
+    fun colonnes(grille: String): Int =
+        grille.substringBefore('x').toIntOrNull()?.coerceIn(3, 6) ?: 4
 
     /** commit() : écrit tout de suite, comme les listes (voir [garder]). */
     fun choisirHeadGrille(grille: String) {
-        headGrille = if (dimensions(grille) != null) grille else "auto"
+        headGrille = colonnes(grille).toString()
         prefs?.edit()?.putString("head_grille", headGrille)?.commit()
     }
 
@@ -126,7 +122,7 @@ object Marques {
         avatarFichier = p.getString("avatar_fichier", null)
         deuxVolets = p.getBoolean("deux_volets", true)
         heureChaqueMessage = p.getBoolean("heure_chaque_message", false)
-        headGrille = p.getString("head_grille", "auto")?.takeIf { dimensions(it) != null } ?: "auto"
+        headGrille = colonnes(p.getString("head_grille", "4") ?: "4").toString()
         head.clear()
         head.addAll(lire(p, "head"))
         favoris.clear()

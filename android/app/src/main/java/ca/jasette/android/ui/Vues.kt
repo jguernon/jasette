@@ -293,12 +293,9 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
 /**
  * Le « Head » : la grille des favoris en haut de la boîte de réception.
  *
- * Grille « Automatique » (le défaut) : des cases de 80 dp, autant que la
- * largeur en permet, sur autant de rangées qu'il faut. Grille choisie
- * (Réglages → Apparence, `Marques.headGrille`) : colonnes × rangées ; les
- * cases se partagent la largeur et les avatars rapetissent jusqu'à un minimum
- * lisible (au-delà, la grille défile de côté). Seuls colonnes × rangées Head
- * sont montrés : les autres restent dans le Head, simplement cachés.
+ * La grille (Réglages → Apparence, `Marques.headGrille`) : 3 à 6 colonnes,
+ * autant de rangées qu'il faut. Les cases se partagent la largeur et les
+ * avatars rapetissent au besoin jusqu'à un minimum lisible.
  *
  * Tous les ids du Head y sont, chargés ou non : une conversation absente
  * (service coupé ou pas encore prêt) vient de [ca.jasette.android.CacheMarques],
@@ -307,30 +304,21 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun Head(favoris: List<Conv>, choisie: String?, ouvrir: (String) -> Unit, retiree: (String) -> Unit) {
-    val dims = ca.jasette.android.Marques.dimensions(ca.jasette.android.Marques.headGrille)
+    val colonnes = ca.jasette.android.Marques.colonnes(ca.jasette.android.Marques.headGrille)
     Column {
-        if (dims == null) {
-            FlowRow(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp)) {
-                for (c in favoris) key(c.id) { CaseHead(c, choisie, 80.dp, 54.dp, 12.sp, ouvrir, retiree) }
-            }
-        } else {
-            val (colonnes, rangees) = dims
-            androidx.compose.foundation.layout.BoxWithConstraints(
-                Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
-            ) {
-                // La case : la largeur partagée, jamais moins que le minimum lisible.
-                val case = maxOf(maxWidth / colonnes, CASE_HEAD_MIN)
-                // L'avatar suit la case (54 dp pour 80 dp), entre 30 et 54 dp.
-                val avatar = (case * (54f / 80f)).coerceIn(30.dp, 54.dp)
-                val police = if (case < 64.dp) 10.sp else if (case < 76.dp) 11.sp else 12.sp
-                val defile = case * colonnes > maxWidth
-                Column(
-                    if (defile) Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()) else Modifier,
-                ) {
-                    for (rangee in favoris.take(colonnes * rangees).chunked(colonnes)) {
-                        Row {
-                            for (c in rangee) key(c.id) { CaseHead(c, choisie, case, avatar, police, ouvrir, retiree) }
-                        }
+        androidx.compose.foundation.layout.BoxWithConstraints(
+            Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
+        ) {
+            // La case : la largeur partagée, jamais moins que le minimum lisible.
+            val case = maxOf(maxWidth / colonnes, CASE_HEAD_MIN)
+            // L'avatar suit la case (54 dp pour 80 dp), entre 30 et 54 dp.
+            val avatar = (case * (54f / 80f)).coerceIn(30.dp, 54.dp)
+            val police = if (case < 64.dp) 10.sp else if (case < 76.dp) 11.sp else 12.sp
+            // Autant de rangées qu'il faut : tous les Head sont montrés.
+            Column {
+                for (rangee in favoris.chunked(colonnes)) {
+                    Row {
+                        for (c in rangee) key(c.id) { CaseHead(c, choisie, case, avatar, police, ouvrir, retiree) }
                     }
                 }
             }

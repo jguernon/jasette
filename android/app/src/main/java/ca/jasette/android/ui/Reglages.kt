@@ -794,7 +794,7 @@ private fun ChoixTeinte() {
 }
 
 /**
- * Réglages → Apparence → Grille du Head : « Automatique » ou colonnes × rangées,
+ * Réglages → Apparence → Grille du Head : 3, 4, 5 ou 6 de large,
  * chaque choix avec son petit schéma. Propre à cet appareil (Marques.headGrille).
  */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -819,9 +819,8 @@ private fun ChoixGrilleHead() {
                 ) {
                     SchemaGrille(g, if (actif) P.accent else P.textePale)
                     Spacer(Modifier.height(6.dp))
-                    val dims = ca.jasette.android.Marques.dimensions(g)
                     Text(
-                        if (dims == null) t("Automatique") else "${dims.first} × ${dims.second}",
+                        t("%d de large").format(ca.jasette.android.Marques.colonnes(g)),
                         color = if (actif) P.texteFort else P.texte, fontSize = 12.sp,
                         fontWeight = if (actif) FontWeight.SemiBold else FontWeight.Normal,
                         maxLines = 1,
@@ -830,26 +829,25 @@ private fun ChoixGrilleHead() {
             }
         }
         Text(
-            t("Automatique : autant d'avatars que la largeur en permet. Sinon, colonnes × rangées ; les avatars rapetissent au besoin, et ceux en trop sont cachés (pas retirés du Head)."),
+            t("Le nombre d'avatars par rangée ; il y a autant de rangées qu'il faut pour tout le Head."),
             color = P.textePale, fontSize = 12.sp,
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
         )
     }
 }
 
-/** Le schéma d'une grille : un rond par case ; « auto », des ronds qui débordent sur la ligne suivante. */
+/** Le schéma d'une grille : un rond par case, sur deux rangées. */
 @Composable
 private fun SchemaGrille(grille: String, couleur: androidx.compose.ui.graphics.Color) {
-    val dims = ca.jasette.android.Marques.dimensions(grille)
+    val colonnes = ca.jasette.android.Marques.colonnes(grille)
     androidx.compose.foundation.Canvas(Modifier.size(width = 56.dp, height = 34.dp)) {
-        // « auto » : 5 ronds, puis 2 sur la rangée suivante (la grille s'adapte).
-        val (colonnes, rangees) = dims ?: (5 to 2)
+        // Les colonnes choisies, sur deux rangées (la hauteur suit le Head).
+        val rangees = 2
         val cote = minOf(size.width / colonnes, size.height / rangees)
         val r = cote * 0.36f
         val x0 = (size.width - cote * colonnes) / 2
         val y0 = (size.height - cote * rangees) / 2
         for (y in 0 until rangees) for (x in 0 until colonnes) {
-            if (dims == null && y == 1 && x >= 2) continue
             drawCircle(
                 couleur, r,
                 androidx.compose.ui.geometry.Offset(x0 + cote * (x + 0.5f), y0 + cote * (y + 0.5f)),
