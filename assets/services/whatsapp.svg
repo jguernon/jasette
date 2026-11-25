@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <!-- WhatsApp, dessiné pour Jasette : une bulle verte et un combiné blanc. -->
-  <circle cx="51" cy="48" r="38" fill="#25D366"/>
-  <path d="M22 70 L12 90 L36 82 Z" fill="#25D366"/>
-  <path d="M36 32 Q33 52 47 64 Q57 71 68 67" fill="none" stroke="#ffffff" stroke-width="9" stroke-linecap="round"/>
-  <circle cx="36" cy="31" r="7.5" fill="#ffffff"/>
-  <circle cx="69" cy="66" r="7.5" fill="#ffffff"/>
-</svg>
