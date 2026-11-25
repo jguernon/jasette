@@ -9,6 +9,18 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
+ * Un service vu par l'interface : un pont local ([PontLocal]) ou le même
+ * service servi par un serveur Jasette ([PontDistant], voir Serveur.kt).
+ * Comme `Pont` du bureau (src/pont.rs) : le reste de l'app ne voit pas la différence.
+ */
+interface Pont {
+    val nom: String
+    fun envoyer(commande: JSONObject)
+    fun vivant(): Boolean
+    fun arreter()
+}
+
+/**
  * Un pont Go (`libjasette-pont.so` ou `libjasette-meta.so`), lancé comme processus.
  *
  * Même protocole que sur le bureau (src/pont.rs) : une commande JSON par ligne
@@ -18,12 +30,12 @@ import java.util.concurrent.TimeUnit
  * [surNouvelle] est appelée depuis le fil de lecture ; à la fin du processus,
  * elle reçoit `{"ev":"pont_ferme"}`, comme sur le bureau.
  */
-class Pont(
-    val nom: String,
+class PontLocal(
+    override val nom: String,
     executable: File,
     env: Map<String, String>,
     private val surNouvelle: (JSONObject) -> Unit,
-) {
+) : Pont {
     private val processus: Process
     private val entree: BufferedWriter
     // Les écritures passent par un seul fil : jamais d'attente sur le fil de l'interface.
@@ -65,7 +77,7 @@ class Pont(
         }, "pont-$nom-journal").start()
     }
 
-    fun envoyer(commande: JSONObject) {
+    override fun envoyer(commande: JSONObject) {
         if (arrete) return
         val ligne = commande.toString()
         ecrivain.execute {
@@ -79,10 +91,10 @@ class Pont(
         }
     }
 
-    fun vivant(): Boolean = processus.isAlive
+    override fun vivant(): Boolean = processus.isAlive
 
     /** « quit », puis on attend un peu avant de forcer. */
-    fun arreter() {
+    override fun arreter() {
         if (arrete) return
         envoyer(JSONObject().put("cmd", "quit"))
         arrete = true

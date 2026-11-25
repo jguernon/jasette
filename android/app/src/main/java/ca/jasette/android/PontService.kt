@@ -31,7 +31,10 @@ class PontService : ServiceAndroid() {
         val type = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING else 0
         ServiceCompat.startForeground(this, ID_SERVICE, notificationService(), type)
         Depot.notifier = { m, conv -> notifier(m, conv) }
+        Depot.surChangementMode = { rafraichir() }
         Depot.demarrer(this)
+        // Le mode (local ou serveur) n'est connu qu'une fois le dépôt démarré.
+        rafraichir()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -46,7 +49,16 @@ class PontService : ServiceAndroid() {
 
     override fun onDestroy() {
         Depot.notifier = null
+        Depot.surChangementMode = null
         super.onDestroy()
+    }
+
+    /** La notification du service, selon le mode et la langue. */
+    private fun rafraichir() {
+        try {
+            NotificationManagerCompat.from(this).notify(ID_SERVICE, notificationService())
+        } catch (_: SecurityException) {
+        }
     }
 
     private fun ouvrir(conv: String?): PendingIntent {
@@ -67,11 +79,14 @@ class PontService : ServiceAndroid() {
         return NotificationCompat.Builder(this, CANAL_SERVICE)
             .setSmallIcon(R.drawable.ic_notif)
             .setContentTitle("Jasette")
-            .setContentText("Connecté à tes messageries")
+            .setContentText(
+                Depot.serveur?.let { "${t("Connecté à ton serveur Jasette")} (${it.adresse})" }
+                    ?: t("Connecté à tes messageries"),
+            )
             .setOngoing(true)
             .setSilent(true)
             .setContentIntent(ouvrir(null))
-            .addAction(0, "Quitter", arreter)
+            .addAction(0, t("Quitter"), arreter)
             .build()
     }
 
@@ -80,7 +95,7 @@ class PontService : ServiceAndroid() {
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
         val titre = conv?.name?.ifEmpty { null } ?: m.sender.ifEmpty { Service.de(m.conv).court }
-        val texte = if (conv?.group == true && m.sender.isNotEmpty()) "${m.sender} : ${m.apercu()}" else m.apercu()
+        val texte = if (conv?.group == true && m.sender.isNotEmpty()) "${m.sender}${t(" : ")}${m.apercu()}" else m.apercu()
         val n = NotificationCompat.Builder(this, CANAL_MESSAGES)
             .setSmallIcon(R.drawable.ic_notif)
             .setColor(0xFF2F6BFF.toInt())
@@ -113,13 +128,13 @@ class PontService : ServiceAndroid() {
         fun canaux(ctx: Context) {
             val nm = ctx.getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(
-                NotificationChannel(CANAL_SERVICE, "Jasette en marche", NotificationManager.IMPORTANCE_MIN).apply {
-                    description = "Garde la connexion à Google Messages et à Messenger."
+                NotificationChannel(CANAL_SERVICE, t("Jasette en marche"), NotificationManager.IMPORTANCE_MIN).apply {
+                    description = t("Garde la connexion à Google Messages, Messenger et Instagram (ou à ton serveur Jasette).")
                     setShowBadge(false)
                 },
             )
             nm.createNotificationChannel(
-                NotificationChannel(CANAL_MESSAGES, "Nouveaux messages", NotificationManager.IMPORTANCE_HIGH),
+                NotificationChannel(CANAL_MESSAGES, t("Nouveaux messages"), NotificationManager.IMPORTANCE_HIGH),
             )
         }
 

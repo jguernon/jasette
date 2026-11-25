@@ -1,5 +1,6 @@
 package ca.jasette.android.ui
 
+import ca.jasette.android.t
 import android.annotation.SuppressLint
 import android.os.Handler
 import android.os.Looper
@@ -141,15 +142,15 @@ fun Connexion(service: Service, plateforme: String, fini: () -> Unit) {
     }
 
     val titre = when (service) {
-        Service.GOOGLE -> "Connexion à Google"
-        Service.MESSENGER -> if (plateforme == "facebook") "Connexion à Facebook" else "Connexion à Messenger"
-        Service.INSTAGRAM -> "Connexion à Instagram"
+        Service.GOOGLE -> t("Connexion à Google")
+        Service.MESSENGER -> if (plateforme == "facebook") t("Connexion à Facebook") else t("Connexion à Messenger")
+        Service.INSTAGRAM -> t("Connexion à Instagram")
     }
     Scaffold(
         containerColor = P.fond,
         topBar = {
             TopAppBar(
-                navigationIcon = { IconButton(onClick = fini) { Icon(Icons.Filled.Close, "Fermer") } },
+                navigationIcon = { IconButton(onClick = fini) { Icon(Icons.Filled.Close, t("Fermer")) } },
                 title = { Text(titre) },
                 colors = barreCouleurs(),
             )

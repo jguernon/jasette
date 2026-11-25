@@ -111,9 +111,9 @@ data class Msg(
     /** L'aperçu dans la liste ou une notification. */
     fun apercu(): String = when {
         text.isNotEmpty() -> text
-        attachments.any { it.estImage } -> "📷 Photo"
-        attachments.any { it.estAudio } -> "🎤 Message vocal"
-        attachments.isNotEmpty() || media.isNotEmpty() -> "📎 Pièce jointe"
+        attachments.any { it.estImage } -> t("📷 Photo")
+        attachments.any { it.estAudio } -> t("🎤 Message vocal")
+        attachments.isNotEmpty() || media.isNotEmpty() -> t("📎 Pièce jointe")
         else -> ""
     }
 
@@ -144,18 +144,18 @@ data class Msg(
 
 /** Le statut d'un message, en mots (comme `statut()` du bureau). */
 fun statut(s: String): String = when {
-    s == "ENVOI" -> "Envoi…"
-    s == "ÉCHEC" -> "Échec"
-    s.contains("FAILED") -> "Échec"
-    s.contains("READ") -> "Lu"
-    s.contains("DELIVERED") -> "Distribué"
-    s.contains("COMPLETE") -> "Envoyé"
-    s.contains("SENDING") || s.contains("YET_TO_SEND") -> "Envoi…"
+    s == "ENVOI" -> t("Envoi…")
+    s == "ÉCHEC" -> t("Échec")
+    s.contains("FAILED") -> t("Échec")
+    s.contains("READ") -> t("Lu")
+    s.contains("DELIVERED") -> t("Distribué")
+    s.contains("COMPLETE") -> t("Envoyé")
+    s.contains("SENDING") || s.contains("YET_TO_SEND") -> t("Envoi…")
     else -> ""
 }
 
 /** L'état d'un pont, tel qu'annoncé par ses nouvelles « state ». */
-enum class Etat(val texte: String) {
+enum class Etat(private val fr: String) {
     DEMARRAGE("Démarrage"),
     NON_ASSOCIE("Non connecté"),
     ASSOCIATION("Association"),
@@ -164,6 +164,9 @@ enum class Etat(val texte: String) {
     TELEPHONE_HORS_LIGNE("Téléphone hors ligne"),
     RECONNEXION("Reconnexion…"),
     ARRETE("Pont arrêté");
+
+    /** En mots, dans la langue de l'interface. */
+    val texte get() = t(fr)
 
     val associe get() = this == CONNEXION || this == PRET || this == TELEPHONE_HORS_LIGNE || this == RECONNEXION
 

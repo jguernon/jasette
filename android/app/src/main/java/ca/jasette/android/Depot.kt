@@ -28,6 +28,14 @@ object Depot {
     /** Un pont par service : Google, puis le pont Meta lancé une fois par service Meta. */
     private val ponts = HashMap<Service, Pont>()
     private var enMarche = false
+    /** Change à chaque arrêt : les nouvelles d'un pont d'avant sont ignorées. */
+    private var generation = 0
+    /** En mode client : la connexion au serveur Jasette, partagée par les trois services. */
+    private var connexion: ConnexionServeur? = null
+
+    /** Le serveur Jasette jumelé (mode « client »), ou null : « Sur cet appareil ». */
+    var serveur by mutableStateOf<ConfigServeur?>(null)
+        private set
 
     // ---- Ce que l'interface affiche ----
 
@@ -69,11 +77,21 @@ object Depot {
 
     // ---- Les ponts ----
 
-    /** Lance les deux ponts (une seule fois). */
+    /** Le service au premier plan met sa notification à jour quand le mode change. */
+    var surChangementMode: (() -> Unit)? = null
+
+    /**
+     * Lance les ponts (une seule fois) : locaux, ou, en mode client, les trois
+     * services du serveur Jasette (aucun pont local ne tourne alors).
+     */
     fun demarrer(ctx: Context) {
         if (enMarche) return
         appli = ctx.applicationContext
         enMarche = true
+        generation++
+        val cfg = ConfigServeur.lire(appli)
+        serveur = cfg
+        if (cfg != null) connexion = ConnexionServeur(cfg, ConnexionServeur.dossierCache(appli, cfg.adresse))
         Service.entries.forEach { lancer(it) }
     }
 
@@ -81,8 +99,42 @@ object Depot {
 
     fun arreter() {
         enMarche = false
+        generation++
         ponts.values.forEach { it.arreter() }
         ponts.clear()
+        connexion?.fermer()
+        connexion = null
+    }
+
+    /** Passe en mode client ([config]) ou revient « Sur cet appareil » (null). */
+    private fun changerMode(config: ConfigServeur?) {
+        val relancer = enMarche
+        ConfigServeur.garder(appli, config)
+        arreter()
+        vider()
+        // Les copies des fichiers d'un serveur abandonné ne servent plus.
+        if (config == null) File(appli.filesDir, "distant").deleteRecursively()
+        serveur = config
+        if (relancer) demarrer(appli)
+        surChangementMode?.invoke()
+    }
+
+    /** Oublie tout ce qui vient des ponts d'avant. */
+    private fun vider() {
+        convs.clear()
+        messages.clear()
+        plusAnciens.clear()
+        avatars.clear()
+        medias.clear()
+        echecs.clear()
+        demandes.clear()
+        Service.entries.forEach { etats[it] = Etat.DEMARRAGE }
+        noms.clear()
+        emoji = null
+        besoinNip = false
+        erreurNip = null
+        erreur = null
+        chargement = null
     }
 
     /** Les variables d'environnement que les ponts lisent déjà. */
@@ -106,21 +158,29 @@ object Depot {
      * JASETTE_META_SERVICE, chacun avec son dossier (<données>/messenger ou /instagram).
      */
     private fun lancer(service: Service) {
-        try {
-            ponts[service] = if (service == Service.GOOGLE) {
-                Pont("google", executable("libjasette-pont.so"), environnement()) { v ->
-                    principal.post { nouvelle(v, Service.GOOGLE) }
+        val g = generation
+        // Depuis le fil de lecture : préfixe Meta, puis le fil principal.
+        val recu: (JSONObject) -> Unit = { v ->
+            if (service.meta) prefixerMeta(v, service)
+            principal.post {
+                if (g == generation) {
+                    if (service.meta) nouvelleMeta(v, service) else nouvelle(v, Service.GOOGLE)
                 }
-            } else {
-                val env = environnement() + ("JASETTE_META_SERVICE" to service.cle)
-                Pont(service.cle, executable("libjasette-meta.so"), env) { v ->
-                    prefixerMeta(v, service)
-                    principal.post { nouvelleMeta(v, service) }
+            }
+        }
+        try {
+            val cx = connexion
+            ponts[service] = when {
+                cx != null -> PontDistant(service.cle, cx, recu)
+                service == Service.GOOGLE -> PontLocal("google", executable("libjasette-pont.so"), environnement(), recu)
+                else -> {
+                    val env = environnement() + ("JASETTE_META_SERVICE" to service.cle)
+                    PontLocal(service.cle, executable("libjasette-meta.so"), env, recu)
                 }
             }
         } catch (e: Exception) {
             Log.e("jasette", "pont ${service.court}", e)
-            erreur = "Le pont ${service.court} ne démarre pas : ${e.message}"
+            erreur = "${t("Le pont ne démarre pas")} (${service.court}) : ${e.message}"
             etats[service] = Etat.ARRETE
         }
     }
@@ -133,6 +193,77 @@ object Depot {
 
     fun commande(service: Service, v: JSONObject) {
         ponts[service]?.envoyer(v)
+    }
+
+    // ---- Le serveur Jasette (réglages et accueil) ----
+
+    /** « Utiliser mon serveur Jasette » choisi : le formulaire est affiché. */
+    var choixClient by mutableStateOf(false)
+    /** Étape 1 faite : le code de vérification à faire confirmer. */
+    var verifClient by mutableStateOf<Verification?>(null)
+    var serveurOccupe by mutableStateOf(false)
+        private set
+    var erreurServeur by mutableStateOf<String?>(null)
+    /** Un jumelage vient de réussir (l'écran du serveur peut se refermer). */
+    var jumelageReussi by mutableStateOf(false)
+    /** L'accueil : « Autonome » choisi, on passe au choix du premier service. */
+    var accueilAutonome by mutableStateOf(false)
+
+    private fun tacheServeur(travail: () -> Unit) {
+        serveurOccupe = true
+        erreurServeur = null
+        Thread({
+            try {
+                travail()
+            } catch (e: Exception) {
+                val texte = e.message ?: e.toString()
+                principal.post { erreurServeur = texte }
+            } finally {
+                principal.post { serveurOccupe = false }
+            }
+        }, "serveur-jumelage").start()
+    }
+
+    /** Client, étape 1 : se brancher et calculer le code de vérification (rien de secret ne part). */
+    fun verifierClient(adresse: String, code: String) {
+        val a = adresse.trim()
+        val c = code.filter { it.isDigit() }
+        if (a.isEmpty() || c.length != 6) {
+            erreurServeur = t("Entre l'adresse du serveur et le code à 6 chiffres qu'il affiche.")
+            return
+        }
+        tacheServeur {
+            val v = Jumelage.verifier(a, c)
+            principal.post { verifClient = v }
+        }
+    }
+
+    /** Client, étape 2 : les codes correspondent, on jumelle ; le mode devient « client ». */
+    fun jumelerClient() {
+        val v = verifClient ?: return
+        val nom = Jumelage.nomAppareil(appli)
+        tacheServeur {
+            val cfg = Jumelage.jumeler(v, nom)
+            principal.post {
+                verifClient = null
+                choixClient = false
+                jumelageReussi = true
+                changerMode(cfg)
+            }
+        }
+    }
+
+    fun refuserVerification() {
+        verifClient = null
+        erreurServeur = t("Jumelage annulé : les codes ne correspondaient pas.")
+    }
+
+    /** « Sur cet appareil » : plus de serveur, les ponts locaux reprennent. */
+    fun utiliserCetAppareil() {
+        choixClient = false
+        verifClient = null
+        erreurServeur = null
+        if (serveur != null) changerMode(null)
     }
 
     // ---- Les comptes ----
@@ -189,7 +320,7 @@ object Depot {
             "hello", "e2ee", "typing", "search" -> {}
             "error" -> {
                 val texte = v.chaine("text")
-                if (texte.isNotEmpty()) erreur = "${service.court} : $texte"
+                if (texte.isNotEmpty()) erreur = "${service.court} : ${t(texte)}"
             }
             "pont_ferme" -> pontFerme(service)
             else -> nouvelle(v, service)
@@ -293,7 +424,7 @@ object Depot {
             }
             "error" -> {
                 val texte = v.chaine("text")
-                if (texte.isNotEmpty()) erreur = texte
+                if (texte.isNotEmpty()) erreur = t(texte)
                 if (v.chaine("where") == "messages") chargement = null
             }
             "pont_ferme" -> pontFerme(service)

@@ -1,5 +1,6 @@
 package ca.jasette.android.ui
 
+import ca.jasette.android.t
 import android.app.Activity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -83,7 +84,7 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit) {
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") }
+                    IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Filled.ArrowBack, t("Retour")) }
                 },
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -133,7 +134,7 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit) {
                     when {
                         Depot.chargement == id -> CircularProgressIndicator(Modifier.size(24.dp), color = P.accent)
                         Depot.plusAnciens[id] == true ->
-                            TextButton(onClick = { Depot.plusVieux(id) }) { Text("Messages plus anciens") }
+                            TextButton(onClick = { Depot.plusVieux(id) }) { Text(t("Messages plus anciens")) }
                     }
                 }
             }
@@ -154,13 +155,13 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit) {
 private fun BoutonsAppel(activite: Activity, conv: ca.jasette.android.Conv) {
     when (conv.service) {
         Service.GOOGLE -> if (!conv.group && conv.number.isNotEmpty()) {
-            IconButton(onClick = { Appels.video(activite, conv.number) }) { Icon(Icones.camera, "Appel vidéo") }
-            IconButton(onClick = { Appels.telephone(activite, conv.number) }) { Icon(Icons.Filled.Phone, "Appeler") }
+            IconButton(onClick = { Appels.video(activite, conv.number) }) { Icon(Icones.camera, t("Appel vidéo")) }
+            IconButton(onClick = { Appels.telephone(activite, conv.number) }) { Icon(Icons.Filled.Phone, t("Appeler")) }
         }
         else -> {
             val nom = conv.service.court
-            IconButton(onClick = { Appels.ouvrirMeta(activite, conv) }) { Icon(Icones.camera, "Appel vidéo dans $nom") }
-            IconButton(onClick = { Appels.ouvrirMeta(activite, conv) }) { Icon(Icons.Filled.Phone, "Appel dans $nom") }
+            IconButton(onClick = { Appels.ouvrirMeta(activite, conv) }) { Icon(Icones.camera, "${t("Appel vidéo dans")} $nom") }
+            IconButton(onClick = { Appels.ouvrirMeta(activite, conv) }) { Icon(Icons.Filled.Phone, "${t("Appel dans")} $nom") }
         }
     }
 }
@@ -193,7 +194,7 @@ private fun Message(m: Msg, groupe: Boolean, premier: Boolean, dernier: Boolean,
             if (p.estImage) PieceImage(p, agrandir) else PieceAutre(p.name.ifEmpty { p.mime })
         }
         if (m.attachments.isEmpty() && m.media.isNotEmpty()) PieceAutre(m.media)
-        val echec = statut(m.status) == "Échec"
+        val echec = statut(m.status) == t("Échec")
         if (m.text.isNotEmpty()) {
             val rayon = 18.dp
             val forme = if (m.fromMe) {
@@ -214,7 +215,7 @@ private fun Message(m: Msg, groupe: Boolean, premier: Boolean, dernier: Boolean,
             }
         } else if (dernier || echec) {
             Text(
-                heure(m.time) + if (echec) " · Échec" else "",
+                heure(m.time) + if (echec) " · ${t("Échec")}" else "",
                 color = if (echec) P.danger else P.textePale, fontSize = 11.sp,
                 modifier = Modifier.padding(horizontal = 6.dp),
             )
@@ -251,7 +252,7 @@ private fun PieceImage(p: Piece, agrandir: (String) -> Unit) {
     } else {
         Box(cadre, contentAlignment = Alignment.Center) {
             if (Depot.echecs.containsKey(p.mediaId)) {
-                Text("Image indisponible", color = P.textePale, fontSize = 12.sp)
+                Text(t("Image indisponible"), color = P.textePale, fontSize = 12.sp)
             } else {
                 CircularProgressIndicator(Modifier.size(22.dp), color = P.textePale, strokeWidth = 2.dp)
             }
@@ -281,7 +282,7 @@ private fun Saisie(conv: String, actif: Boolean) {
                 .padding(horizontal = 16.dp, vertical = 11.dp),
             contentAlignment = Alignment.CenterStart,
         ) {
-            if (texte.isEmpty()) Text(if (actif) "Message" else "Envoi impossible pour l'instant", color = P.textePale)
+            if (texte.isEmpty()) Text(if (actif) t("Message") else t("Envoi impossible pour l'instant"), color = P.textePale)
             BasicTextField(
                 texte, { texte = it },
                 enabled = actif,
@@ -301,7 +302,7 @@ private fun Saisie(conv: String, actif: Boolean) {
             enabled = peut,
             modifier = Modifier.size(44.dp).clip(CircleShape).background(if (peut) P.accent else P.surface),
         ) {
-            Icon(Icons.AutoMirrored.Filled.Send, "Envoyer", tint = if (peut) P.texteFort else P.textePale)
+            Icon(Icons.AutoMirrored.Filled.Send, t("Envoyer"), tint = if (peut) P.texteFort else P.textePale)
         }
     }
 }

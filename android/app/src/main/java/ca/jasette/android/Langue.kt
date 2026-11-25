@@ -1,0 +1,178 @@
+package ca.jasette.android
+
+import android.content.Context
+import android.content.res.Resources
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+
+/**
+ * La langue de l'interface, comme `t()` du bureau (src/main.rs) : les textes
+ * sont écrits en français dans le code, et [t] rend leur traduction anglaise
+ * quand l'interface est en anglais.
+ *
+ * Par défaut (« auto »), la langue du téléphone : français si sa locale
+ * commence par « fr », sinon anglais. Le choix est un état Compose : le
+ * changer redessine aussitôt tout ce qui est à l'écran.
+ */
+object Langue {
+    private const val PREFS = "reglages"
+    private const val CLE = "langue"
+    private var prefs: android.content.SharedPreferences? = null
+
+    /** « auto », « fr » ou « en ». */
+    var choix by mutableStateOf("auto")
+        private set
+
+    fun charger(ctx: Context) {
+        val p = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs = p
+        choix = p.getString(CLE, "auto")?.takeIf { it in listOf("auto", "fr", "en") } ?: "auto"
+    }
+
+    fun choisir(valeur: String) {
+        choix = valeur
+        prefs?.edit()?.putString(CLE, valeur)?.apply()
+    }
+
+    /** Le téléphone est-il en français ? (sa locale, pas celle de l'app) */
+    fun telephoneFrancais(): Boolean {
+        val l = Resources.getSystem().configuration.locales
+        return l.size() > 0 && l[0].language.startsWith("fr")
+    }
+
+    val anglais: Boolean get() = when (choix) {
+        "fr" -> false
+        "en" -> true
+        else -> !telephoneFrancais()
+    }
+}
+
+/** Le texte [fr] dans la langue de l'interface. */
+fun t(fr: String): String = if (!Langue.anglais) fr else ANGLAIS[fr] ?: fr
+
+private val ANGLAIS: Map<String, String> = mapOf(
+    " : " to ": ",
+    "🎤 Message vocal" to "🎤 Voice message",
+    "📎 Pièce jointe" to "📎 Attachment",
+    "📷 Photo" to "📷 Photo",
+    "Adresse du serveur" to "Server address",
+    "adresse invalide" to "invalid address",
+    "adresse vide" to "empty address",
+    "affiche-t-il ce code de vérification ?" to "show this verification code?",
+    "Appel dans" to "Call in",
+    "Appeler" to "Call",
+    "Appel vidéo" to "Video call",
+    "Appel vidéo dans" to "Video call in",
+    "Aucun compte connecté." to "No account connected.",
+    "Aucune app de téléphone sur cet appareil" to "No phone app on this device",
+    "Aucun navigateur pour ouvrir" to "No browser to open",
+    "Aucun service n'est connecté sur ton serveur Jasette. Connecte-les sur le serveur." to "No service is connected on your Jasette server. Connect them on the server.",
+    "Aujourd'hui" to "Today",
+    "Automatique" to "Automatic",
+    "Autonome" to "Standalone",
+    "Avec Facebook" to "With Facebook",
+    "Avec Messenger" to "With Messenger",
+    "Bienvenue dans Jasette" to "Welcome to Jasette",
+    "Blanche" to "White",
+    "Celle du téléphone" to "The phone's language",
+    "ce n'est pas un serveur Jasette" to "this is not a Jasette server",
+    "Cet appareil" to "This device",
+    "Ce téléphone se connecte lui-même à tes services (Messenger, Instagram)." to "This phone connects to your services itself (Messenger, Instagram).",
+    "Changer de mode" to "Change mode",
+    "Chargement des conversations…" to "Loading conversations…",
+    "Chiffré" to "Encrypted",
+    "Client" to "Client",
+    "Code à 6 chiffres" to "6-digit code",
+    "Comment utiliser Jasette ici ?" to "How do you want to use Jasette here?",
+    "Comptes" to "Accounts",
+    "Connecté à tes messageries" to "Connected to your messaging services",
+    "Connecté à ton serveur Jasette" to "Connected to your Jasette server",
+    "Connecte un premier service :" to "Connect a first service:",
+    "Connexion à Facebook" to "Sign in to Facebook",
+    "Connexion à Google" to "Sign in to Google",
+    "Connexion à Instagram" to "Sign in to Instagram",
+    "Connexion à Messenger" to "Sign in to Messenger",
+    "connexion fermée" to "connection closed",
+    "connexion perdue" to "connection lost",
+    "Continuer" to "Continue",
+    "Déconnecter" to "Sign out",
+    "Distribué" to "Delivered",
+    "Échec" to "Failed",
+    "Entre l'adresse du serveur et le code à 6 chiffres qu'il affiche." to "Enter the server's address and the 6-digit code it shows.",
+    "Entre le NIP de 6 chiffres choisi dans Messenger pour restaurer tes anciennes conversations chiffrées." to "Enter the 6-digit PIN you chose in Messenger to restore your older encrypted chats.",
+    "Envoi…" to "Sending…",
+    "Envoi impossible pour l'instant" to "Can't send right now",
+    "Envoyé" to "Sent",
+    "Envoyer" to "Send",
+    "Fermer" to "Close",
+    "Garde la connexion à Google Messages, Messenger et Instagram (ou à ton serveur Jasette)." to "Keeps the connection to Google Messages, Messenger and Instagram (or to your Jasette server).",
+    "Google Meet refuse l'appel vidéo direct" to "Google Meet refuses the direct video call",
+    "Hier" to "Yesterday",
+    "Historique chiffré de Messenger" to "Messenger encrypted history",
+    "Icône de l'app" to "App icon",
+    "Image indisponible" to "Image unavailable",
+    "introuvable" to "not found",
+    "Jasette en marche" to "Jasette running",
+    "Jasette se connecte elle-même à chaque service." to "Jasette connects to each service itself.",
+    "Jumelage annulé : les codes ne correspondaient pas." to "Pairing cancelled: the codes did not match.",
+    "Langue" to "Language",
+    "L'appel vidéo passe par l'app Google Meet, qui n'est pas installée." to "Video calls go through the Google Meet app, which is not installed.",
+    "le certificat du serveur a changé : connexion refusée. S'il a été réinstallé, jumelle de nouveau." to "the server's certificate has changed: connection refused. If it was reinstalled, pair again.",
+    "le code de jumelage a 6 chiffres" to "the pairing code has 6 digits",
+    "Le lanceur peut prendre quelques secondes à montrer la nouvelle icône." to "The launcher may take a few seconds to show the new icon.",
+    "Le pont ne démarre pas" to "The bridge does not start",
+    "Le serveur" to "Does the server",
+    "le serveur n'a pas confirmé le dépôt" to "the server did not confirm the upload",
+    "le serveur n'a pas prouvé qu'il connaissait le code" to "the server did not prove it knew the code",
+    "le serveur n'offre pas" to "the server does not offer",
+    "Les services se connectent et se déconnectent sur le serveur." to "Services are connected and disconnected on the server.",
+    "Lu" to "Read",
+    "Message" to "Message",
+    "Messages plus anciens" to "Older messages",
+    "Messenger : entre ton NIP pour restaurer l'historique chiffré" to "Messenger: enter your PIN to restore the encrypted history",
+    "Ne plus l'utiliser" to "Stop using it",
+    "NIP" to "PIN",
+    "nom ou IP (port 47800 par défaut)" to "name or IP (port 47800 by default)",
+    "Non" to "No",
+    "Nouveaux messages" to "New messages",
+    "Oui, jumeler" to "Yes, pair",
+    "pas de certificat" to "no certificate",
+    "Pas maintenant" to "Not now",
+    "port invalide" to "invalid port",
+    "Pour changer de serveur, choisis « Sur cet appareil », puis jumelle de nouveau." to "To change server, choose “On this device”, then pair again.",
+    "Quitter" to "Quit",
+    "Quitter Jasette (arrête les ponts)" to "Quit Jasette (stops the bridges)",
+    "Quitter Jasette (se débranche du serveur)" to "Quit Jasette (disconnects from the server)",
+    "Recommandé" to "Recommended",
+    "Réglages" to "Settings",
+    "réponse inattendue du serveur" to "unexpected answer from the server",
+    "Restaurer" to "Restore",
+    "Retour" to "Back",
+    "Se brancher à ton serveur Jasette, qui garde les sessions. Sur Android, Google Messages ne peut se connecter que de cette façon." to "Connect to your Jasette server, which keeps the sessions. On Android, this is the only way Google Messages can connect.",
+    "Se connecter" to "Sign in",
+    "serveur injoignable" to "server unreachable",
+    "Serveur Jasette" to "Jasette server",
+    "Sombre" to "Dark",
+    "Sur cet appareil" to "On this device",
+    "Sur le serveur : jasette-serveur --jumeler (ou, au bureau, Réglages > Serveur Jasette > Jumeler un appareil). Entre ici son adresse et le code affiché." to "On the server: jasette-serveur --jumeler (or, on the desktop, Settings > Jasette server > Pair a device). Enter its address and the code shown here.",
+    "Touche cet emoji dans Google Messages sur ton téléphone" to "Tap this emoji in Google Messages on your phone",
+    "Tous les services passent par ton serveur : rien à connecter ici. Google Messages fonctionne ainsi." to "All services go through your server: nothing to connect here. Google Messages works this way.",
+    "Un instant…" to "One moment…",
+    "Utiliser mon serveur Jasette" to "Use my Jasette server",
+    "Votre serveur" to "Your server",
+    "Vous : " to "You: ",
+    "Démarrage" to "Starting",
+    "Non connecté" to "Not connected",
+    "Association" to "Pairing",
+    "Connexion…" to "Connecting…",
+    "Connecté" to "Connected",
+    "Téléphone hors ligne" to "Phone offline",
+    "Reconnexion…" to "Reconnecting…",
+    "Pont arrêté" to "Bridge stopped",
+    "appareil inconnu ou révoqué : jumelez-le de nouveau" to "unknown or revoked device: pair it again",
+    "code de jumelage invalide ou expiré" to "invalid or expired pairing code",
+    "trop d'essais, réessayez dans quelques minutes" to "too many attempts, try again in a few minutes",
+    "trop d'essais" to "too many attempts",
+    "impossible d'enregistrer l'appareil" to "could not register the device",
+)

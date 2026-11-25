@@ -1,5 +1,6 @@
 package ca.jasette.android.ui
 
+import ca.jasette.android.t
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -92,8 +93,12 @@ fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true) {
 }
 
 private val heureFmt = DateTimeFormatter.ofPattern("HH:mm")
-private val jourFmt = DateTimeFormatter.ofPattern("d MMM", Locale.CANADA_FRENCH)
-private val jourLongFmt = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.CANADA_FRENCH)
+private val jourFmtFr = DateTimeFormatter.ofPattern("d MMM", Locale.CANADA_FRENCH)
+private val jourLongFmtFr = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.CANADA_FRENCH)
+private val jourFmtEn = DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH)
+private val jourLongFmtEn = DateTimeFormatter.ofPattern("EEEE, MMMM d", Locale.ENGLISH)
+private val jourFmt get() = if (ca.jasette.android.Langue.anglais) jourFmtEn else jourFmtFr
+private val jourLongFmt get() = if (ca.jasette.android.Langue.anglais) jourLongFmtEn else jourLongFmtFr
 
 /** L'heure dans la liste : l'heure aujourd'hui, sinon la date. */
 fun heureListe(ms: Long): String {
@@ -108,8 +113,8 @@ fun jour(ms: Long): String {
     val d = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
     val auj = LocalDate.now()
     return when (d) {
-        auj -> "Aujourd'hui"
-        auj.minusDays(1) -> "Hier"
+        auj -> t("Aujourd'hui")
+        auj.minusDays(1) -> t("Hier")
         else -> d.format(jourLongFmt).replaceFirstChar { it.uppercase() }
     }
 }

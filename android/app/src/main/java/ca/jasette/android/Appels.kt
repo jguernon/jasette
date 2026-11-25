@@ -27,7 +27,7 @@ object Appels {
         try {
             activite.startActivity(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", numero, null)))
         } catch (_: ActivityNotFoundException) {
-            Toast.makeText(activite, "Aucune app de téléphone sur cet appareil", Toast.LENGTH_LONG).show()
+            Toast.makeText(activite, t("Aucune app de téléphone sur cet appareil"), Toast.LENGTH_LONG).show()
         }
     }
 
@@ -47,11 +47,11 @@ object Appels {
         } catch (_: ActivityNotFoundException) {
             Toast.makeText(
                 activite,
-                "L'appel vidéo passe par l'app Google Meet, qui n'est pas installée.",
+                t("L'appel vidéo passe par l'app Google Meet, qui n'est pas installée."),
                 Toast.LENGTH_LONG,
             ).show()
         } catch (_: SecurityException) {
-            Toast.makeText(activite, "Google Meet refuse l'appel vidéo direct", Toast.LENGTH_LONG).show()
+            Toast.makeText(activite, t("Google Meet refuse l'appel vidéo direct"), Toast.LENGTH_LONG).show()
         }
     }
 
@@ -69,7 +69,7 @@ object Appels {
             try {
                 activite.startActivity(vue)
             } catch (_: ActivityNotFoundException) {
-                Toast.makeText(activite, "Aucun navigateur pour ouvrir $url", Toast.LENGTH_LONG).show()
+                Toast.makeText(activite, "${t("Aucun navigateur pour ouvrir")} $url", Toast.LENGTH_LONG).show()
             }
         }
     }

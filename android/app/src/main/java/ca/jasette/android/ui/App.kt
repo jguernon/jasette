@@ -46,12 +46,18 @@ import androidx.compose.ui.unit.sp
 import ca.jasette.android.Conv
 import ca.jasette.android.Depot
 import ca.jasette.android.Service
+import ca.jasette.android.t
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Phone
 
 /** Les écrans de l'app (pas de bibliothèque de navigation : une pile toute simple). */
 sealed interface Ecran {
     data object Liste : Ecran
     data class Fil(val conv: String) : Ecran
     data object Reglages : Ecran
+    /** Réglages → Serveur Jasette (aussi ouvert par « Client » à l'accueil). */
+    data object Serveur : Ecran
     /** La fenêtre de connexion d'un service ; [plateforme] : messenger, facebook ou instagram. */
     data class Connexion(val service: Service, val plateforme: String) : Ecran
 }
@@ -79,9 +85,19 @@ fun App(activite: Activity) {
 
     Box(Modifier.fillMaxSize().background(P.fond)) {
         when (ecran) {
-            Ecran.Liste -> Liste(ouvrir = { aller(Ecran.Fil(it)) }, reglages = { aller(Ecran.Reglages) })
+            Ecran.Liste -> Liste(
+                ouvrir = { aller(Ecran.Fil(it)) },
+                reglages = { aller(Ecran.Reglages) },
+                serveur = { aller(Ecran.Serveur) },
+                connecter = { s, p -> aller(Ecran.Connexion(s, p)) },
+            )
             is Ecran.Fil -> Fil(activite, ecran.conv, retour = ::retour)
-            Ecran.Reglages -> Reglages(retour = ::retour, connecter = { s, p -> aller(Ecran.Connexion(s, p)) })
+            Ecran.Reglages -> Reglages(
+                retour = ::retour,
+                connecter = { s, p -> aller(Ecran.Connexion(s, p)) },
+                serveur = { aller(Ecran.Serveur) },
+            )
+            Ecran.Serveur -> ServeurJasette(retour = ::retour)
             is Ecran.Connexion -> Connexion(ecran.service, ecran.plateforme, fini = ::retour)
         }
     }
@@ -89,14 +105,19 @@ fun App(activite: Activity) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Liste(ouvrir: (String) -> Unit, reglages: () -> Unit) {
+private fun Liste(
+    ouvrir: (String) -> Unit,
+    reglages: () -> Unit,
+    serveur: () -> Unit,
+    connecter: (Service, String) -> Unit,
+) {
     Scaffold(
         containerColor = P.fond,
         topBar = {
             TopAppBar(
                 title = { Text("Jasette", fontWeight = FontWeight.Bold, fontSize = 22.sp) },
                 actions = {
-                    IconButton(onClick = reglages) { Icon(Icons.Filled.Settings, "Réglages", tint = P.icone) }
+                    IconButton(onClick = reglages) { Icon(Icons.Filled.Settings, t("Réglages"), tint = P.icone) }
                 },
                 colors = barreCouleurs(),
             )
@@ -104,11 +125,12 @@ private fun Liste(ouvrir: (String) -> Unit, reglages: () -> Unit) {
     ) { marges ->
         LazyColumn(Modifier.fillMaxSize().padding(marges)) {
             item { Bannieres(reglages) }
-            if (Depot.convs.isEmpty()) {
+            if (accueilVisible()) item { Accueil(serveur, connecter) }
+            if (Depot.convs.isEmpty() && !accueilVisible()) {
                 item {
                     val connecte = Service.entries.any { Depot.etat(it).associe }
                     Text(
-                        if (connecte) "Chargement des conversations…" else "Aucun compte connecté.",
+                        if (connecte) t("Chargement des conversations…") else t("Aucun compte connecté."),
                         color = P.textePale,
                         modifier = Modifier.fillMaxWidth().padding(32.dp),
                     )
@@ -133,7 +155,7 @@ private fun Bannieres(reglages: () -> Unit) {
         Depot.erreur?.let { e ->
             Bandeau(couleur = P.danger) {
                 Text(e, color = P.texteFort, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                IconButton(onClick = { Depot.erreur = null }) { Icon(Icons.Filled.Close, "Fermer", tint = P.icone) }
+                IconButton(onClick = { Depot.erreur = null }) { Icon(Icons.Filled.Close, t("Fermer"), tint = P.icone) }
             }
         }
         Depot.emoji?.let { e ->
@@ -141,7 +163,7 @@ private fun Bannieres(reglages: () -> Unit) {
                 Text(e, fontSize = 40.sp)
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    "Touche cet emoji dans Google Messages sur ton téléphone",
+                    t("Touche cet emoji dans Google Messages sur ton téléphone"),
                     color = P.texteFort, modifier = Modifier.weight(1f),
                 )
             }
@@ -151,16 +173,18 @@ private fun Bannieres(reglages: () -> Unit) {
                 Icon(Icons.Filled.Lock, null, tint = P.accent)
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    "Messenger : entre ton NIP pour restaurer l'historique chiffré",
+                    t("Messenger : entre ton NIP pour restaurer l'historique chiffré"),
                     color = P.texteFort, modifier = Modifier.weight(1f),
                 )
             }
         }
-        val aucun = Service.entries.none { Depot.etat(it).associe || Depot.etat(it) == ca.jasette.android.Etat.DEMARRAGE }
-        if (aucun) {
+        // Mode client sans aucun service connecté sur le serveur.
+        if (Depot.serveur != null && aucunCompte()) {
             Bandeau(couleur = P.accent, onClick = reglages) {
-                Text("Connecte Google Messages, Messenger ou Instagram", color = P.texteFort, modifier = Modifier.weight(1f))
-                TextButton(onClick = reglages) { Text("Comptes") }
+                Text(
+                    t("Aucun service n'est connecté sur ton serveur Jasette. Connecte-les sur le serveur."),
+                    color = P.texteFort, modifier = Modifier.weight(1f),
+                )
             }
         }
     }
@@ -199,13 +223,13 @@ private fun Rangee(c: Conv, onClick: () -> Unit) {
                     fontWeight = if (c.unread) FontWeight.Bold else FontWeight.SemiBold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), fontSize = 16.sp,
                 )
-                if (c.e2ee) Icon(Icons.Filled.Lock, "Chiffré", tint = P.textePale, modifier = Modifier.size(14.dp))
+                if (c.e2ee) Icon(Icons.Filled.Lock, t("Chiffré"), tint = P.textePale, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(heureListe(c.time), color = if (c.unread) P.accent else P.textePale, fontSize = 12.sp)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    (if (c.fromMe && c.preview.isNotEmpty()) "Vous : " else "") + c.preview.replace('\n', ' '),
+                    (if (c.fromMe && c.preview.isNotEmpty()) t("Vous : ") else "") + c.preview.replace('\n', ' '),
                     color = if (c.unread) P.texteFort else P.apercu, fontSize = 14.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 )
@@ -214,6 +238,79 @@ private fun Rangee(c: Conv, onClick: () -> Unit) {
                     Box(Modifier.size(10.dp).clip(CircleShape).background(P.accent))
                 }
             }
+        }
+    }
+}
+
+/** Aucun compte connecté (et tous les ponts ont dit leur état). */
+private fun aucunCompte() =
+    Service.entries.none { Depot.etat(it).associe || Depot.etat(it) == ca.jasette.android.Etat.DEMARRAGE }
+
+/** L'accueil s'affiche tant qu'aucun compte n'est connecté, hors mode client. */
+private fun accueilVisible() = Depot.serveur == null && aucunCompte()
+
+/**
+ * L'accueil du premier lancement, comme au bureau : d'abord le mode (Client,
+ * recommandé sur Android, ou Autonome), puis, en Autonome, le premier service.
+ * Un sélecteur de langue en haut : le changer met tout l'accueil à jour.
+ */
+@Composable
+private fun Accueil(serveur: () -> Unit, connecter: (Service, String) -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(12.dp).clip(RoundedCornerShape(18.dp)).background(P.surface).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                t("Bienvenue dans Jasette"), color = P.texteFort, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        SelecteurLangue()
+        if (!Depot.accueilAutonome) {
+            Text(t("Comment utiliser Jasette ici ?"), color = P.texte, fontSize = 14.sp)
+            Groupe {
+                ChoixRangee(
+                    icone = Icons.Filled.Home,
+                    titre = t("Client"),
+                    badge = t("Recommandé"),
+                    detail = t("Se brancher à ton serveur Jasette, qui garde les sessions. Sur Android, Google Messages ne peut se connecter que de cette façon."),
+                    actif = false,
+                    chevron = true,
+                ) {
+                    Depot.choixClient = true
+                    Depot.erreurServeur = null
+                    serveur()
+                }
+                androidx.compose.material3.HorizontalDivider(color = P.fond)
+                ChoixRangee(
+                    icone = Icons.Filled.Phone,
+                    titre = t("Autonome"),
+                    detail = t("Ce téléphone se connecte lui-même à tes services (Messenger, Instagram)."),
+                    actif = false,
+                    chevron = true,
+                ) { Depot.accueilAutonome = true }
+            }
+        } else {
+            Text(t("Connecte un premier service :"), color = P.texte, fontSize = 14.sp)
+            Groupe {
+                for ((i, s) in Service.entries.withIndex()) {
+                    if (i > 0) androidx.compose.material3.HorizontalDivider(color = P.fond)
+                    Row(
+                        Modifier.fillMaxWidth().clickable { connecter(s, s.cle) }.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.foundation.Image(
+                            androidx.compose.ui.res.painterResource(iconeService(s)), null,
+                            Modifier.size(34.dp).clip(CircleShape),
+                        )
+                        Spacer(Modifier.width(14.dp))
+                        Text(s.titre, color = P.texteFort, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = P.textePale)
+                    }
+                }
+            }
+            TextButton(onClick = { Depot.accueilAutonome = false }) { Text(t("Changer de mode"), color = P.textePale) }
         }
     }
 }

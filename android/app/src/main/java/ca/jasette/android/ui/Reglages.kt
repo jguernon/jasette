@@ -55,18 +55,28 @@ import ca.jasette.android.Depot
 import ca.jasette.android.Etat
 import ca.jasette.android.PontService
 import ca.jasette.android.Service
+import ca.jasette.android.Langue
+import ca.jasette.android.t
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 
 /** Les réglages : les comptes (connecter, déconnecter) et le NIP Messenger. */
+/** Les réglages : les comptes (ou le serveur Jasette), le mode, la langue, l'icône. */
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit) {
+fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: () -> Unit) {
     val ctx = LocalContext.current
     Scaffold(
         containerColor = P.fond,
         topBar = {
             TopAppBar(
-                navigationIcon = { IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") } },
-                title = { Text("Réglages", fontWeight = FontWeight.Bold) },
+                navigationIcon = { IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Filled.ArrowBack, t("Retour")) } },
+                title = { Text(t("Réglages"), fontWeight = FontWeight.Bold) },
                 colors = barreCouleurs(),
             )
         },
@@ -76,45 +86,342 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text("Comptes", color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            for (s in Service.entries) {
-                Carte(s) {
-                    val etat = Depot.etat(s)
-                    if (etat.associe || etat == Etat.ASSOCIATION) {
-                        OutlinedButton(onClick = { Depot.deconnecter(s) }) { Text("Déconnecter", color = P.danger) }
-                    } else {
-                        when (s) {
-                            Service.GOOGLE -> BoutonAccent("Se connecter") { connecter(s, "google") }
-                            Service.MESSENGER -> {
-                                BoutonAccent("Avec Messenger") { connecter(s, "messenger") }
-                                OutlinedButton(onClick = { connecter(s, "facebook") }) { Text("Avec Facebook") }
+            Text(t("Comptes"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            val cfg = Depot.serveur
+            if (cfg != null) {
+                // Mode client : les services se connectent sur le serveur, pas ici.
+                CarteServeur(cfg.adresse)
+                Depot.emoji?.let { e -> BandeauEmoji(e) }
+                if (Depot.besoinNip) Nip()
+            } else {
+                for (s in Service.entries) {
+                    Carte(s) {
+                        val etat = Depot.etat(s)
+                        if (etat.associe || etat == Etat.ASSOCIATION) {
+                            OutlinedButton(onClick = { Depot.deconnecter(s) }) { Text(t("Déconnecter"), color = P.danger) }
+                        } else {
+                            when (s) {
+                                Service.GOOGLE -> BoutonAccent(t("Se connecter")) { connecter(s, "google") }
+                                Service.MESSENGER -> {
+                                    BoutonAccent(t("Avec Messenger")) { connecter(s, "messenger") }
+                                    OutlinedButton(onClick = { connecter(s, "facebook") }) { Text(t("Avec Facebook")) }
+                                }
+                                Service.INSTAGRAM -> BoutonAccent(t("Se connecter")) { connecter(s, "instagram") }
                             }
-                            Service.INSTAGRAM -> BoutonAccent("Se connecter") { connecter(s, "instagram") }
                         }
                     }
+                    if (s == Service.GOOGLE) Depot.emoji?.let { e -> BandeauEmoji(e) }
+                    if (s == Service.MESSENGER && Depot.besoinNip) Nip()
                 }
-                if (s == Service.GOOGLE) {
-                    Depot.emoji?.let { e ->
-                        Bandeau(P.accent) {
-                            Text(e, fontSize = 40.sp)
-                            Spacer(Modifier.width(12.dp))
-                            Text("Touche cet emoji dans Google Messages sur ton téléphone", color = P.texteFort)
-                        }
-                    }
-                }
-                if (s == Service.MESSENGER && Depot.besoinNip) Nip()
             }
             Depot.erreur?.let { Text(it, color = P.danger, fontSize = 14.sp) }
 
             Spacer(Modifier.height(12.dp))
-            Text("Icône de l'app", color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(t("Serveur Jasette"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Groupe {
+                ChoixRangee(
+                    icone = Icons.Filled.Home,
+                    titre = if (cfg != null) t("Utiliser mon serveur Jasette") else t("Sur cet appareil"),
+                    detail = if (cfg != null) cfg.adresse else t("Jasette se connecte elle-même à chaque service."),
+                    actif = false,
+                    chevron = true,
+                    onClick = serveur,
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Text(t("Langue"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            ChoixLangue()
+
+            Spacer(Modifier.height(12.dp))
+            Text(t("Icône de l'app"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             ChoixIcone()
 
             Spacer(Modifier.height(12.dp))
             TextButton(onClick = {
                 ctx.startService(Intent(ctx, PontService::class.java).setAction(PontService.ACTION_ARRETER))
                 (ctx as? android.app.Activity)?.finishAffinity()
-            }) { Text("Quitter Jasette (arrête les ponts)", color = P.textePale) }
+            }) {
+                Text(
+                    if (cfg != null) t("Quitter Jasette (se débranche du serveur)") else t("Quitter Jasette (arrête les ponts)"),
+                    color = P.textePale,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BandeauEmoji(e: String) {
+    Bandeau(P.accent) {
+        Text(e, fontSize = 40.sp)
+        Spacer(Modifier.width(12.dp))
+        Text(t("Touche cet emoji dans Google Messages sur ton téléphone"), color = P.texteFort)
+    }
+}
+
+/** Mode client : à la place des services, la carte du serveur. */
+@Composable
+private fun CarteServeur(adresse: String) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(P.surface).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Home, null, tint = P.accent, modifier = Modifier.size(32.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "${t("Votre serveur")}${t(" : ")}$adresse",
+                    color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 16.sp,
+                )
+            }
+        }
+        for (s in Service.entries) {
+            val etat = Depot.etat(s)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.foundation.layout.Box(Modifier.size(8.dp).clip(CircleShape).background(couleurEtat(etat)))
+                Spacer(Modifier.width(8.dp))
+                val nom = Depot.noms[s]?.takeIf { etat.associe }?.let { " · $it" } ?: ""
+                Text("${s.court}${t(" : ")}${etat.texte}$nom", color = P.texte, fontSize = 13.sp)
+            }
+        }
+        Text(t("Les services se connectent et se déconnectent sur le serveur."), color = P.textePale, fontSize = 12.sp)
+        OutlinedButton(onClick = { Depot.utiliserCetAppareil() }) { Text(t("Ne plus l'utiliser"), color = P.danger) }
+    }
+}
+
+/** Un groupe de rangées sur fond de carte. */
+@Composable
+fun Groupe(contenu: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(P.surface), content = contenu)
+}
+
+/** Une rangée à choisir : icône, titre, détail, coche si [actif]. */
+@Composable
+fun ChoixRangee(
+    icone: androidx.compose.ui.graphics.vector.ImageVector,
+    titre: String,
+    detail: String,
+    actif: Boolean,
+    chevron: Boolean = false,
+    badge: String? = null,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icone, null, tint = if (actif || chevron) P.accent else P.textePale, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(titre, color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                if (badge != null) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        badge, color = P.texteFort, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(P.accent)
+                            .padding(horizontal = 7.dp, vertical = 2.dp),
+                    )
+                }
+            }
+            Text(detail, color = P.textePale, fontSize = 13.sp)
+        }
+        if (actif) Icon(Icons.Filled.Check, null, tint = P.accent, modifier = Modifier.size(20.dp))
+        if (chevron) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = P.textePale)
+    }
+}
+
+/** Réglages → Langue : Automatique (celle du téléphone), Français ou English. */
+@Composable
+private fun ChoixLangue() {
+    val choix = Langue.choix
+    Groupe {
+        for ((valeur, titre) in listOf(
+            "auto" to t("Automatique"),
+            "fr" to "Français",
+            "en" to "English",
+        )) {
+            Row(
+                Modifier.fillMaxWidth().clickable { Langue.choisir(valeur) }.padding(horizontal = 16.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(titre, color = P.texteFort, fontSize = 15.sp)
+                    if (valeur == "auto") {
+                        Text(
+                            "${t("Celle du téléphone")} (${if (Langue.telephoneFrancais()) "Français" else "English"})",
+                            color = P.textePale, fontSize = 13.sp,
+                        )
+                    }
+                }
+                if (choix == valeur) Icon(Icons.Filled.Check, null, tint = P.accent, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}
+
+/** Le petit sélecteur de l'accueil : « Français / English ». */
+@Composable
+fun SelecteurLangue() {
+    val anglais = Langue.anglais
+    Row(
+        Modifier.clip(RoundedCornerShape(999.dp)).background(P.fond).padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        for ((en, nom) in listOf(false to "Français", true to "English")) {
+            val actif = anglais == en
+            Text(
+                nom,
+                color = if (actif) P.texteFort else P.texte,
+                fontWeight = if (actif) FontWeight.SemiBold else FontWeight.Normal,
+                fontSize = 14.sp,
+                modifier = Modifier.clip(RoundedCornerShape(999.dp))
+                    .background(if (actif) P.accent else androidx.compose.ui.graphics.Color.Transparent)
+                    .clickable {
+                        // La langue du téléphone reste « automatique ».
+                        Langue.choisir(if (en != Langue.telephoneFrancais()) "auto" else if (en) "en" else "fr")
+                    }
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
+            )
+        }
+    }
+}
+
+/** Réglages → Serveur Jasette : « Sur cet appareil » ou « Utiliser mon serveur Jasette ». */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ServeurJasette(retour: () -> Unit) {
+    // Un jumelage réussi : retour à l'écran d'avant.
+    LaunchedEffect(Depot.jumelageReussi) {
+        if (Depot.jumelageReussi) {
+            Depot.jumelageReussi = false
+            retour()
+        }
+    }
+    val cfg = Depot.serveur
+    val occupe = Depot.serveurOccupe
+    Scaffold(
+        containerColor = P.fond,
+        topBar = {
+            TopAppBar(
+                navigationIcon = { IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Filled.ArrowBack, t("Retour")) } },
+                title = { Text(t("Serveur Jasette"), fontWeight = FontWeight.Bold) },
+                colors = barreCouleurs(),
+            )
+        },
+    ) { marges ->
+        Column(
+            Modifier.fillMaxSize().padding(marges).verticalScroll(rememberScrollState()).navigationBarsPadding()
+                .imePadding().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Groupe {
+                ChoixRangee(
+                    icone = Icons.Filled.Phone,
+                    titre = t("Sur cet appareil"),
+                    detail = t("Jasette se connecte elle-même à chaque service."),
+                    actif = cfg == null && !Depot.choixClient,
+                    enabled = !occupe,
+                ) { Depot.utiliserCetAppareil() }
+                androidx.compose.material3.HorizontalDivider(color = P.fond)
+                ChoixRangee(
+                    icone = Icons.Filled.Home,
+                    titre = t("Utiliser mon serveur Jasette"),
+                    detail = t("Tous les services passent par ton serveur : rien à connecter ici. Google Messages fonctionne ainsi."),
+                    actif = cfg != null || Depot.choixClient,
+                    enabled = !occupe && cfg == null,
+                ) {
+                    Depot.choixClient = true
+                    Depot.erreurServeur = null
+                }
+            }
+            when {
+                cfg != null -> {
+                    Groupe {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(t("Votre serveur"), color = P.texte, fontSize = 13.sp)
+                            Text(cfg.adresse, color = P.texteFort, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                            Text("${t("Cet appareil")}${t(" : ")}${cfg.nomAppareil}", color = P.texte, fontSize = 13.sp)
+                            Text(
+                                t("Pour changer de serveur, choisis « Sur cet appareil », puis jumelle de nouveau."),
+                                color = P.textePale, fontSize = 12.sp,
+                            )
+                        }
+                    }
+                    OutlinedButton(onClick = { Depot.utiliserCetAppareil() }) { Text(t("Ne plus l'utiliser"), color = P.danger) }
+                }
+                Depot.choixClient -> FormulaireClient(occupe)
+            }
+            if (occupe) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.CircularProgressIndicator(Modifier.size(18.dp), color = P.accent, strokeWidth = 2.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text(t("Un instant…"), color = P.texte)
+                }
+            }
+            Depot.erreurServeur?.let { Text(it, color = P.danger, fontSize = 14.sp) }
+        }
+    }
+}
+
+/** Le jumelage : adresse et code, puis la comparaison du code de vérification. */
+@Composable
+private fun FormulaireClient(occupe: Boolean) {
+    val v = Depot.verifClient
+    Groupe {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (v != null) {
+                Text(
+                    "${t("Le serveur")} ${v.adresse} ${t("affiche-t-il ce code de vérification ?")}",
+                    color = P.texte, fontSize = 15.sp,
+                )
+                Text(
+                    "${v.codeVerification.take(3)} ${v.codeVerification.drop(3)}",
+                    color = P.texteFort, fontSize = 34.sp, fontWeight = FontWeight.Bold,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = { Depot.jumelerClient() }, enabled = !occupe,
+                        colors = ButtonDefaults.buttonColors(containerColor = P.accent),
+                    ) { Text(t("Oui, jumeler")) }
+                    OutlinedButton(onClick = { Depot.refuserVerification() }, enabled = !occupe) {
+                        Text(t("Non"), color = P.danger)
+                    }
+                }
+            } else {
+                var adresse by rememberSaveable { mutableStateOf("") }
+                var code by rememberSaveable { mutableStateOf("") }
+                Text(
+                    t("Sur le serveur : jasette-serveur --jumeler (ou, au bureau, Réglages > Serveur Jasette > Jumeler un appareil). Entre ici son adresse et le code affiché."),
+                    color = P.texte, fontSize = 14.sp,
+                )
+                OutlinedTextField(
+                    adresse, { v -> adresse = v.filterNot { it.isWhitespace() }.take(200) },
+                    label = { Text(t("Adresse du serveur")) },
+                    placeholder = { Text(t("nom ou IP (port 47800 par défaut)")) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    code, { c -> code = c.filter { it.isDigit() }.take(6) },
+                    label = { Text(t("Code à 6 chiffres")) },
+                    singleLine = true,
+                    // Pas « mot de passe » : un code à usage unique, que les gestionnaires n'ont pas à retenir.
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, autoCorrectEnabled = false),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = { Depot.verifierClient(adresse, code) },
+                    enabled = !occupe && adresse.isNotBlank() && code.length == 6,
+                    colors = ButtonDefaults.buttonColors(containerColor = P.accent),
+                ) { Text(t("Continuer")) }
+            }
         }
     }
 }
@@ -159,14 +466,14 @@ private fun Nip() {
         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(P.surface).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text("Historique chiffré de Messenger", color = P.texteFort, fontWeight = FontWeight.SemiBold)
+        Text(t("Historique chiffré de Messenger"), color = P.texteFort, fontWeight = FontWeight.SemiBold)
         Text(
-            "Entre le NIP de 6 chiffres choisi dans Messenger pour restaurer tes anciennes conversations chiffrées.",
+            t("Entre le NIP de 6 chiffres choisi dans Messenger pour restaurer tes anciennes conversations chiffrées."),
             color = P.texte, fontSize = 14.sp,
         )
         OutlinedTextField(
             nip, { v -> nip = v.filter { it.isDigit() }.take(6) },
-            label = { Text("NIP") },
+            label = { Text(t("NIP")) },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
@@ -177,8 +484,8 @@ private fun Nip() {
             Button(
                 onClick = { Depot.envoyerNip(nip) }, enabled = nip.length == 6,
                 colors = ButtonDefaults.buttonColors(containerColor = P.accent),
-            ) { Text("Restaurer") }
-            TextButton(onClick = { Depot.envoyerNip("") }) { Text("Pas maintenant", color = P.textePale) }
+            ) { Text(t("Restaurer")) }
+            TextButton(onClick = { Depot.envoyerNip("") }) { Text(t("Pas maintenant"), color = P.textePale) }
         }
     }
 }
@@ -212,8 +519,8 @@ private fun ChoixIcone() {
     var blanche by remember { mutableStateOf(iconeBlanche(ctx)) }
     Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(vertical = 8.dp)) {
         for ((valeur, nom, res) in listOf(
-            Triple(false, "Sombre", ca.jasette.android.R.mipmap.ic_launcher),
-            Triple(true, "Blanche", ca.jasette.android.R.mipmap.ic_launcher_blanc),
+            Triple(false, t("Sombre"), ca.jasette.android.R.mipmap.ic_launcher),
+            Triple(true, t("Blanche"), ca.jasette.android.R.mipmap.ic_launcher_blanc),
         )) {
             val choisie = blanche == valeur
             Column(
@@ -238,7 +545,7 @@ private fun ChoixIcone() {
         }
     }
     Text(
-        "Le lanceur peut prendre quelques secondes à montrer la nouvelle icône.",
+        t("Le lanceur peut prendre quelques secondes à montrer la nouvelle icône."),
         color = P.textePale,
         fontSize = 12.sp,
     )
