@@ -1781,6 +1781,8 @@ struct Jasette {
     // Le fil
     saisie: Entity<InputState>,
     defile: ScrollHandle,
+    /// Le défilement de la liste des conversations (le fondu du haut n'apparaît qu'une fois défilée).
+    defil_liste: ScrollHandle,
     descendre: bool,
     envoi_seq: u64,
     emojis_ouverts: bool,
@@ -2617,6 +2619,7 @@ impl Jasette {
             filtre: String::new(),
             saisie,
             defile: ScrollHandle::new(),
+            defil_liste: ScrollHandle::new(),
             descendre: false,
             envoi_seq: 0,
             emojis_ouverts: false,
@@ -5109,7 +5112,10 @@ impl Jasette {
         // Comme le fil : la liste passe sous un en-tête givré qui s'efface
         // en dégradé, et ne dessine jamais dans les coins arrondis.
         let givre = |a: f32| alpha(th().givre_liste, a);
-        let haut_voile = haut + 24.;
+        // Le fondu sous l'en-tête n'apparaît qu'une fois la liste défilée : au
+        // repos, la première conversation n'est pas ombrée.
+        let defilee = self.defil_liste.offset().y < px(-1.);
+        let haut_voile = if defilee { haut + 24. } else { haut };
         // Les voiles en retrait d'un pixel (le liseré du verre), arrondis comme le panneau.
         let r = (th().rayon_liste - 1.).max(0.);
         panneau(th().liste, th().rayon_liste)
@@ -5134,11 +5140,15 @@ impl Jasette {
                     .right(px(1.))
                     .rounded_t(rayon(r))
                     .when(!th().ega, |d| {
-                        d.h(px(haut_voile)).bg(linear_gradient(
-                            180.,
-                            linear_color_stop(givre(mesure(0.97, 1.)), haut / haut_voile),
-                            linear_color_stop(givre(0.), 1.),
-                        ))
+                        d.h(px(haut_voile)).bg(if defilee {
+                            linear_gradient(
+                                180.,
+                                linear_color_stop(givre(mesure(0.97, 1.)), haut / haut_voile),
+                                linear_color_stop(givre(0.), 1.),
+                            )
+                        } else {
+                            givre(mesure(0.97, 1.)).into()
+                        })
                     })
                     // En EGA, un en-tête noir plein, coupé net par un filet.
                     .when(th().ega, |d| d.h(px(haut)).bg(givre(1.)).border_b_1().border_color(th().trait_fin))
@@ -5452,7 +5462,7 @@ impl Jasette {
         let source = if self.vue == Vue::Archives { self.toutes_archives() } else { self.boite() };
         let badge = self.vue == Vue::Tout || self.vue == Vue::Archives;
         let mut col =
-            div().id("convs").flex().flex_col().size_full().overflow_y_scroll().px(px(8.)).pt(px(haut)).pb(px(18.));
+            div().id("convs").flex().flex_col().size_full().overflow_y_scroll().track_scroll(&self.defil_liste).px(px(8.)).pt(px(haut)).pb(px(18.));
         let mut visibles: Vec<&Conv> = source.iter().copied().filter(|c| self.correspond(c)).collect();
         // Les épinglées d'abord, dans l'ordre où elles ont été épinglées.
         let rang = |c: &Conv| self.reglages.epingles.iter().position(|x| x == &c.id).unwrap_or(usize::MAX);
