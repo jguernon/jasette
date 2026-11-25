@@ -3,3 +3,8 @@ target/
 *.tmp
 session.json
 __pycache__/
+# Android (android/) : sorties de compilation
+android/**/build/
+android/.gradle/
+android/.kotlin/
+android/local.properties

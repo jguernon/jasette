@@ -1,0 +1,221 @@
+package ca.jasette.android
+
+import org.json.JSONArray
+import org.json.JSONObject
+
+/**
+ * Les services. Les ids des services Meta portent un préfixe dans l'interface,
+ * comme sur le bureau : « m: » pour Messenger, « i: » pour Instagram. Le
+ * préfixe dit aussi à quel pont envoyer une commande.
+ */
+enum class Service(val titre: String, val court: String, val prefixe: String, val cle: String) {
+    GOOGLE("Google Messages", "Google Messages", "", "google"),
+    MESSENGER("Facebook Messenger", "Messenger", "m:", "messenger"),
+    INSTAGRAM("Instagram", "Instagram", "i:", "instagram");
+
+    val meta get() = this != GOOGLE
+
+    companion object {
+        /** Les services servis par le pont Meta (une copie du pont par service). */
+        val META = listOf(MESSENGER, INSTAGRAM)
+
+        fun de(id: String): Service = META.firstOrNull { id.startsWith(it.prefixe) } ?: GOOGLE
+    }
+}
+
+/** Une conversation (mêmes champs que `Conversation` des ponts). */
+data class Conv(
+    val id: String,
+    val name: String,
+    val preview: String,
+    val fromMe: Boolean,
+    val time: Long,
+    val unread: Boolean,
+    val group: Boolean,
+    val rcs: Boolean,
+    val color: String,
+    val members: List<String>,
+    val readOnly: Boolean,
+    val archived: Boolean,
+    val e2ee: Boolean,
+    /** Le numéro de l'autre (Google, conversation à deux) : pour appeler. */
+    val number: String,
+) {
+    val service get() = Service.de(id)
+
+    companion object {
+        fun de(o: JSONObject) = Conv(
+            id = o.chaine("id"),
+            name = o.chaine("name"),
+            preview = o.chaine("preview"),
+            fromMe = o.optBoolean("from_me"),
+            time = o.optLong("time"),
+            unread = o.optBoolean("unread"),
+            group = o.optBoolean("group"),
+            rcs = o.optBoolean("rcs"),
+            color = o.chaine("color"),
+            members = o.optJSONArray("members").chaines(),
+            readOnly = o.optBoolean("read_only"),
+            archived = o.optBoolean("archived"),
+            e2ee = o.optBoolean("e2ee"),
+            number = o.chaine("number"),
+        )
+    }
+}
+
+/** Une pièce jointe. La clé (base64) est renvoyée telle quelle au pont. */
+data class Piece(
+    val mediaId: String,
+    val key: String,
+    val mime: String,
+    val name: String,
+    val size: Long,
+    val w: Long,
+    val h: Long,
+) {
+    val estImage get() = mime.startsWith("image/")
+    val estAudio get() = mime.startsWith("audio/")
+
+    companion object {
+        fun de(o: JSONObject) = Piece(
+            mediaId = o.chaine("media_id"),
+            key = o.chaine("key"),
+            mime = o.chaine("mime"),
+            name = o.chaine("name"),
+            size = o.optLong("size"),
+            w = o.optLong("w"),
+            h = o.optLong("h"),
+        )
+    }
+}
+
+data class Reaction(val emoji: String, val sender: String, val fromMe: Boolean)
+
+data class Msg(
+    val id: String,
+    val conv: String,
+    val text: String,
+    val media: String,
+    val fromMe: Boolean,
+    val sender: String,
+    val time: Long,
+    val status: String,
+    val kind: String,
+    val tmpId: String,
+    val attachments: List<Piece>,
+    val reactions: List<Reaction>,
+) {
+    /** Un envoi local pas encore confirmé par le pont. */
+    val local get() = id == tmpId
+
+    /** L'aperçu dans la liste ou une notification. */
+    fun apercu(): String = when {
+        text.isNotEmpty() -> text
+        attachments.any { it.estImage } -> "📷 Photo"
+        attachments.any { it.estAudio } -> "🎤 Message vocal"
+        attachments.isNotEmpty() || media.isNotEmpty() -> "📎 Pièce jointe"
+        else -> ""
+    }
+
+    companion object {
+        fun de(o: JSONObject): Msg {
+            val pieces = o.optJSONArray("attachments")
+            val reactions = o.optJSONArray("reactions")
+            return Msg(
+                id = o.chaine("id"),
+                conv = o.chaine("conv"),
+                text = o.chaine("text"),
+                media = o.chaine("media"),
+                fromMe = o.optBoolean("from_me"),
+                sender = o.chaine("sender"),
+                time = o.optLong("time"),
+                status = o.chaine("status"),
+                kind = o.chaine("kind"),
+                tmpId = o.chaine("tmp_id"),
+                attachments = (0 until (pieces?.length() ?: 0)).map { Piece.de(pieces!!.getJSONObject(it)) },
+                reactions = (0 until (reactions?.length() ?: 0)).map {
+                    val r = reactions!!.getJSONObject(it)
+                    Reaction(r.chaine("emoji"), r.chaine("sender"), r.optBoolean("from_me"))
+                }.filter { it.emoji.isNotEmpty() },
+            )
+        }
+    }
+}
+
+/** Le statut d'un message, en mots (comme `statut()` du bureau). */
+fun statut(s: String): String = when {
+    s == "ENVOI" -> "Envoi…"
+    s == "ÉCHEC" -> "Échec"
+    s.contains("FAILED") -> "Échec"
+    s.contains("READ") -> "Lu"
+    s.contains("DELIVERED") -> "Distribué"
+    s.contains("COMPLETE") -> "Envoyé"
+    s.contains("SENDING") || s.contains("YET_TO_SEND") -> "Envoi…"
+    else -> ""
+}
+
+/** L'état d'un pont, tel qu'annoncé par ses nouvelles « state ». */
+enum class Etat(val texte: String) {
+    DEMARRAGE("Démarrage"),
+    NON_ASSOCIE("Non connecté"),
+    ASSOCIATION("Association"),
+    CONNEXION("Connexion…"),
+    PRET("Connecté"),
+    TELEPHONE_HORS_LIGNE("Téléphone hors ligne"),
+    RECONNEXION("Reconnexion…"),
+    ARRETE("Pont arrêté");
+
+    val associe get() = this == CONNEXION || this == PRET || this == TELEPHONE_HORS_LIGNE || this == RECONNEXION
+
+    companion object {
+        fun de(s: String, avant: Etat): Etat = when (s) {
+            "unpaired" -> NON_ASSOCIE
+            "pairing" -> ASSOCIATION
+            "connecting" -> CONNEXION
+            "ready" -> PRET
+            "phone_offline" -> TELEPHONE_HORS_LIGNE
+            "reconnecting" -> RECONNEXION
+            else -> avant
+        }
+    }
+}
+
+/** Une chaîne d'un objet JSON : "" si absente ou null (optString rendrait « null »). */
+fun JSONObject.chaine(k: String): String {
+    val v = opt(k)
+    return if (v == null || v == JSONObject.NULL) "" else v.toString()
+}
+
+fun JSONArray?.chaines(): List<String> = if (this == null) emptyList() else (0 until length()).mapNotNull { i -> opt(i).takeIf { it != null && it != JSONObject.NULL }?.toString() }
+
+/** Ajoute le préfixe du service aux ids d'une nouvelle de son pont Meta (comme `prefixer_meta`). */
+fun prefixerMeta(v: JSONObject, service: Service) {
+    val prefixe = service.prefixe
+    fun ids(x: Any?, dansItem: Boolean) {
+        when (x) {
+            is JSONObject -> for (k in x.keys().asSequence().toList()) {
+                val valeur = x.get(k)
+                val cle = k == "conv" || k == "media_id" || (dansItem && k == "id")
+                if (cle && valeur is String && valeur.isNotEmpty() && !valeur.startsWith(prefixe)) {
+                    x.put(k, prefixe + valeur)
+                } else {
+                    ids(valeur, k == "item" || k == "items")
+                }
+            }
+            is JSONArray -> for (i in 0 until x.length()) ids(x.get(i), dansItem)
+        }
+    }
+    ids(v, false)
+}
+
+/** Le service Meta d'une commande (et on retire alors les préfixes), ou null pour Google. */
+fun deprefixerMeta(v: JSONObject): Service? {
+    var service: Service? = null
+    for (k in listOf("conv", "media_id", "msg", "id")) {
+        val s = v.opt(k) as? String ?: continue
+        val sv = Service.META.firstOrNull { s.startsWith(it.prefixe) } ?: continue
+        v.put(k, s.removePrefix(sv.prefixe))
+        service = sv
+    }
+    return service
+}
