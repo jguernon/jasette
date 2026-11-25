@@ -453,7 +453,7 @@ private fun Message(
     val reessayer = { Depot.reessayer(m.conv, m.tmpId) }
     val aReactions = m.reactions.isNotEmpty()
     Column(
-        Modifier.fillMaxWidth().padding(top = if (premier) 8.dp else 2.dp, bottom = if (aReactions) 14.dp else 0.dp),
+        Modifier.fillMaxWidth().padding(top = if (premier) 8.dp else 2.dp, bottom = if (aReactions) 20.dp else 0.dp),
         horizontalAlignment = alignement,
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
@@ -507,7 +507,7 @@ private fun Message(
                 Reactions(
                     m,
                     Modifier.align(if (m.fromMe) Alignment.BottomEnd else Alignment.BottomStart)
-                        .offset(x = if (m.fromMe) (-10).dp else 10.dp, y = 12.dp),
+                        .offset(x = if (m.fromMe) (-10).dp else 10.dp, y = 18.dp),
                 ) { qui = true }
             }
         }
@@ -517,7 +517,7 @@ private fun Message(
         if (dernier || details || echec || (m.text.isEmpty() && m.fromMe)) {
             Row(
                 Modifier.padding(horizontal = 6.dp)
-                    .padding(top = if (aReactions) 10.dp else 0.dp)
+                    .padding(top = if (aReactions) 16.dp else 0.dp)
                     .let { if (echec) it.clickable(onClick = reessayer) else it },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
