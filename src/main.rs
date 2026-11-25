@@ -5569,6 +5569,9 @@ impl Jasette {
     fn serveur_vue(&self, cx: &mut Context<Self>) -> AnyElement {
         let mode = self.reglages.mode_serveur.as_str();
         let occupe = self.serveur_occupe;
+        // GPUI ne découpe pas les enfants selon les coins : le survol de la
+        // première rangée prend les coins du haut du groupe, la dernière ceux du bas.
+        let r = mesure(17., 12.);
         let choix = |id: &'static str, ic: &'static str, titre: &'static str, detail: &'static str, actif: bool| {
             div()
                 .id(id)
@@ -5579,6 +5582,8 @@ impl Jasette {
                 .px(px(16.))
                 .py(px(13.))
                 .cursor_pointer()
+                .when(id == "srv-local", |d| d.rounded_t(rayon(r)))
+                .when(id == "srv-client", |d| d.rounded_b(rayon(r)))
                 .hover(|s| s.bg(th().survol))
                 .child(icone(ic, 22., if actif { th().accent } else { th().texte_pale }))
                 .child(
@@ -6750,6 +6755,38 @@ fn t(fr: &'static str) -> &'static str {
         "Se brancher à votre serveur Jasette : rien à connecter ici." => "Connect to your Jasette server: nothing to sign in to here.",
         "← Changer de mode" => "← Change mode",
         "Cette machine est le serveur Jasette : les services connectés ici servent à tous vos appareils." => "This machine is the Jasette server: services connected here serve all your devices.",
+        "Serveur Jasette" => "Jasette server",
+        "Sur cet appareil" => "On this device",
+        "Jasette se connecte elle-même à chaque service." => "Jasette connects to each service by itself.",
+        "Je suis le serveur Jasette" => "I am the Jasette server",
+        "Utiliser mon serveur Jasette" => "Use my Jasette server",
+        "Tous les services passent par votre serveur : rien à connecter ici." => "All services go through your server: nothing to sign in to here.",
+        "Un instant…" => "One moment…",
+        "Jumeler un appareil" => "Pair a device",
+        "Nouveau code" => "New code",
+        "Adresse pour les autres appareils :" => "Address for your other devices:",
+        "L'autre appareil doit afficher ce code de vérification :" => "The other device must show this verification code:",
+        "Valable 10 minutes, pour un seul appareil." => "Valid for 10 minutes, for one device.",
+        "Appareils jumelés" => "Paired devices",
+        "Aucun autre appareil jumelé." => "No other paired device.",
+        "jumelé le" => "paired on",
+        "Révoquer" => "Revoke",
+        "Cette interface passe par le serveur local" => "This window goes through the local server",
+        "Connectez les services dans Comptes." => "Connect services in Accounts.",
+        "Votre serveur" => "Your server",
+        "Pour changer de serveur, choisissez « Sur cet appareil », puis jumelez de nouveau." => "To change server, choose “On this device”, then pair again.",
+        "Le serveur" => "Does the server",
+        "affiche-t-il ce code de vérification ?" => "show this verification code?",
+        "Oui, jumeler" => "Yes, pair",
+        "Non, annuler" => "No, cancel",
+        "Jumelage annulé : les codes ne correspondaient pas." => "Pairing cancelled: the codes did not match.",
+        "Sur le serveur : Réglages > Serveur Jasette > Jumeler un appareil. Entrez ici son adresse et le code affiché." => "On the server: Settings > Jasette server > Pair a device. Enter its address and the code shown.",
+        "Continuer" => "Continue",
+        "Entrez l'adresse du serveur et le code à 6 chiffres qu'il affiche." => "Enter the server address and the 6-digit code it shows.",
+        "Adresse du serveur (ex. : thinkcentretc)" => "Server address (e.g. thinkcentretc)",
+        "Code de jumelage (6 chiffres)" => "Pairing code (6 digits)",
+        "Ne plus l'utiliser" => "Stop using it",
+        "Les services se connectent et se déconnectent sur le serveur." => "Services are connected and disconnected on the server.",
         "Créé par" => "Created by",
         "Archiver" => "Archive",
         "Épingler en haut" => "Pin to top",
