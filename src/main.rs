@@ -7122,7 +7122,7 @@ impl Jasette {
                 apercu = apercu.child(rangee);
             }
             let titre = format!("{cols} {}", t("colonnes"));
-            let detail = format!("{} {} px", t("avatars de"), m.avatar.round());
+            let detail = format!("{} px", m.avatar.round());
             let v = cols.to_string();
             tuiles = tuiles.child(
                 div()
@@ -7156,8 +7156,8 @@ impl Jasette {
                             .justify_center()
                             .child(apercu),
                     )
-                    .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(titre))
-                    .child(div().text_size(px(11.)).text_color(th().texte_pale).child(detail)),
+                    .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).whitespace_nowrap().child(titre))
+                    .child(div().text_size(px(11.)).text_color(th().texte_pale).whitespace_nowrap().child(detail)),
             );
         }
         div()
@@ -7428,9 +7428,10 @@ impl Jasette {
                     .flex()
                     .flex_col()
                     .gap(px(4.))
-                    // Arrondie comme la tuile (14 px, moins le trait) : GPUI ne découpe pas les enfants.
-                    .child(div().h(px(9.)).rounded_t(rayon(13.)).bg(c(EGA_BLEU)))
-                    .child(div().flex().flex_col().gap(px(4.)).px(px(5.)).pt(px(1.))
+                    // La barre de titre bleue en retrait des coins : GPUI ne découpe pas
+                    // les enfants, une barre pleine largeur déborderait de l'arrondi.
+                    .child(div().mt(px(7.)).mx(px(7.)).h(px(6.)).rounded(px(1.)).bg(c(EGA_BLEU)))
+                    .child(div().flex().flex_col().gap(px(4.)).px(px(7.))
                         .child(ligne_ega(28., EGA_JAUNE))
                         .child(ligne_ega(38., EGA_GRIS_CLAIR))
                         .child(ligne_ega(22., EGA_CYAN_VIF))
@@ -9717,7 +9718,6 @@ fn t(fr: &'static str) -> &'static str {
         "déconnecté" => "disconnected",
         "n'est pas connecté." => "is not connected.",
         "colonnes" => "columns",
-        "avatars de" => "avatars",
         "Tous les Head sont montrés : la grille prend autant de rangées qu'il faut." => "Every Head is shown: the grid takes as many rows as needed.",
         "Nom ou numéro de téléphone" => "Name or phone number",
         "Nouvelle conversation Messenger" => "New Messenger chat",
