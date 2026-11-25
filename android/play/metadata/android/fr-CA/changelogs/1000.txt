@@ -1,0 +1,5 @@
+Première version sur Google Play.
+• Une seule boîte pour Google Messages, Messenger, Instagram, WhatsApp, Signal et X.
+• Recherche globale, Head, Favoris, épingles et archives.
+• Réactions, accusés de lecture, vocaux et pièces jointes.
+• Modes Autonome et Client (serveur Jasette), thèmes Sombre, Verre et EGA.

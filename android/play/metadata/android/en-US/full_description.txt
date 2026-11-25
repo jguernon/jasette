@@ -1,0 +1,33 @@
+Jasette brings your conversations from Google Messages (SMS and RCS), Messenger, Instagram, WhatsApp, Signal and X together in a single inbox, sorted in the order they arrive.
+
+No middleman: Jasette talks directly to each service, from your phone or from your own Jasette server. There is no "Jasette cloud", no Jasette account, no ads and no tracking. The code is open source (AGPL-3.0): anyone can check what it does.
+
+★ ONE INBOX
+• All your conversations across services, with their real groups, photos and reactions.
+• Global search: one word, and Jasette searches the conversations and messages of all your services at once.
+• The Head: a grid with the faces of your most important people, at the top of your inbox.
+• Favorites, pins and archives; a new message brings an archived conversation back.
+
+★ FOR PEOPLE WHO CHAT A LOT
+• Emoji reactions, delivery and read receipts, even in groups.
+• Voice messages, photos, videos and attachments.
+• Swipes your way: Reply, Archive, Delete or nothing.
+• Photos from your address book replace the grey circles (if you allow it; your contacts never leave the phone).
+• Notifications with the person's photo.
+
+★ THREE WAYS TO USE IT
+• Standalone: the phone connects to Messenger, Instagram, WhatsApp, Signal and X by itself.
+• Client: the phone connects to your own Jasette server (an old laptop, a mini PC) that keeps the sessions. Pairing with a six-digit code, TLS 1.3 with a pinned certificate. On Android, Google Messages goes through this server.
+• The server and the Linux app are free, at jonathanguernon.net/jasette.
+
+★ YOUR STYLE
+• Dark, Glass (eight tints) and EGA themes, the 16-color screen of a 1984 PC.
+• English or French interface.
+
+★ PRIVACY
+Your messages, sessions and settings stay on your phone (or on your own server). The developer receives nothing and sees nothing. The app's automatic backups are turned off. A foreground service, shown by a permanent notification, keeps the connections open so you receive your messages.
+
+★ GOOD TO KNOW
+Jasette is an independent project. It is not affiliated with, endorsed or sponsored by Google, Meta (Messenger, Instagram, WhatsApp), Signal or X. Service names are trademarks of their respective owners and are used only to say what Jasette works with. Jasette uses the same protocols as the web and "linked device" versions of these services, which are not official interfaces: a service may change and break a connection at any time. Use Jasette in accordance with each service's terms.
+
+Source code: github.com/jguernon/jasette

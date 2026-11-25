@@ -1,0 +1,5 @@
+First release on Google Play.
+• One inbox for Google Messages, Messenger, Instagram, WhatsApp, Signal and X.
+• Global search, Head, Favorites, pins and archives.
+• Reactions, read receipts, voice messages and attachments.
+• Standalone and Client (Jasette server) modes, Dark, Glass and EGA themes.

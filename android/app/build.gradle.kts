@@ -11,6 +11,14 @@ val versionJasette: String = rootProject.file("../Cargo.toml").readLines()
     .first { it.startsWith("version = ") }
     .substringAfter('"').substringBefore('"')
 
+// Le versionCode (Google Play exige qu'il augmente à chaque envoi) se déduit de
+// la version : X.Y.Z → X·1 000 000 + Y·1 000 + Z (0.1.0 → 1000). Il dépasse
+// l'ancien versionCode 1 des APK déjà distribués, qui se mettent donc à jour.
+val codeJasette: Int = versionJasette.split('.', '-').take(3)
+    .map { it.toIntOrNull() ?: 0 }
+    .plus(listOf(0, 0, 0))
+    .let { (x, y, z) -> x * 1_000_000 + y * 1_000 + z }
+
 // La clé de signature release (aussi la clé d'importation de Google Play) :
 // ../signing/jasette-release.properties (storeFile, storePassword, keyAlias,
 // keyPassword), jamais dans git. Sans ce fichier, tout se compile comme avant
@@ -28,7 +36,7 @@ android {
         applicationId = "ca.jasette"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
+        versionCode = codeJasette
         versionName = versionJasette
         // Les ponts ne sont compilés que pour arm64 (les téléphones).
         ndk { abiFilters += "arm64-v8a" }
@@ -67,6 +75,10 @@ android {
 
     // Les ponts sont des exécutables : ils doivent être extraits sur le disque
     // (nativeLibraryDir) pour qu'on puisse les lancer.
+    // Dans un App Bundle (Google Play), le même réglage met
+    // android:extractNativeLibs="true" dans le manifeste et
+    // uncompressNativeLibraries=false dans BundleConfig.pb : les APK que Play
+    // génère gardent les .so compressés, et l'installeur les extrait.
     packaging {
         jniLibs.useLegacyPackaging = true
     }
@@ -92,4 +104,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     // Les codes QR de l'association WhatsApp et Signal (zxing core : l'encodeur seul, sans caméra).
     implementation("com.google.zxing:core:3.5.3")
+    // Le flou derrière les barres (Haze) et le bouton + en verre liquide (haze-glass), Compose 1.12.
+    implementation("dev.chrisbanes.haze:haze:2.1.0")
+    implementation("dev.chrisbanes.haze:haze-blur:2.1.0")
+    implementation("dev.chrisbanes.haze:haze-glass:2.1.0")
 }

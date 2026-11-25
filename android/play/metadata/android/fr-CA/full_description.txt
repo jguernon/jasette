@@ -1,0 +1,33 @@
+Jasette réunit tes conversations de Google Messages (SMS et RCS), Messenger, Instagram, WhatsApp, Signal et X dans une seule boîte de réception, triées dans l'ordre où elles arrivent.
+
+Sans intermédiaire : Jasette parle directement à chaque service, depuis ton téléphone ou depuis ton propre serveur Jasette. Il n'y a pas de « nuage Jasette », pas de compte Jasette, pas de publicité, pas de pistage. Le code est ouvert (AGPL-3.0) : chacun peut vérifier ce qu'il fait.
+
+★ UNE SEULE BOÎTE
+• Toutes tes conversations, tous services confondus, avec leurs vrais groupes, photos et réactions.
+• Recherche globale : un mot, et Jasette fouille les conversations et les messages de tous tes services à la fois.
+• Le Head : la grille de visages de tes gens les plus importants, en tête de ta boîte.
+• Favoris, épingles et archives ; un nouveau message ramène une conversation archivée.
+
+★ POUR CEUX QUI JASENT BEAUCOUP
+• Réactions emoji, accusés de distribution et de lecture, même dans les groupes.
+• Messages vocaux, photos, vidéos et pièces jointes.
+• Glissements à ta façon : Répondre, Archiver, Supprimer ou rien.
+• Les photos de ton carnet d'adresses remplacent les pastilles grises (si tu le permets ; tes contacts ne quittent pas le téléphone).
+• Notifications avec la photo de la personne.
+
+★ TROIS FAÇONS DE S'EN SERVIR
+• Autonome : le téléphone se connecte lui-même à Messenger, Instagram, WhatsApp, Signal et X.
+• Client : le téléphone se branche à ton serveur Jasette (un vieux portable, un mini-PC) qui garde les sessions. Jumelage par code à six chiffres, TLS 1.3 avec certificat épinglé. Sur Android, Google Messages passe par ce serveur.
+• Le serveur et l'app pour Linux sont gratuits, sur jonathanguernon.net/jasette.
+
+★ À TON GOÛT
+• Thèmes Sombre, Verre (huit teintes) et EGA, l'écran 16 couleurs d'un PC de 1984.
+• Interface en français ou en anglais.
+
+★ VIE PRIVÉE
+Tes messages, tes sessions et tes réglages restent sur ton téléphone (ou sur ton propre serveur). Le développeur ne reçoit rien et ne voit rien. Les sauvegardes automatiques de l'app sont désactivées. Un service au premier plan, signalé par une notification permanente, garde les connexions ouvertes pour recevoir tes messages.
+
+★ À SAVOIR
+Jasette est un projet indépendant. Il n'est ni affilié, ni approuvé, ni commandité par Google, Meta (Messenger, Instagram, WhatsApp), Signal ou X. Les noms des services sont des marques de leurs propriétaires respectifs et ne servent ici qu'à indiquer avec quoi Jasette fonctionne. Jasette utilise les mêmes protocoles que les versions web et « appareil lié » de ces services, qui ne sont pas des interfaces officielles : un service peut changer et briser une connexion à tout moment. Utilise Jasette dans le respect des conditions de chaque service.
+
+Code source : github.com/jguernon/jasette
