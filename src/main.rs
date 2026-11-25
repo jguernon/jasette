@@ -866,6 +866,9 @@ struct Reglages {
     /// "fr" (ou vide) ou "en".
     #[serde(default)]
     langue: String,
+    /// Les conversations favorites (ids, préfixés pour Messenger), dans l'ordre d'ajout.
+    #[serde(default)]
+    favoris: Vec<String>,
     /// Le thème : "sombre" (ou vide, le défaut) ou "verre".
     #[serde(default)]
     theme: String,
@@ -890,6 +893,7 @@ impl Default for Reglages {
             theme: String::new(),
             teinte: String::new(),
             langue: String::new(),
+            favoris: Vec::new(),
         }
     }
 }
@@ -3027,6 +3031,69 @@ impl Jasette {
         } else if visibles.is_empty() {
             col = col.child(div().p(px(16.)).text_color(th().texte_pale).child(t("Aucun résultat")));
         }
+        // Les favoris : une grille d'avatars en tête de liste (sans recherche en cours).
+        let favoris: Vec<&Conv> = if self.filtre.is_empty() && !self.non_lus_seulement && self.vue != Vue::Archives {
+            self.reglages.favoris.iter().filter_map(|id| self.conv(id)).filter(|c| self.correspond(c)).collect()
+        } else {
+            Vec::new()
+        };
+        if !favoris.is_empty() {
+            let mut grille = div().flex().flex_row().flex_wrap().pb(px(6.));
+            for conv in &favoris {
+                let id = conv.id.clone();
+                let choisie = self.choisie.as_deref() == Some(conv.id.as_str());
+                let nom = if conv.name.is_empty() { t("Sans nom").to_string() } else { conv.name.clone() };
+                let prenom = if conv.group { nom.clone() } else { nom.split_whitespace().next().unwrap_or(&nom).to_string() };
+                grille = grille.child(
+                    div()
+                        .id(SharedString::from(format!("fav-{}", conv.id)))
+                        .w(px(88.))
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap(px(5.))
+                        .py(px(8.))
+                        .rounded(rayon(14.))
+                        .cursor_pointer()
+                        .when(choisie, |d| d.bg(th().choisi))
+                        .when(!choisie, |d| d.hover(|s| s.bg(th().survol)))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.choisir(id.clone());
+                            cx.notify();
+                        }))
+                        .child(
+                            div()
+                                .relative()
+                                .child(self.avatar_conv(conv, &nom, 54.))
+                                .child(div().absolute().right(px(-3.)).bottom(px(-1.)).child(logo(service_de(&conv.id), 18.)))
+                                .when(conv.unread, |d| {
+                                    d.child(
+                                        div()
+                                            .absolute()
+                                            .top(px(0.))
+                                            .right(px(0.))
+                                            .size(px(12.))
+                                            .rounded(rayon(999.))
+                                            .bg(th().accent)
+                                            .border_2()
+                                            .border_color(th().liste),
+                                    )
+                                }),
+                        )
+                        .child(
+                            div()
+                                .w_full()
+                                .px(px(4.))
+                                .text_center()
+                                .truncate()
+                                .text_size(px(12.))
+                                .text_color(if conv.unread { th().texte_fort } else { th().texte })
+                                .child(prenom),
+                        ),
+                );
+            }
+            col = col.child(grille).child(div().h(px(1.)).mx(px(10.)).mb(px(4.)).bg(th().survol));
+        }
         let n = visibles.len();
         for (i, conv) in visibles.into_iter().enumerate() {
             let choisie = self.choisie.as_deref() == Some(conv.id.as_str());
@@ -4081,12 +4148,34 @@ impl Jasette {
         };
         let id_m = id.clone();
         let id_a = id.clone();
+        let id_f = id.clone();
+        let favori = self.reglages.favoris.contains(&id);
         let mut menu = verre(0.96, 16.)
             .shadow(ombre_verre())
             .w(px(240.))
             .p(px(6.))
             .flex()
             .flex_col()
+            .child(
+                item(
+                    "menu-favori",
+                    "star",
+                    if favori { t("Retirer des favoris") } else { t("Ajouter aux favoris") }.into(),
+                    th().texte_fort,
+                    true,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    let f = &mut this.reglages.favoris;
+                    if favori {
+                        f.retain(|x| x != &id_f);
+                    } else {
+                        f.push(id_f.clone());
+                    }
+                    this.reglages.garder();
+                    this.menu_conv = false;
+                    cx.notify();
+                })),
+            )
             .child(item("menu-medias", "images", t("Médias").into(), th().texte_fort, true).on_click(cx.listener(
                 move |this, _, _, cx| {
                     this.menu_conv = false;
@@ -5473,6 +5562,8 @@ fn t(fr: &'static str) -> &'static str {
         "Pour voir l'historique chiffré, entrez le NIP de Messenger (celui choisi dans l'app)." => "To see your encrypted history, enter your Messenger PIN (the one set in the app).",
         "Créé par" => "Created by",
         "Archiver" => "Archive",
+        "Ajouter aux favoris" => "Add to favorites",
+        "Retirer des favoris" => "Remove from favorites",
         "Désarchiver" => "Unarchive",
         "Supprimer la conversation" => "Delete conversation",
         "Confirmer la suppression" => "Confirm delete",
