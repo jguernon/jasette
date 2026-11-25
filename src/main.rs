@@ -4150,13 +4150,10 @@ impl Jasette {
                 .on_click(move |_, _, _| ouvrir_adresse(&adresse))
                 .child(icone(ic, 17., th().texte_pale))
         };
-        // La vidéo : Google Messages passe par Google Meet ; Messenger et
-        // Instagram, par leur conversation sur le site (bouton caméra là-bas).
-        let video = if service == Service::GoogleMessages {
-            self.choisie.as_ref().map(|_| "https://meet.google.com/new".to_string())
-        } else {
-            appel.clone()
-        };
+        // La vidéo : Messenger et Instagram, par leur conversation sur le site
+        // (bouton caméra là-bas). Google Messages ne fait la vidéo que sur le
+        // téléphone : pas de caméra pour lui.
+        let video = if service == Service::GoogleMessages { None } else { appel.clone() };
         let boutons_appel = div()
             .flex()
             .flex_row()
