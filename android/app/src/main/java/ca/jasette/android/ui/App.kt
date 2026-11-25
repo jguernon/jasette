@@ -283,6 +283,7 @@ private fun Liste(
         // Le Head : la grille des favoris en haut de la boîte de réception.
         val head = if (vue == Vue.Tout && f.isEmpty()) Marques.head.mapNotNull { id -> Depot.convs.firstOrNull { it.id == id } } else emptyList()
         val reorg = reorganiser && vue == Vue.Favoris
+        LaunchedEffect(f) { Depot.chercherContacts(if (f.length >= 2) filtre.trim() else "") }
         LazyColumn(Modifier.fillMaxSize().padding(marges)) {
             item { ChampFiltre(filtre) { filtre = it } }
             item { Bannieres(reglages) }
@@ -319,6 +320,29 @@ private fun Liste(
                         reorganiser = reorg,
                         retiree = retiree,
                     ) { ouvrir(c.id) }
+                }
+            }
+            // La recherche : aussi les personnes trouvées par Messenger et Instagram
+            // (la liste ne contient que les conversations récentes).
+            if (f.length >= 2) {
+                val trouvees = Depot.resultatsMeta.filter { (id, _) -> Depot.conv(id) == null }.take(8)
+                if (trouvees.isNotEmpty()) {
+                    item(key = "personnes") {
+                        Text(
+                            t("Personnes"), color = P.textePale, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 4.dp),
+                        )
+                    }
+                    items(trouvees, key = { "p-" + it.first }) { (id, nom) ->
+                        val s = Service.de(id)
+                        val detail = if (s == Service.INSTAGRAM) t("Nouvelle conversation Instagram") else t("Nouvelle conversation Messenger")
+                        Suggestion(nom, detail, s, null) {
+                            filtre = ""
+                            Depot.nouvelleConversation(s, id)
+                        }
+                    }
+                } else if (Service.META.any { Depot.pret(it) } && visibles.isEmpty()) {
+                    item { Text(t("Recherche…"), color = P.textePale, modifier = Modifier.padding(start = 16.dp, top = 8.dp)) }
                 }
             }
             // De la place pour le bouton flottant.

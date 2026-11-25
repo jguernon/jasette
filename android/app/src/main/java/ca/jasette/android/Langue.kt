@@ -188,6 +188,7 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Aucun favori : ajoutez-en par un appui long sur une conversation." to "No favorites yet: long-press a conversation to add some.",
     "Aucun média dans les messages chargés." to "No media in the loaded messages.",
     "Aucun résultat" to "No results",
+    "Personnes" to "People",
     "Aucun service connecté." to "No service connected.",
     "Aucune conversation" to "No conversations",
     "Aucune conversation archivée" to "No archived conversations",

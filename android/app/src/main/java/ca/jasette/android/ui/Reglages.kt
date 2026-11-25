@@ -596,7 +596,14 @@ private fun ChoixHeures() {
             androidx.compose.material3.Switch(
                 checked = oui,
                 onCheckedChange = { ca.jasette.android.Marques.choisirHeureChaqueMessage(it) },
-                colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = P.accent),
+                // Éteint : piste et bordure visibles sur le fond sombre.
+                colors = androidx.compose.material3.SwitchDefaults.colors(
+                    checkedTrackColor = P.accent,
+                    checkedThumbColor = androidx.compose.ui.graphics.Color.White,
+                    uncheckedTrackColor = P.choisi,
+                    uncheckedThumbColor = P.textePale,
+                    uncheckedBorderColor = P.textePale,
+                ),
             )
         }
     }
