@@ -70,6 +70,14 @@ Jasette parle directement aux services, depuis tes appareils ou ton propre
 serveur. Aucune donnée ne passe par un service tiers. Les sessions sont
 gardées en fichiers privés (0600).
 
+**Liste privée** (Réglages > Liste privée, désactivée par défaut) : « Rendre
+privée », dans le menu ⋮ d'une conversation, la cache partout (listes,
+recherche, médias, non-lus, notifications, MCP). On la retrouve dans la vue
+Privées, avec un code à 6 chiffres : Ctrl+Maj+P ou `jasette --prive` au
+bureau, l'icône « Jasette privé » (au cadenas) sur Android. La liste des
+privées est synchronisée par le serveur Jasette ; le code reste sur chaque
+appareil, haché (PBKDF2).
+
 ## Avertissement
 
 Jasette n'est affilié à aucun des services qu'il relie. Il utilise leurs

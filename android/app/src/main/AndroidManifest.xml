@@ -51,6 +51,29 @@
             </intent-filter>
         </activity-alias>
 
+        <!-- La Liste privée : sa propre activité, dans une tâche à part (l'icône
+             normale ne la ramène pas), et son lanceur au cadenas, désactivé tant
+             que la liste ne l'est pas (Prive.poserLanceur). -->
+        <activity
+            android:name=".PriveActivity"
+            android:exported="false"
+            android:taskAffinity="ca.jasette.prive"
+            android:launchMode="singleTask"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|density|keyboardHidden"
+            android:windowSoftInputMode="adjustResize" />
+        <activity-alias
+            android:name=".LanceurPrive"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_prive"
+            android:label="Jasette privé"
+            android:targetActivity=".PriveActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
         <!-- L'appareil photo écrit ses photos et vidéos dans le cache de l'app. -->
         <provider
             android:name="androidx.core.content.FileProvider"

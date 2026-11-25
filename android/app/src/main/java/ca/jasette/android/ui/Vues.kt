@@ -104,9 +104,10 @@ fun MenuDeListe(c: Conv, ouvert: Boolean, fermer: () -> Unit, retiree: (String) 
 /** Le nombre de conversations non lues d'une vue (la pastille du rail). */
 fun nonLus(v: Vue): Int = when (v) {
     Vue.Tout -> Depot.boite.count { it.unread }
-    Vue.Favoris -> Marques.favoris.count { id -> Depot.conv(id)?.unread == true }
+    Vue.Favoris -> Marques.favoris.count { id -> !Marques.estPrivee(id) && Depot.conv(id)?.unread == true }
     Vue.Archives -> Depot.toutesArchives.count { it.unread }
     is Vue.DuService -> Depot.boite.count { it.service == v.service && it.unread }
+    Vue.Privees -> Depot.privees.count { it.unread }
 }
 
 /** Les services connectés, dans l'ordre du rail du bureau. */
@@ -516,6 +517,14 @@ fun MenuConversation(
         Item(if (dansHead) t("Retirer du Head") else t("Ajouter au Head"), Icones.grille) { Marques.basculerHead(c.id) }
         Item(if (favori) t("Retirer des favoris") else t("Ajouter aux favoris"), Icons.Filled.Star) { Marques.basculerFavori(c.id) }
         Item(if (epinglee) t("Désépingler") else t("Épingler en haut"), Icones.epingle) { Marques.basculerEpingle(c.id) }
+        // Liste privée : seulement si elle est activée sur cet appareil.
+        if (ca.jasette.android.Prive.actif) {
+            val privee = Marques.estPrivee(c.id)
+            Item(if (privee) t("Retirer des privées") else t("Rendre privée"), Icons.Filled.Lock) {
+                Marques.rendrePrivee(c.id, !privee)
+                retiree(c.id)
+            }
+        }
         Item(t("Médias"), Icones.images, action = medias)
         Item(
             if (archivee) t("Désarchiver") else t("Archiver"),

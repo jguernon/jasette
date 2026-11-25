@@ -1035,11 +1035,18 @@ pub struct Marques {
     pub epingles: Vec<String>,
     /// L'archivage propre à Jasette (Messenger, Instagram, Signal, X).
     pub archives: Vec<String>,
+    /// La Liste privée : cachées partout sauf dans la vue Privées. Le code
+    /// qui ouvre cette vue n'est jamais synchronisé.
+    pub privees: Vec<String>,
 }
 
 impl Marques {
     pub fn vide(&self) -> bool {
-        self.head.is_empty() && self.favoris.is_empty() && self.epingles.is_empty() && self.archives.is_empty()
+        self.head.is_empty()
+            && self.favoris.is_empty()
+            && self.epingles.is_empty()
+            && self.archives.is_empty()
+            && self.privees.is_empty()
     }
 
     /// Chaque liste de `dabord`, dans son ordre, puis les ids de `ensuite` qui n'y sont pas.
@@ -1058,6 +1065,7 @@ impl Marques {
             favoris: unir(&dabord.favoris, &ensuite.favoris),
             epingles: unir(&dabord.epingles, &ensuite.epingles),
             archives: unir(&dabord.archives, &ensuite.archives),
+            privees: unir(&dabord.privees, &ensuite.privees),
         }
     }
 
@@ -1069,6 +1077,7 @@ impl Marques {
             favoris: garder(&self.favoris, &autre.favoris),
             epingles: garder(&self.epingles, &autre.epingles),
             archives: garder(&self.archives, &autre.archives),
+            privees: garder(&self.privees, &autre.privees),
         }
     }
 }
@@ -1079,7 +1088,15 @@ pub enum NouvelleMarques {
     /// Une trame `{"marques":{…}}` : rejeu, diffusion ou réponse à notre envoi.
     /// `avec_archives` : faux pour un serveur d'avant `archives` (champ absent) ;
     /// le client garde alors ses archives pour lui seul.
-    Recues { marques: Marques, version: u64, id: Option<u64>, refus: Option<String>, avec_archives: bool },
+    /// `avec_privees` : de même pour un serveur d'avant `privees`.
+    Recues {
+        marques: Marques,
+        version: u64,
+        id: Option<u64>,
+        refus: Option<String>,
+        avec_archives: bool,
+        avec_privees: bool,
+    },
     /// La connexion est tombée : rien n'est plus en vol.
     Coupure,
 }
@@ -1099,11 +1116,13 @@ impl NouvelleMarques {
                 favoris: liste("favoris")?,
                 epingles: liste("epingles")?,
                 archives: liste("archives")?,
+                privees: liste("privees")?,
             },
             version: v.get("version")?.as_u64()?,
             id: v.get("id").and_then(Value::as_u64),
             refus: v.get("refus").and_then(Value::as_str).map(str::to_string),
             avec_archives: v.get("archives").is_some_and(Value::is_array),
+            avec_privees: v.get("privees").is_some_and(Value::is_array),
         })
     }
 }
@@ -1160,6 +1179,7 @@ impl SuiviMarques {
             "favoris": c.listes.favoris,
             "epingles": c.listes.epingles,
             "archives": c.listes.archives,
+            "privees": c.listes.privees,
             "version": c.version,
             "id": id,
         }}))
@@ -1173,11 +1193,15 @@ impl SuiviMarques {
                 self.reinitialiser();
                 return None;
             }
-            NouvelleMarques::Recues { marques, version, id, refus, avec_archives } => {
+            NouvelleMarques::Recues { marques, version, id, refus, avec_archives, avec_privees } => {
                 // Un serveur d'avant `archives` : nos archives restent les nôtres, jamais vidées.
                 let mut marques = marques;
                 if !avec_archives {
                     marques.archives = c.listes.archives.clone();
+                }
+                // De même pour les privées (serveur d'avant `privees`).
+                if !avec_privees {
+                    marques.privees = c.listes.privees.clone();
                 }
                 (marques, version, id, refus)
             }
@@ -1419,11 +1443,11 @@ mod essais {
 
     fn m(head: &[&str], favoris: &[&str], epingles: &[&str]) -> Marques {
         let v = |l: &[&str]| l.iter().map(|x| x.to_string()).collect();
-        Marques { head: v(head), favoris: v(favoris), epingles: v(epingles), archives: Vec::new() }
+        Marques { head: v(head), favoris: v(favoris), epingles: v(epingles), ..Default::default() }
     }
 
     fn recues(marques: Marques, version: u64, id: Option<u64>) -> NouvelleMarques {
-        NouvelleMarques::Recues { marques, version, id, refus: None, avec_archives: true }
+        NouvelleMarques::Recues { marques, version, id, refus: None, avec_archives: true, avec_privees: true }
     }
 
     fn id_de(t: &Value) -> u64 {
@@ -1506,6 +1530,31 @@ mod essais {
     }
 
     #[test]
+    fn marques_privees() {
+        // La liste `privees` va et vient comme les autres.
+        let n = NouvelleMarques::lire(
+            &json!({"head": [], "favoris": [], "epingles": [], "archives": [], "privees": ["s:1"], "version": 3}),
+        );
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques::default();
+        s.recu(n.unwrap(), &mut c);
+        assert_eq!(c.listes.privees, ["s:1"]);
+        c.listes.privees.push("m:2".into());
+        let t = s.changement(&mut c).expect("envoi");
+        assert_eq!(t["marques"]["privees"], json!(["s:1", "m:2"]));
+        // Un serveur d'avant `privees` : les nôtres restent, jamais vidées.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 4, ..Default::default() };
+        c.listes.privees = vec!["s:1".into()];
+        let vieux = NouvelleMarques::lire(
+            &json!({"head": [], "favoris": ["b"], "epingles": [], "archives": [], "version": 4}),
+        )
+        .unwrap();
+        assert!(s.recu(vieux, &mut c).is_none());
+        assert_eq!(c.listes.privees, ["s:1"]);
+    }
+
+    #[test]
     fn marques_hors_ligne() {
         // Changé pendant une coupure, personne d'autre : la copie locale part telle quelle.
         let mut s = SuiviMarques::default();
@@ -1528,6 +1577,7 @@ mod essais {
             id: Some(id),
             refus: Some("non".into()),
             avec_archives: true,
+            avec_privees: true,
         };
         let t = s.recu(r, &mut c).expect("renvoi");
         assert_eq!(t["marques"]["favoris"], json!(["z", "a", "y", "x"]));

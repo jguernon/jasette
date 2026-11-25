@@ -47,6 +47,12 @@ object Marques {
     /** Les archives de Jasette (ids préfixés), dans l'ordre d'archivage. */
     val archives: SnapshotStateList<String> = mutableStateListOf()
     /**
+     * La Liste privée (ids préfixés) : cachées partout dans l'app normale, montrées
+     * seulement dans la vue Privées ([Prive]). Partagée par le serveur comme les
+     * autres listes (`privees`) ; le code, lui, reste sur l'appareil.
+     */
+    val privees: SnapshotStateList<String> = mutableStateListOf()
+    /**
      * Depuis quand (ms, horloge du téléphone) chaque id est dans [archives], ici :
      * seul un message reçu après cette heure la désarchive (pas une réaction
      * ni la mise à jour d'un vieux message). Propre à l'appareil, jamais envoyé.
@@ -141,6 +147,8 @@ object Marques {
         epingles.addAll(lire(p, "epingles"))
         archives.clear()
         archives.addAll(lire(p, "archives"))
+        privees.clear()
+        privees.addAll(lire(p, "privees"))
         archivesDepuis.clear()
         try {
             val o = JSONObject(p.getString("archives_depuis", "{}") ?: "{}")
@@ -178,6 +186,7 @@ object Marques {
             ?.putString("epingles", JSONArray(epingles.toList()).toString())
             ?.putString("head", JSONArray(head.toList()).toString())
             ?.putString("archives", JSONArray(archives.toList()).toString())
+            ?.putString("privees", JSONArray(privees.toList()).toString())
             ?.putString("archives_depuis", JSONObject(archivesDepuis.toMap()).toString())
             ?.putLong("version", version)
             ?.putBoolean("a_envoyer", aEnvoyer)
@@ -189,6 +198,21 @@ object Marques {
     fun estEpinglee(id: String) = id in epingles
     fun estDansHead(id: String) = id in head
     fun estArchivee(id: String) = id in archives
+    fun estPrivee(id: String) = id in privees
+
+    /** Rend privée (à la fin de la liste) ou ne l'est plus ; rien si c'est déjà fait. */
+    fun rendrePrivee(id: String, oui: Boolean) {
+        if (oui == (id in privees)) return
+        if (oui) privees.add(id) else privees.remove(id)
+        changement()
+    }
+
+    /** Toutes les privées redeviennent normales (désactivation de la Liste privée). */
+    fun remettrePrivees() {
+        if (privees.isEmpty()) return
+        privees.clear()
+        changement()
+    }
 
     /** Archive par Jasette (à la fin de la liste) ou désarchive ; rien si c'est déjà fait. */
     fun archiver(id: String, oui: Boolean) {
@@ -246,8 +270,9 @@ object Marques {
         val b = epingles.remove(id)
         val c = head.remove(id)
         val d = archives.remove(id)
+        val e = privees.remove(id)
         if (d) majDepuis()
-        if (a || b || c || d) changement()
+        if (a || b || c || d || e) changement()
     }
 
     // ---- La synchronisation avec le serveur Jasette (§5.5) ----
@@ -258,8 +283,9 @@ object Marques {
         val favoris: List<String>,
         val epingles: List<String>,
         val archives: List<String>,
+        val privees: List<String>,
     ) {
-        fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty()
+        fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty() && privees.isEmpty()
 
         /** Chaque liste de this, dans son ordre, puis les ids de [b] qui n'y sont pas. */
         fun union(b: Listes) = Listes(
@@ -267,22 +293,24 @@ object Marques {
             (favoris + b.favoris).filter { it.isNotEmpty() }.distinct(),
             (epingles + b.epingles).filter { it.isNotEmpty() }.distinct(),
             (archives + b.archives).filter { it.isNotEmpty() }.distinct(),
+            (privees + b.privees).filter { it.isNotEmpty() }.distinct(),
         )
 
         /** Les ids de this absents de [b], liste par liste. */
         fun moins(b: Listes) = Listes(
             head - b.head.toSet(), favoris - b.favoris.toSet(), epingles - b.epingles.toSet(),
-            archives - b.archives.toSet(),
+            archives - b.archives.toSet(), privees - b.privees.toSet(),
         )
     }
 
-    private fun listes() = Listes(head.toList(), favoris.toList(), epingles.toList(), archives.toList())
+    private fun listes() = Listes(head.toList(), favoris.toList(), epingles.toList(), archives.toList(), privees.toList())
 
     private fun poser(l: Listes) {
         if (head.toList() != l.head) { head.clear(); head.addAll(l.head) }
         if (favoris.toList() != l.favoris) { favoris.clear(); favoris.addAll(l.favoris) }
         if (epingles.toList() != l.epingles) { epingles.clear(); epingles.addAll(l.epingles) }
         if (archives.toList() != l.archives) { archives.clear(); archives.addAll(l.archives); majDepuis() }
+        if (privees.toList() != l.privees) { privees.clear(); privees.addAll(l.privees) }
     }
 
     /** Envoie une trame au serveur ; faux si la connexion est coupée. Posé par [Depot] en mode client. */
@@ -318,6 +346,7 @@ object Marques {
         enVol = prochain to l
         val corps = JSONObject().put("head", JSONArray(l.head)).put("favoris", JSONArray(l.favoris))
             .put("epingles", JSONArray(l.epingles)).put("archives", JSONArray(l.archives))
+            .put("privees", JSONArray(l.privees))
             .put("version", version).put("id", prochain)
         if (!envoi(JSONObject().put("marques", corps))) {
             // La connexion tombe : le rejeu suivant tranchera.
@@ -340,6 +369,8 @@ object Marques {
             // Un serveur d'avant les archives ne les envoie pas : elles restent
             // alors propres à cet appareil (le serveur est censé avoir les nôtres).
             if (m.has("archives")) m.optJSONArray("archives").chaines().distinct() else archives.toList(),
+            // De même pour les privées (serveur d'avant `privees`).
+            if (m.has("privees")) m.optJSONArray("privees").chaines().distinct() else privees.toList(),
         )
         val v = m.optLong("version", -1)
         if (v < 0) return

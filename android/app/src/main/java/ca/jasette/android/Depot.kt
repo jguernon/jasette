@@ -724,7 +724,7 @@ object Depot {
                     remplacerConvs(autres + c)
                     if (autresArchives.size != archives.size) remplacerArchives(autresArchives)
                 }
-                if (v.optBoolean("open")) aOuvrir = c.id
+                if (v.optBoolean("open") && !Marques.estPrivee(c.id)) aOuvrir = c.id
             }
             "avatar" -> {
                 val conv = v.chaine("conv")
@@ -874,7 +874,8 @@ object Depot {
         if (nouveau && !m.fromMe) {
             if (ouverteIci) {
                 commande(JSONObject().put("cmd", "read").put("conv", m.conv).put("msg", m.id))
-            } else {
+            } else if (!Marques.estPrivee(m.conv)) {
+                // Liste privée : aucune notification, même neutre (rien ne trahit la conversation).
                 notifier?.invoke(m, conv)
             }
         }
@@ -907,11 +908,16 @@ object Depot {
     fun estArchivee(c: Conv) = c.archived || archives.any { it.id == c.id } || archiveeJasette(c.id)
 
     /** La boîte de réception (et les vues Favoris et par service) : sans les archives de Jasette. */
-    val boite: List<Conv> get() = convs.filter { !archiveeJasette(it.id) }
+    val boite: List<Conv> get() = convs.filter { !archiveeJasette(it.id) && !Marques.estPrivee(it.id) }
 
     /** La vue Archives : celles des services et celles de Jasette, ensemble, les plus récentes d'abord. */
     val toutesArchives: List<Conv>
-        get() = (archives + convs.filter { archiveeJasette(it.id) }).distinctBy { it.id }.sortedByDescending { it.time }
+        get() = (archives + convs.filter { archiveeJasette(it.id) }).distinctBy { it.id }
+            .filter { !Marques.estPrivee(it.id) }.sortedByDescending { it.time }
+
+    /** La vue Privées : les conversations de la Liste privée (boîte et archives), les plus récentes d'abord. */
+    val privees: List<Conv>
+        get() = (convs + archives).filter { Marques.estPrivee(it.id) }.distinctBy { it.id }.sortedByDescending { it.time }
 
     /**
      * Un compte déconnecté : ses conversations disparaissent de la liste (et des

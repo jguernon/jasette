@@ -413,4 +413,37 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Les messages de cette conversation s'afficheront dès que le service sera connecté." to
         "This conversation's messages will appear as soon as the service is connected.",
     "Réglages → Comptes" to "Settings → Accounts",
+    // La Liste privée (Prive.kt, ui/Prive.kt).
+    "Liste privée" to "Private list",
+    "Privées" to "Private",
+    "Rendre privée" to "Make private",
+    "Retirer des privées" to "Remove from private",
+    "Verrouiller" to "Lock",
+    "Conversations privées" to "Private conversations",
+    "Entre ton code" to "Enter your code",
+    "Code incorrect" to "Wrong code",
+    "Trop d'essais : attends" to "Too many tries: wait",
+    "La Liste privée n'est pas activée." to "The private list is not turned on.",
+    "Changer le code" to "Change the code",
+    "Choisis un code à 6 chiffres" to "Choose a 6-digit code",
+    "Entre le code une 2e fois" to "Enter the code again",
+    "Les deux codes diffèrent : recommence." to "The codes don't match: try again.",
+    "Entre le code actuel" to "Enter the current code",
+    "Désactiver la liste" to "Turn off the list",
+    "Il reste des conversations privées :" to "Private conversations left:",
+    "Qu'en fait-on ?" to "What should happen to them?",
+    "Les remettre dans l'app (conseillé)" to "Put them back in the app (recommended)",
+    "Les garder cachées" to "Keep them hidden",
+    "Cachées, elles ne se verront plus avant de réactiver la Liste privée." to
+        "Hidden, they won't show again until the private list is turned back on.",
+    "Confirmer : elles redeviennent normales" to "Confirm: they become normal again",
+    "conversation(s) privée(s)" to "private conversation(s)",
+    "Aucune conversation privée : ajoutez-en par le menu d'une conversation." to
+        "No private conversations: add some from a conversation's menu.",
+    "Des conversations cachées partout dans Jasette, qu'on rouvre par l'icône « Jasette privé » et un code à 6 chiffres. Le code reste sur cet appareil." to
+        "Conversations hidden everywhere in Jasette, reopened through the “Jasette privé” icon and a 6-digit code. The code stays on this device.",
+    "conversation(s) rendue(s) privée(s) sur un autre appareil reste(nt) cachée(s) ici. Active la Liste privée pour les voir." to
+        "conversation(s) made private on another device stay hidden here. Turn on the private list to see them.",
+    "« Rendre privée » apparaît dans le menu d'une conversation. Une conversation privée ne donne aucune notification. La vue se reverrouille en arrière-plan, ou après 1 minute sans toucher l'écran. La liste des privées est partagée par le serveur Jasette ; le code, jamais." to
+        "“Make private” appears in a conversation's menu. A private conversation never notifies. The view locks again in the background, or after 1 minute without touching the screen. The private list is shared by the Jasette server; the code never is.",
 )

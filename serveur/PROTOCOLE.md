@@ -353,10 +353,10 @@ compte et le relais `did:web:api.bsky.chat`) :
   conversation Bluesky ; un message : `<conversation>/<id>`. Les résultats de
   `search` ont le DID de la personne pour id (à passer à `new`).
 
-### 5.5 Marques (Head, favoris, épinglées, archives)
+### 5.5 Marques (Head, favoris, épinglées, archives, privées)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
-tous ses appareils. Ce sont quatre listes **ordonnées** d'ids de
+tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
 conversations, tels que l'interface les voit (« m: » pour Messenger,
 « i: » pour Instagram, « w: » pour WhatsApp, « s: » pour Signal, « x: »
 pour X, « t: » pour Telegram, « b: » pour Bluesky, sans préfixe pour Google) :
@@ -367,7 +367,8 @@ pour X, « t: » pour Telegram, « b: » pour Bluesky, sans préfixe pour Google
 - `archives` : l'**archivage propre à Jasette**, pour les services qui ne
   savent pas archiver (Messenger, Instagram, Signal, X, Bluesky). Google, WhatsApp et
   Telegram archivent pour de vrai (commande `archive` de leur pont) et n'y
-  vont pas.
+  vont pas ;
+- `privees` : la **Liste privée** (voir « Règle des privées » plus bas).
 
 C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 
@@ -375,7 +376,7 @@ C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 changement, à **tous** les clients) :
 
 ```json
-{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"version":7}}
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"version":7}}
 ```
 
 `version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
@@ -384,15 +385,16 @@ encore rien reçu (listes vides).
 **Client → serveur** :
 
 ```json
-{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"version":7,"id":12}}
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"version":7,"id":12}}
 ```
 
 - `version` : la dernière version reçue du serveur (0 si aucune).
 - `id` (facultatif, entier) : renvoyé tel quel dans la réponse **à ce client
   seulement**, pour qu'il reconnaisse la réponse à sa propre trame.
 - Une liste absente ne change pas. Ids vides ou en double retirés ; au plus
-  5000 ids par liste, 512 octets par id. Un client d'avant `archives` (qui
-  n'envoie pas ce champ) ne les vide donc jamais : le serveur les garde.
+  5000 ids par liste, 512 octets par id. Un client d'avant `archives` ou
+  `privees` (qui n'envoie pas ce champ) ne les vide donc jamais : le serveur
+  les garde.
 
 Règles du serveur :
 
@@ -424,8 +426,8 @@ réponse. À la réception :
 
 Rien n'est mis en file pendant une coupure : à la reconnexion, le rejeu
 donne l'état du serveur et la règle ci-dessus s'applique. Un serveur d'avant
-`archives` n'envoie pas ce champ : le client garde alors ses archives pour
-lui seul (sans les vider).
+`archives` (ou `privees`) n'envoie pas ce champ : le client garde alors ses
+archives (ou ses privées) pour lui seul, sans les vider.
 
 **Règle des archives.**
 
@@ -447,6 +449,32 @@ lui seul (sans les vider).
   réception du message (Android : `Marques.desarchiverSiRecu`, avec l'heure où
   l'id est entré dans sa liste). En mode client, il peut le faire aussi : la
   diffusion du serveur arrive d'abord, et l'id n'y est déjà plus.
+
+**Règle des privées.**
+
+- Une conversation de `privees` n'apparaît plus **nulle part** dans l'app
+  normale : boîte de réception, Head, favoris, épinglées, archives, vues par
+  service, recherche globale, médias, compteurs de non-lus et badges. Elle
+  garde ses autres marques, qui ne se voient pas tant qu'elle est privée.
+- Elle se voit seulement dans la vue **Privées**, ouverte par un **code à
+  6 chiffres** propre à chaque appareil (Réglages > Liste privée). Le code
+  n'est **jamais** envoyé au serveur ni synchronisé : chaque appareil garde
+  son haché (PBKDF2-HMAC-SHA256, sel aléatoire ; bureau :
+  `<données>/prive.json` en 0600 ; Android : préférences privées de l'app).
+  Un appareil où la Liste privée n'est pas activée cache quand même les
+  conversations de `privees` (il le dit dans ses réglages).
+- **Aucune notification** pour une conversation privée (ni son nom, ni son
+  texte, ni une bulle neutre).
+- Le **MCP** (§9) ne les montre jamais : ni dans `lister_conversations`, ni
+  `etat_services`, ni `chercher_messages` ; `lire_messages` et
+  `envoyer_message` répondent « conversation inconnue ».
+- « Rendre privée » l'ajoute à la fin de la liste ; « Retirer des privées »
+  l'en retire. Désactiver la Liste privée sur un appareil propose de les
+  remettre dans l'app (la liste est alors vidée, pour tous les appareils) ou
+  de les garder cachées.
+- Compatibilité : un client d'avant `privees` n'envoie pas ce champ (le
+  serveur garde la liste) et ignore celui qu'il reçoit : il montre les
+  privées comme des conversations normales. Mettre à jour tous les appareils.
 
 ### 5.6 Supprimer une conversation
 
@@ -732,8 +760,8 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"svc":…,"ev":{"ev":"messages",…,"cache":true}}` | copie du cache, avant la réponse du pont (§5.8) |
 | C→S | `{"rejouer":"<svc>"}` | redemander l'état d'un service |
 | ↔ | `{"ping":n}` / `{"pong":n}` | signes de vie |
-| S→C | `{"marques":{"head","favoris","epingles","archives","version"[,"id","refus"]}}` | rejeu, changement |
-| C→S | `{"marques":{"head","favoris","epingles","archives","version"[,"id"]}}` | changement local |
+| S→C | `{"marques":{"head","favoris","epingles","archives","privees","version"[,"id","refus"]}}` | rejeu, changement |
+| C→S | `{"marques":{"head","favoris","epingles","archives","privees","version"[,"id"]}}` | changement local |
 | C→S | `{"get":{"id","chemin","sha256"}}` | télécharger |
 | S→C | `{"fichier":{"id",…}}` | morceaux ou erreur |
 | C→S | `{"put":{"id","nom","donnees","fin"}}` | téléverser |
@@ -788,6 +816,10 @@ du cache du serveur (§5.8) et, au besoin, du pont.
 
 Rien d'autre : aucun outil ne marque comme lu, n'archive, ne supprime ni ne
 réagit.
+
+- **Les conversations privées** (marque `privees`, §5.5) sont exclues de
+  tous les outils : absentes des listes, des comptes et des résultats de
+  recherche ; `lire_messages` et `envoyer_message` les disent inconnues.
 
 - **Rien n'est marqué comme lu.** Le serveur n'envoie jamais `read`, et la
   commande `messages` des ponts ne marque rien. Les réponses des ponts aux

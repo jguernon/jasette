@@ -23,7 +23,7 @@ const (
 	tailleIdMax     = 512  // octets au plus par id
 )
 
-// Marques : quatre listes ordonnées d'ids de conversations (préfixés « m: »
+// Marques : cinq listes ordonnées d'ids de conversations (préfixés « m: »
 // pour Messenger, « i: » pour Instagram, « w: », « s: », « x: » pour
 // WhatsApp, Signal et X, sans préfixe pour Google).
 // Version 0 : le serveur n'a encore rien reçu.
@@ -36,7 +36,11 @@ type Marques struct {
 	Favoris  []string `json:"favoris"`
 	Epingles []string `json:"epingles"`
 	Archives []string `json:"archives"`
-	Version  int64    `json:"version"`
+	// Privees : les conversations de la Liste privée (PROTOCOLE.md, §5.5) :
+	// cachées partout ailleurs que dans la vue Privées des clients, et
+	// exclues du MCP. Le code qui ouvre cette vue reste sur chaque appareil.
+	Privees []string `json:"privees"`
+	Version int64    `json:"version"`
 	// Propre au serveur, jamais envoyé aux clients : depuis quand (ms, horloge
 	// du serveur) chaque id est dans Archives. Seul un message reçu après
 	// cette heure ramène la conversation dans l'Inbox (une réaction ou une
@@ -46,9 +50,9 @@ type Marques struct {
 
 func marquesPath() string { return filepath.Join(serveurDir(), "marques.json") }
 
-// listes rend les quatre listes, dans l'ordre (pour les boucles).
+// listes rend les cinq listes, dans l'ordre (pour les boucles).
 func (m *Marques) listes() []*[]string {
-	return []*[]string{&m.Head, &m.Favoris, &m.Epingles, &m.Archives}
+	return []*[]string{&m.Head, &m.Favoris, &m.Epingles, &m.Archives, &m.Privees}
 }
 
 // normaliser : jamais de liste nulle (elle s'écrirait `null`), ids propres,
@@ -218,7 +222,7 @@ func ecrireAtomique(chemin string, data []byte) error {
 func trameMarques(m Marques, id json.RawMessage, refus string) []byte {
 	corps := map[string]any{
 		"head": m.Head, "favoris": m.Favoris, "epingles": m.Epingles, "archives": m.Archives,
-		"version": m.Version,
+		"privees": m.Privees, "version": m.Version,
 	}
 	if len(id) > 0 {
 		corps["id"] = id
@@ -246,6 +250,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		Favoris  *[]string       `json:"favoris"`
 		Epingles *[]string       `json:"epingles"`
 		Archives *[]string       `json:"archives"`
+		Privees  *[]string       `json:"privees"`
 		Version  int64           `json:"version"`
 		ID       json.RawMessage `json:"id"`
 	}
@@ -260,11 +265,11 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	cur := s.marques
 	nouv := Marques{
 		Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Archives: cur.Archives,
-		ArchivesDepuis: cur.ArchivesDepuis,
+		Privees: cur.Privees, ArchivesDepuis: cur.ArchivesDepuis,
 	}
 	// Une liste absente de la trame ne change pas (un ancien client, qui ne
-	// connaît pas `archives`, ne les vide donc jamais).
-	for i, l := range []*[]string{d.Head, d.Favoris, d.Epingles, d.Archives} {
+	// connaît pas `archives` ou `privees`, ne les vide donc jamais).
+	for i, l := range []*[]string{d.Head, d.Favoris, d.Epingles, d.Archives, d.Privees} {
 		if l != nil {
 			*nouv.listes()[i] = nettoyerIds(*l)
 		}
@@ -300,8 +305,8 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		return
 	}
 	s.marques = nouv
-	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d",
-		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives))
+	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d",
+		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees))
 	tous := trameMarques(nouv, nil, "")
 	for autre := range s.clients {
 		if autre == c {
@@ -351,7 +356,7 @@ func (s *Serveur) desarchiverSiRecu(svc string, ligne []byte) {
 		return
 	}
 	cur := s.marques
-	nouv := Marques{Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, ArchivesDepuis: cur.ArchivesDepuis}
+	nouv := Marques{Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Privees: cur.Privees, ArchivesDepuis: cur.ArchivesDepuis}
 	for _, a := range cur.Archives {
 		if a != id {
 			nouv.Archives = append(nouv.Archives, a)

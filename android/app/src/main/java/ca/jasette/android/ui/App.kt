@@ -85,18 +85,24 @@ sealed interface Vue {
     data object Favoris : Vue
     data object Archives : Vue
     data class DuService(val service: Service) : Vue
+    /** La Liste privée : seulement dans [ca.jasette.android.PriveActivity], déverrouillée. */
+    data object Privees : Vue
 }
 
 /** Écran large (Fold déplié, tablette) : le rail à gauche plutôt que la barre du bas. */
 const val LARGEUR_RAIL = 600
 
 @Composable
-fun App(activite: Activity) {
+fun App(activite: Activity, prive: Boolean = false) {
     var pile by remember { mutableStateOf(listOf<Ecran>(Ecran.Liste)) }
-    var vue by remember { mutableStateOf<Vue>(Vue.Tout) }
+    var vue by remember { mutableStateOf<Vue>(if (prive) Vue.Privees else Vue.Tout) }
     // La conversation ouverte : à droite en deux volets, sinon en plein écran.
     // Elle survit au pliage ou au dépliage (l'activité n'est pas recréée).
     var ouverte by remember { mutableStateOf<String?>(null) }
+    // Liste privée : une conversation devenue privée (ici ou par synchro) quitte
+    // l'app normale ; dans la vue Privées, celle qui ne l'est plus la quitte.
+    val horsVue = ouverte?.let { Marques.estPrivee(it) != prive } == true
+    LaunchedEffect(horsVue) { if (horsVue) ouverte = null }
     val ecran = pile.last()
     val largeur = LocalConfiguration.current.screenWidthDp
     val large = largeur >= LARGEUR_RAIL
@@ -124,7 +130,10 @@ fun App(activite: Activity) {
     // Une notification touchée (ou une nouvelle conversation) : on ouvre le fil.
     val aOuvrir = Depot.aOuvrir
     LaunchedEffect(aOuvrir) {
-        if (aOuvrir != null) {
+        if (prive) return@LaunchedEffect
+        if (aOuvrir != null && Marques.estPrivee(aOuvrir)) {
+            Depot.aOuvrir = null
+        } else if (aOuvrir != null) {
             pile = listOf(Ecran.Liste)
             vue = Vue.Tout
             ouverte = aOuvrir
@@ -141,6 +150,7 @@ fun App(activite: Activity) {
             retiree = { if (ouverte == it) ouverte = null },
             choisirVue = ::choisirVue,
             reglages = { aller(Ecran.Reglages) },
+            verrouiller = if (prive) ({ ca.jasette.android.Prive.verrouiller() }) else null,
             serveur = { aller(Ecran.Serveur) },
             connecter = { s, p -> aller(Ecran.Connexion(s, p)) },
         )
@@ -153,7 +163,7 @@ fun App(activite: Activity) {
     Box(Modifier.fillMaxSize().sourceFlou(flou, FLOU_FOND, z = 0f).fondFenetre())
     androidx.compose.runtime.CompositionLocalProvider(LocalFlou provides flou) {
     Row(Modifier.fillMaxSize()) {
-        if (large && ecran !is Ecran.Connexion) {
+        if (large && ecran !is Ecran.Connexion && !prive) {
             Rail(
                 vue = vue,
                 enReglages = ecran == Ecran.Reglages || ecran == Ecran.Serveur,
@@ -242,6 +252,7 @@ private fun Liste(
     retiree: (String) -> Unit,
     choisirVue: (Vue) -> Unit,
     reglages: () -> Unit,
+    verrouiller: (() -> Unit)?,
     serveur: () -> Unit,
     connecter: (Service, String) -> Unit,
 ) {
@@ -270,6 +281,7 @@ private fun Liste(
         Vue.Favoris -> t("Favoris")
         Vue.Archives -> t("Archives")
         is Vue.DuService -> vue.service.titre
+        Vue.Privees -> t("Privées")
     }
     Scaffold(
         containerColor = P.ecran,
@@ -288,8 +300,11 @@ private fun Liste(
                             }
                         }
                     }
-                    // Sur grand écran, les réglages sont en bas du rail.
-                    if (!large) {
+                    // La vue Privées : un cadenas pour la refermer tout de suite.
+                    if (verrouiller != null) {
+                        IconButton(onClick = verrouiller) { Icon(Icons.Filled.Lock, t("Verrouiller"), tint = P.icone) }
+                    } else if (!large) {
+                        // Sur grand écran, les réglages sont en bas du rail.
                         IconButton(onClick = reglages) { Icon(Icons.Filled.Settings, t("Réglages"), tint = P.icone) }
                     }
                 },
@@ -297,7 +312,7 @@ private fun Liste(
             )
         },
         // La barre du bas flotte par-dessus la liste, floutée (voir BarreBas).
-        bottomBar = { if (!large) BarreBas(vue, choisirVue) },
+        bottomBar = { if (!large && vue != Vue.Privees) BarreBas(vue, choisirVue) },
         snackbarHost = {
             androidx.compose.material3.SnackbarHost(barreMessages) { d ->
                 androidx.compose.material3.Snackbar(
@@ -308,7 +323,7 @@ private fun Liste(
         },
         floatingActionButton = {
             // Le + en verre liquide (carré EGA en EGA), voir Flou.kt.
-            if (!reorganiser) BoutonNouveau { nouveau = true }
+            if (!reorganiser && vue != Vue.Privees) BoutonNouveau { nouveau = true }
         },
     ) { marges ->
         // Les archives des services et celles de Jasette, ensemble ; ailleurs, sans elles.
@@ -316,6 +331,7 @@ private fun Liste(
         // conversation est absente (service coupé, pas encore prêt) viennent du cache des marques.
         val source = when (vue) {
             Vue.Archives -> Depot.toutesArchives
+            Vue.Privees -> Depot.privees
             Vue.Favoris -> Marques.favoris.map { convMarquee(it) }
             else -> Depot.boite + epinglesAbsentes()
         }
@@ -328,7 +344,8 @@ private fun Liste(
                 is Vue.DuService -> c.service == vue.service
                 else -> true
             }
-            dansVue && (f.isEmpty() || ca.jasette.android.plier(c.name).contains(f) ||
+            // Liste privée : nulle part ailleurs que dans sa vue.
+            dansVue && Marques.estPrivee(c.id) == (vue == Vue.Privees) && (f.isEmpty() || ca.jasette.android.plier(c.name).contains(f) ||
                 ca.jasette.android.plier(c.preview).contains(f) ||
                 c.members.any { ca.jasette.android.plier(it).contains(f) })
         }
@@ -340,7 +357,11 @@ private fun Liste(
         }
         val nbEpingles = if (vue == Vue.Favoris) 0 else visibles.count { rang(it) != Int.MAX_VALUE }
         // Le Head : la grille en haut de la boîte de réception, tous ses ids (chargés ou du cache).
-        val head = if (vue == Vue.Tout && f.isEmpty()) Marques.head.map { convMarquee(it) } else emptyList()
+        val head = if (vue == Vue.Tout && f.isEmpty()) {
+            Marques.head.filter { !Marques.estPrivee(it) }.map { convMarquee(it) }
+        } else {
+            emptyList()
+        }
         val reorg = reorganiser && vue == Vue.Favoris
         LaunchedEffect(f) { Depot.chercherContacts(if (f.length >= 2) filtre.trim() else "") }
         // La liste défile sous la barre du bas (floutée) : la marge du bas devient un
@@ -366,6 +387,7 @@ private fun Liste(
                 f.isNotEmpty() -> t("Aucun résultat")
                 vue == Vue.Archives && Depot.archivesEnAttente -> t("Chargement des archives…")
                 vue == Vue.Archives -> t("Aucune conversation archivée")
+                vue == Vue.Privees -> t("Aucune conversation privée : ajoutez-en par le menu d'une conversation.")
                 vue == Vue.Favoris && Marques.favoris.isEmpty() ->
                     t("Aucun favori : ajoutez-en par un appui long sur une conversation.")
                 accueilVisible() -> null
@@ -407,7 +429,7 @@ private fun Liste(
             }
             // La recherche : aussi les personnes trouvées par Messenger, Instagram, WhatsApp et Signal
             // (la liste ne contient que les conversations récentes).
-            if (f.length >= 2) {
+            if (f.length >= 2 && vue != Vue.Privees) {
                 // Les contacts du téléphone d'abord (avec leur photo), puis ceux des ponts sans doublon de numéro.
                 val tel = contactsTelephone(filtre)
                 val trouvees = personnesPonts(tel)
@@ -466,7 +488,7 @@ private fun detailPersonne(s: Service, id: String): String = when (s) {
 private fun contactsTelephone(texte: String): List<ContactTrouve> {
     if (!Contacts.permis || !Depot.etat(Service.GOOGLE).associe) return emptyList()
     val existants = (Depot.convs + Depot.archives)
-        .filter { !it.group && it.service == Service.GOOGLE }
+        .filter { !it.group && it.service == Service.GOOGLE && !Marques.estPrivee(it.id) }
         .map { Contacts.cleDe(it.number) }.filter { it.isNotEmpty() }.toSet()
     return Contacts.chercher(texte).filter { it.cle !in existants }
 }
@@ -572,7 +594,7 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
                 if (q.isEmpty()) return@LazyColumn
                 // Les conversations qui existent déjà (pas les groupes).
                 val existantes = (Depot.convs + Depot.archives).filter { c ->
-                    !c.group && (ca.jasette.android.plier(c.name).contains(q) ||
+                    !c.group && !Marques.estPrivee(c.id) && (ca.jasette.android.plier(c.name).contains(q) ||
                         c.members.any { ca.jasette.android.plier(it).contains(q) })
                 }.distinctBy { it.id }.take(6)
                 items(existantes, key = { "c-" + it.id }) { c ->

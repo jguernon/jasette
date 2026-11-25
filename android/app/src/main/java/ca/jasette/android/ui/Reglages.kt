@@ -167,6 +167,10 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
             ChoixGestes()
 
             Spacer(Modifier.height(12.dp))
+            Text(t("Liste privée"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            ReglagesPrive()
+
+            Spacer(Modifier.height(12.dp))
             Text(t("Icône de l'app"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             ChoixIcone()
 

@@ -14,6 +14,7 @@
 
 mod cache;
 mod pont;
+mod prive;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -1249,6 +1250,8 @@ enum Vue {
     Tout,
     Favoris,
     Archives,
+    /// La Liste privée (src/prive.rs), ouverte par le code.
+    Privees,
     Service(Service),
 }
 
@@ -1260,6 +1263,8 @@ enum Section {
     Apparence,
     Langue,
     APropos,
+    /// La Liste privée (src/prive.rs).
+    Prive,
 }
 
 /// Les réglages gardés entre deux lancements.
@@ -1309,6 +1314,10 @@ struct Reglages {
     /// appareil seulement : un message reçu plus récent la ramène dans l'Inbox.
     #[serde(default)]
     archives_depuis: HashMap<String, i64>,
+    /// La Liste privée : cachées partout sauf dans la vue Privées (marque
+    /// `privees`, partagée par le serveur). Le code est dans prive.json.
+    #[serde(default)]
+    privees: Vec<String>,
     /// La grille du Head : son nombre de colonnes, de 3 à 6 (« 5 ») ; vide = 4.
     /// Une ancienne valeur « colonnes x rangées » (« 8x3 ») donne ses colonnes,
     /// ramenées entre 3 et 6. Propre à cet appareil.
@@ -1420,6 +1429,7 @@ impl Default for Reglages {
             epingles: Vec::new(),
             archives: Vec::new(),
             archives_depuis: HashMap::new(),
+            privees: Vec::new(),
             head_grille: String::new(),
             marques_cache: HashMap::new(),
             heures_messages: false,
@@ -1524,6 +1534,7 @@ impl Reglages {
                     favoris: self.etoiles.clone(),
                     epingles: self.epingles.clone(),
                     archives: self.archives.clone(),
+                    privees: self.privees.clone(),
                 },
                 version: self.marques_version,
                 a_envoyer: self.marques_a_envoyer,
@@ -1537,6 +1548,7 @@ impl Reglages {
         self.etoiles = b.copie.listes.favoris;
         self.epingles = b.copie.listes.epingles;
         self.archives = b.copie.listes.archives;
+        self.privees = b.copie.listes.privees;
         self.marques_version = b.copie.version;
         self.marques_a_envoyer = b.copie.a_envoyer;
         self.marques_serveur = b.serveur;
@@ -1899,6 +1911,8 @@ struct Jasette {
     reaction_cible: Option<String>,
     /// La page elle-même, focalisée quand rien d'autre ne l'est : Ctrl+F et Échap y arrivent toujours.
     focus_page: gpui::FocusHandle,
+    /// La Liste privée : le haché du code, le verrou, le pavé (src/prive.rs).
+    prive: prive::EtatPrive,
 }
 
 // Les ids venant de Messenger portent le préfixe « m: » dans l'interface, ceux
@@ -2462,6 +2476,10 @@ impl Jasette {
         .detach();
         cx.observe_window_activation(window, |this, window, cx| {
             this.active = window.is_window_active();
+            // La fenêtre perd le focus : la vue Privées se reverrouille.
+            if !this.active {
+                this.verrouiller();
+            }
             // De retour dans la fenêtre : la conversation ouverte est lue.
             if this.active
                 && let Some(id) = this.choisie.clone()
@@ -2555,6 +2573,7 @@ impl Jasette {
                             this.marques_recues(n);
                             change = true;
                         }
+                        change |= this.prive_tic();
                         // Le cache local : au plus toutes les 5 secondes, hors du fil de l'interface.
                         if this.cache_sale && this.cache_ecrit.elapsed() >= Duration::from_secs(5) {
                             this.garder_cache();
@@ -2727,12 +2746,14 @@ impl Jasette {
             appui_seq: 0,
             reaction_cible: None,
             focus_page: cx.focus_handle(),
+            prive: prive::EtatPrive::charger(),
         };
         // Le cache local montre déjà une liste : la première conversation s'ouvre
         // tout de suite (ses messages en cache ; la réponse du pont s'y fusionnera).
         if let Some(id) = jasette.boite().first().map(|c| c.id.clone()) {
             jasette.choisir(id);
         }
+        jasette.demarrer_prive();
         jasette
     }
 
@@ -3223,7 +3244,7 @@ impl Jasette {
     fn ids_marques(&self) -> Vec<String> {
         let r = &self.reglages;
         let mut ids: Vec<String> = Vec::new();
-        for id in r.head.iter().chain(&r.etoiles).chain(&r.epingles).chain(&r.archives) {
+        for id in r.head.iter().chain(&r.etoiles).chain(&r.epingles).chain(&r.archives).chain(&r.privees) {
             if !ids.contains(id) {
                 ids.push(id.clone());
             }
@@ -3308,16 +3329,17 @@ impl Jasette {
 
     /// Les non-lues de la boîte de réception (sans les archives de Jasette).
     fn non_lus(&self) -> usize {
-        self.convs.iter().filter(|c| c.unread && !self.reglages.archivee_jasette(&c.id)).count()
+        self.convs.iter().filter(|c| c.unread && !self.reglages.archivee_jasette(&c.id) && !self.privee(&c.id)).count()
     }
 
     /// La boîte de réception (et les vues Favoris et par service) : sans les archives de Jasette.
     /// Les fantômes y sont aussi : épinglés partout, favoris dans la vue Favoris.
     fn boite(&self) -> Vec<&Conv> {
         let r = &self.reglages;
-        let mut l: Vec<&Conv> = self.convs.iter().filter(|c| !r.archivee_jasette(&c.id)).collect();
+        let mut l: Vec<&Conv> = self.convs.iter().filter(|c| !r.archivee_jasette(&c.id) && !self.privee(&c.id)).collect();
         l.extend(self.fantomes.iter().filter(|c| {
             !r.archivee_jasette(&c.id)
+                && !self.privee(&c.id)
                 && (r.epingles.contains(&c.id) || (self.vue == Vue::Favoris && r.etoiles.contains(&c.id)))
         }));
         l
@@ -3330,7 +3352,7 @@ impl Jasette {
             .archives
             .iter()
             .chain(self.convs.iter().chain(self.fantomes.iter()).filter(|c| self.reglages.archivee_jasette(&c.id)))
-            .filter(|c| vues.insert(c.id.as_str()))
+            .filter(|c| !self.privee(&c.id) && vues.insert(c.id.as_str()))
             .collect();
         l.sort_by(|a, b| b.time.cmp(&a.time));
         l
@@ -3399,12 +3421,13 @@ impl Jasette {
             self.confirmer_suppression = false;
         }
         let r = &mut self.reglages;
-        let avant = r.head.len() + r.etoiles.len() + r.epingles.len() + r.archives.len();
+        let avant = r.head.len() + r.etoiles.len() + r.epingles.len() + r.archives.len() + r.privees.len();
         r.head.retain(|x| x != id);
         r.etoiles.retain(|x| x != id);
         r.epingles.retain(|x| x != id);
         r.archives.retain(|x| x != id);
-        if r.head.len() + r.etoiles.len() + r.epingles.len() + r.archives.len() != avant {
+        r.privees.retain(|x| x != id);
+        if r.head.len() + r.etoiles.len() + r.epingles.len() + r.archives.len() + r.privees.len() != avant {
             self.marques_changees();
         }
     }
@@ -3475,7 +3498,8 @@ impl Jasette {
 
     /// Une notification de bureau ; un clic ouvre la conversation.
     fn notifier(&self, m: &Msg) {
-        if !self.reglages.notifications {
+        // Une conversation privée ne notifie jamais (pas même une bulle neutre).
+        if !self.reglages.notifications || self.privee(&m.conv) {
             return;
         }
         let conv = self.conv(&m.conv);
@@ -4073,7 +4097,9 @@ impl Jasette {
     /// Les résultats d'un service remplacent les siens ; tout est trié par date décroissante.
     fn ajouter_trouves(&mut self, svc: Service, items: Vec<Trouve>) {
         self.resultats_msgs.retain(|r| service_de(&r.conv) != svc);
-        self.resultats_msgs.extend(items);
+        // La recherche globale ne trouve rien dans les conversations privées.
+        let privees = &self.reglages.privees;
+        self.resultats_msgs.extend(items.into_iter().filter(|r| !privees.contains(&r.conv)));
         self.resultats_msgs.sort_by(|a, b| b.time.cmp(&a.time));
         let mut vus = HashSet::new();
         self.resultats_msgs.retain(|r| vus.insert((r.conv.clone(), r.id.clone())));
@@ -4242,8 +4268,12 @@ impl Jasette {
             // Google n'a pas de « liste des médias » : on charge les messages
             // récents de chaque conversation, et la galerie se remplit.
             self.galerie_chargee = true;
-            let ids: Vec<String> =
-                self.convs.iter().map(|c| c.id.clone()).filter(|id| !self.messages.contains_key(id)).collect();
+            let ids: Vec<String> = self
+                .convs
+                .iter()
+                .map(|c| c.id.clone())
+                .filter(|id| !self.messages.contains_key(id) && !self.privee(id))
+                .collect();
             for id in ids {
                 self.commande(json!({"cmd": "messages", "conv": id, "count": 60}));
             }
@@ -4257,7 +4287,11 @@ impl Jasette {
         let mut pieces: Vec<(Msg, Piece)> = self
             .messages
             .iter()
-            .filter(|(conv, _)| filtre.as_ref().is_none_or(|f| f == *conv))
+            .filter(|(conv, _)| match &filtre {
+                Some(f) => f == *conv && (!self.privee(f) || self.vue_privee()),
+                // Les médias de toutes les conversations : sans les privées.
+                None => !self.privee(conv),
+            })
             .flat_map(|(_, l)| l.iter())
             .flat_map(|m| m.attachments.iter().map(move |p| (m.clone(), p.clone())))
             .collect();
@@ -4921,6 +4955,17 @@ impl Jasette {
                     }))
                     .child(icone("archive", 22., ton(th().texte_fort, th().icone))),
             )
+            // La vue Privées : seulement tant qu'elle est déverrouillée.
+            .when(self.prive.deverrouille, |d| {
+                d.child(
+                    Self::bouton_rail("r-privees", !en_reglages && self.galerie.is_none() && self.vue == Vue::Privees)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.ouvrir_privees();
+                            cx.notify();
+                        }))
+                        .child(icone("lock-keyhole", 22., ton(th().texte_fort, th().icone))),
+                )
+            })
             .child(
                 Self::bouton_rail("r-medias", !en_reglages && self.galerie == Some(None))
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -4986,6 +5031,10 @@ impl Jasette {
     // ---- Dessin : la liste ----
 
     fn correspond(&self, conv: &Conv) -> bool {
+        // Les privées seulement dans la vue Privées (déverrouillée), et nulle part ailleurs.
+        if self.privee(&conv.id) != (self.vue == Vue::Privees) || (self.vue == Vue::Privees && !self.prive.deverrouille) {
+            return false;
+        }
         if self.non_lus_seulement && !conv.unread {
             return false;
         }
@@ -5025,6 +5074,7 @@ impl Jasette {
             Vue::Tout => "Boîte de réception",
             Vue::Favoris => "Favoris",
             Vue::Archives => "Archives",
+            Vue::Privees => "Privées",
             Vue::Service(s) => s.nom(),
         });
         // La hauteur de l'en-tête flottant : rangée du titre, champs, bannière.
@@ -5051,6 +5101,7 @@ impl Jasette {
                             .text_color(th().texte_fort)
                             .child(titre),
                     )
+                    .when(self.vue == Vue::Privees, |d| d.child(self.bouton_verrouiller(cx)))
                     .when(self.vue == Vue::Favoris && self.reglages.etoiles.len() > 1, |d| {
                         d.child(
                             Self::bouton_icone("f-ordre", if self.reorganiser { "check" } else { "arrow-up-down" }, self.reorganiser)
@@ -5252,6 +5303,8 @@ impl Jasette {
         if b != avant {
             self.reglages.poser_bloc(b);
             self.reglages.garder();
+            // Rendue privée sur un autre appareil : elle quitte l'écran ici aussi.
+            self.cacher_privees_ouvertes();
         }
         if let Some(t) = trame {
             self.envoyer_marques(t);
@@ -5320,7 +5373,7 @@ impl Jasette {
             .convs
             .iter()
             .chain(self.archives.iter())
-            .filter(|c| !c.group && (plier(&c.name).contains(&q) || c.members.iter().any(|m| plier(m).contains(&q))))
+            .filter(|c| !c.group && !self.privee(&c.id) && (plier(&c.name).contains(&q) || c.members.iter().any(|m| plier(m).contains(&q))))
             .take(4)
             .collect();
         for c in existantes {
@@ -5511,8 +5564,12 @@ impl Jasette {
 
     fn liste(&self, haut: f32, cx: &mut Context<Self>) -> impl IntoElement {
         // Les archives de Jasette quittent la boîte et rejoignent celles des services.
-        let source = if self.vue == Vue::Archives { self.toutes_archives() } else { self.boite() };
-        let badge = self.vue == Vue::Tout || self.vue == Vue::Archives;
+        let source = match self.vue {
+            Vue::Archives => self.toutes_archives(),
+            Vue::Privees => self.liste_privees(),
+            _ => self.boite(),
+        };
+        let badge = matches!(self.vue, Vue::Tout | Vue::Archives | Vue::Privees);
         let mut col =
             div().id("convs").flex().flex_col().size_full().overflow_y_scroll().track_scroll(&self.defil_liste).px(px(8.)).pt(px(haut)).pb(px(18.));
         let mut visibles: Vec<&Conv> = source.iter().copied().filter(|c| self.correspond(c)).collect();
@@ -5530,6 +5587,8 @@ impl Jasette {
                 t("Chargement des archives…")
             } else if self.vue == Vue::Archives {
                 t("Aucune conversation archivée")
+            } else if self.vue == Vue::Privees {
+                t("Aucune conversation privée : « Rendre privée » est dans le menu ⋮ d'une conversation.")
             } else {
                 t("Chargement des conversations…")
             };
@@ -5691,7 +5750,7 @@ impl Jasette {
             .iter()
             .filter(|r| match self.vue {
                 Vue::Service(s) => service_de(&r.conv) == s,
-                _ => true,
+                _ => !self.privee(&r.conv),
             })
             .take(100)
             .collect();
@@ -7319,6 +7378,7 @@ impl Jasette {
                     cx.notify();
                 })),
             )
+            .children(self.item_menu_prive(&id, cx))
             .child(item("menu-rechercher", "search", t("Rechercher").into(), th().texte_fort, true).on_click(cx.listener(
                 |this, _, window, cx| {
                     this.ouvrir_recherche_fil(window, cx);
@@ -7718,6 +7778,12 @@ impl Jasette {
                     cx.notify();
                 },
             )))
+            .child(item("s-prive", Section::Prive, t("Liste privée"), "lock", 0xf59e0b, None).on_click(cx.listener(
+                |this, _, _, cx| {
+                    this.section = Some(Section::Prive);
+                    cx.notify();
+                },
+            )))
             .child(item("s-langue", Section::Langue, t("Langue"), "languages", 0x0ea5e9, None).on_click(cx.listener(
                 |this, _, _, cx| {
                     this.section = Some(Section::Langue);
@@ -7745,6 +7811,7 @@ impl Jasette {
             Section::Comptes if self.ajout_compte => self.ecran_choix_service(cx),
             Section::Comptes => self.comptes(cx).into_any_element(),
             Section::Serveur => self.serveur_vue(cx),
+            Section::Prive => self.reglages_prive(cx),
             Section::Notifications => carte_section("Notifications")
                 .child(
                     groupe()
@@ -9677,6 +9744,20 @@ impl Jasette {
             // Ctrl+F : chercher dans la conversation ouverte ; Échap : refermer.
             .capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                 let k = &ev.keystroke;
+                this.prive_activite();
+                // Le pavé du code de la Liste privée prend tout le clavier.
+                if this.prive_touche(k) {
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
+                // Ctrl+Maj+P : la vue Privées (le pavé du code).
+                if (k.modifiers.control || k.modifiers.platform) && k.modifiers.shift && k.key.eq_ignore_ascii_case("p") {
+                    this.ouvrir_privees();
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
                 if (k.modifiers.control || k.modifiers.platform) && k.key == "f" {
                     if this.choisie.is_some() && this.section.is_none() && this.galerie.is_none() {
                         this.ouvrir_recherche_fil(window, cx);
@@ -9698,6 +9779,9 @@ impl Jasette {
                     }
                 }
             }))
+            // Toute activité garde la vue Privées ouverte (elle se reverrouille après 1 minute sans).
+            .capture_any_mouse_down(cx.listener(|this, _, _, _| this.prive_activite()))
+            .on_mouse_move(cx.listener(|this, _, _, _| this.prive_activite()))
             .relative()
             .flex()
             .flex_col()
@@ -9821,6 +9905,7 @@ impl Jasette {
                     .child(icone("x", 14., th().texte_pale)),
             )
         })
+        .children(self.pave_vue(cx))
     }
 }
 
@@ -10197,6 +10282,11 @@ fn t(fr: &'static str) -> &'static str {
         "Archives" => "Archive",
         "Association" => "Pairing",
         "Aucune conversation archivée" => "No archived conversations",
+        "Aucune conversation privée : « Rendre privée » est dans le menu ⋮ d'une conversation." => {
+            "No private conversations: “Make private” is in a conversation's ⋮ menu."
+        }
+        "Privées" => "Private",
+        "Liste privée" => "Private list",
         "Aucun emoji" => "No emoji",
         "Aucune photo trouvée" => "No photo found",
         "Aucun résultat" => "No results",

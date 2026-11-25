@@ -797,6 +797,19 @@ func (m *ServiceMCP) services(filtre string) ([]string, error) {
 	return nil, fmt.Errorf("service inconnu ou non offert : %q (offerts : %s)", filtre, strings.Join(tous, ", "))
 }
 
+// privees : les conversations de la Liste privée (marque `privees`, §5.5).
+// Le MCP ne les montre jamais : ni liste, ni lecture, ni recherche, ni
+// compte, ni envoi ; une conversation privée y est « inconnue ».
+func (m *ServiceMCP) privees() map[string]bool {
+	m.srv.mu.Lock()
+	defer m.srv.mu.Unlock()
+	r := make(map[string]bool, len(m.srv.marques.Privees))
+	for _, id := range m.srv.marques.Privees {
+		r[id] = true
+	}
+	return r
+}
+
 func (m *ServiceMCP) marquesDe() map[string][]string {
 	m.srv.mu.Lock()
 	defer m.srv.mu.Unlock()
@@ -870,6 +883,7 @@ func (m *ServiceMCP) outilLister(ctx context.Context, _ *mcp.CallToolRequest, e 
 	limite = min(limite, 200)
 	m.rafraichirListes(ctx, svcs)
 	marques := m.marquesDe()
+	privees := m.privees()
 	var toutes []ConvMCP
 	for _, svc := range svcs {
 		p := m.srv.ponts[svc]
@@ -879,6 +893,9 @@ func (m *ServiceMCP) outilLister(ctx context.Context, _ *mcp.CallToolRequest, e 
 		}
 		for _, c := range p.cache.convsGardees() {
 			id := prefixeService[svc] + c.ID
+			if privees[id] {
+				continue
+			}
 			mq := marques[id]
 			x := ConvMCP{
 				ID: id, Service: svc, Nom: c.Name, Groupe: c.Group, Membres: c.Members,
@@ -1007,6 +1024,9 @@ func (m *ServiceMCP) outilLire(ctx context.Context, _ *mcp.CallToolRequest, e en
 	p := m.srv.ponts[svc]
 	if p == nil {
 		return nil, out, fmt.Errorf("service non offert par ce serveur : %s", svc)
+	}
+	if m.privees()[prefixeService[svc]+brut] {
+		return nil, out, errors.New("conversation inconnue")
 	}
 	if !p.cache.aDesListes() {
 		m.rafraichirListe(ctx, p)
@@ -1156,12 +1176,13 @@ func (m *ServiceMCP) outilChercher(ctx context.Context, _ *mcp.CallToolRequest, 
 
 	var mu sync.Mutex
 	vus := map[string]bool{}
+	privees := m.privees()
 	ajouter := func(svc string, noms map[string]string, l []msgPont) {
 		mu.Lock()
 		defer mu.Unlock()
 		for _, x := range l {
 			cle := svc + "\x00" + x.Conv + "\x00" + x.ID
-			if vus[cle] || x.Conv == "" {
+			if vus[cle] || x.Conv == "" || privees[prefixeService[svc]+x.Conv] {
 				continue
 			}
 			vus[cle] = true
@@ -1239,6 +1260,7 @@ func (m *ServiceMCP) outilEtat(ctx context.Context, _ *mcp.CallToolRequest, _ st
 	m.mu.Unlock()
 	m.rafraichirListes(ctx, m.srv.servicesTries())
 	marques := m.marquesDe()
+	privees := m.privees()
 	for _, svc := range ordreServices {
 		p := m.srv.ponts[svc]
 		if p == nil {
@@ -1248,7 +1270,7 @@ func (m *ServiceMCP) outilEtat(ctx context.Context, _ *mcp.CallToolRequest, _ st
 		e := m.etatDe(p)
 		x := EtatServiceMCP{Service: svc, Etat: e.etat, Pret: e.pret, Compte: e.compte, EnCopie: p.cache.nbCopies()}
 		for _, c := range p.cache.convsGardees() {
-			if c.Archived || contient(marques[prefixeService[svc]+c.ID], "archives") {
+			if c.Archived || contient(marques[prefixeService[svc]+c.ID], "archives") || privees[prefixeService[svc]+c.ID] {
 				continue
 			}
 			x.Conversations++
@@ -1298,7 +1320,7 @@ func (m *ServiceMCP) outilEnvoyer(ctx context.Context, _ *mcp.CallToolRequest, e
 	m.rafraichirListe(ctx, p)
 	var conv *convPont
 	for _, c := range p.cache.convsGardees() {
-		if c.ID == brut {
+		if c.ID == brut && !m.privees()[prefixeService[svc]+brut] {
 			conv = &c
 			break
 		}
