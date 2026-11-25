@@ -6768,16 +6768,19 @@ impl Jasette {
                         .child(bouton_medias)
                         .child(bouton_info)
                         .child(bouton_options)
-                        .child(
-                            div()
-                                .px(px(10.))
-                                .py(px(2.))
-                                .rounded(rayon(999.))
-                                .text_size(px(11.))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .when(conv.rcs, |d| d.bg(alpha(th().accent, 0.12)).text_color(th().accent).child("RCS"))
-                                .when(!conv.rcs, |d| d.bg(alpha(th().succes, 0.12)).text_color(th().succes).child("SMS")),
-                        )
+                        // RCS / SMS : seulement pour Google Messages.
+                        .when(service_de(&conv.id) == Service::GoogleMessages, |d| {
+                            d.child(
+                                div()
+                                    .px(px(10.))
+                                    .py(px(2.))
+                                    .rounded(rayon(999.))
+                                    .text_size(px(11.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .when(conv.rcs, |d| d.bg(alpha(th().accent, 0.12)).text_color(th().accent).child("RCS"))
+                                    .when(!conv.rcs, |d| d.bg(alpha(th().succes, 0.12)).text_color(th().succes).child("SMS")),
+                            )
+                        })
                     },
                 ),
             );

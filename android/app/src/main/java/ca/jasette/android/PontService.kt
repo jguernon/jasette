@@ -107,7 +107,7 @@ class PontService : ServiceAndroid() {
         val moi = androidx.core.app.Person.Builder().setName(t("Moi")).build()
         val style = NotificationCompat.MessagingStyle(moi)
             .addMessage(m.apercu(), m.time, personne)
-            .apply { if (conv?.group == true) { conversationTitle = titre; isGroupConversation = true } }
+            .also { if (conv?.group == true) { it.setConversationTitle(titre); it.setGroupConversation(true) } }
         val n = NotificationCompat.Builder(this, CANAL_MESSAGES)
             .setSmallIcon(R.drawable.ic_notif)
             .setColor(0xFF2F6BFF.toInt())
