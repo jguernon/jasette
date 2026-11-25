@@ -122,9 +122,10 @@ func (p *Pont) loadKV(k string) []byte {
 // recalculer l'expéditeur, répondre aux accusés et redemander l'historique.
 type msgRow struct {
 	Message
-	SenderJID string `json:"sender_jid,omitempty"`
-	ChatJID   string `json:"chat_jid,omitempty"` // le JID d'origine du fil (peut être un LID)
-	Body      string `json:"body,omitempty"`     // le texte sans la citation (aperçu)
+	SenderJID string   `json:"sender_jid,omitempty"`
+	ChatJID   string   `json:"chat_jid,omitempty"` // le JID d'origine du fil (peut être un LID)
+	Body      string   `json:"body,omitempty"`     // le texte sans la citation (aperçu)
+	Readers   []string `json:"readers,omitempty"`  // groupes : JID de ceux qui ont lu (mes messages)
 }
 
 func (p *Pont) putMsg(r *msgRow) {

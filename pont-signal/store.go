@@ -168,7 +168,8 @@ func (p *Pont) loadKV(k string, into any) bool {
 // recalculer l'expéditeur.
 type msgRow struct {
 	Message
-	SenderID string `json:"sender_id,omitempty"`
+	SenderID string   `json:"sender_id,omitempty"`
+	Readers  []string `json:"readers,omitempty"` // groupes : ACI de ceux qui ont lu (mes messages)
 }
 
 func (p *Pont) putMsg(r *msgRow) {

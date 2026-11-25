@@ -14,7 +14,10 @@
 
 mod pont;
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
+use std::rc::Rc;
 use std::path::PathBuf;
 use std::process::Child;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
@@ -24,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use gpui::{
     AnyElement, App, AppContext, BoxShadow, Bounds, Context, Div, Entity, FontWeight, Hsla, InteractiveElement,
-    IntoElement, ObjectFit, ParentElement, PathPromptOptions, Render, ScrollHandle, SharedString,
+    IntoElement, KeyDownEvent, MouseButton, ObjectFit, Pixels, ParentElement, PathPromptOptions, Render, ScrollHandle, SharedString,
     StatefulInteractiveElement, Styled, StyledImage, Svg, Window, WindowBounds, WindowOptions, div,
     hsla, img, linear_color_stop, linear_gradient, point, prelude::FluentBuilder, px, rgb, rgba, size, svg,
 };
@@ -99,33 +102,122 @@ fn est_emoji(c: char) -> bool {
 
 /// Du texte dont les emojis passent par Noto Color Emoji.
 fn texte_emoji(s: impl Into<SharedString>, couleur: Hsla, gras: Option<FontWeight>) -> gpui::StyledText {
+    texte_surligne(s, couleur, gras, None)
+}
+
+/// Comme `texte_emoji`, avec un passage surligné (octets de `s`) : fond et gras.
+fn texte_surligne(
+    s: impl Into<SharedString>,
+    couleur: Hsla,
+    gras: Option<FontWeight>,
+    plage: Option<(Range<usize>, Hsla)>,
+) -> gpui::StyledText {
     let s: SharedString = s.into();
     let mut runs = Vec::new();
     let mut debut = 0;
-    let mut emoji_courant: Option<bool> = None;
-    let run = |len: usize, emoji: bool| {
+    // Chaque morceau : (emoji ?, surligné ?).
+    let mut courant: Option<(bool, bool)> = None;
+    let fond = plage.as_ref().map(|(_, f)| *f);
+    let run = |len: usize, (emoji, marque): (bool, bool)| {
         let mut f = gpui::font(if emoji { POLICE_EMOJI } else { police() });
         if let Some(g) = gras {
             f.weight = g;
         }
-        gpui::TextRun { len, font: f, color: couleur, background_color: None, underline: None, strikethrough: None }
+        if marque {
+            f.weight = FontWeight::BOLD;
+        }
+        let (color, background_color) = match (marque, fond) {
+            (true, Some(f)) => (if th().ega { c(EGA_NOIR) } else { couleur }, Some(f)),
+            _ => (couleur, None),
+        };
+        gpui::TextRun { len, font: f, color, background_color, underline: None, strikethrough: None }
     };
     for (i, ch) in s.char_indices() {
         // Un joint ou un sélecteur garde la police de ce qui précède.
-        let e = if ch == '\u{200D}' || ch == '\u{FE0F}' { emoji_courant.unwrap_or(true) } else { est_emoji(ch) };
-        match emoji_courant {
-            Some(prec) if prec != e => {
-                runs.push(run(i - debut, prec));
+        let prec = courant.map(|c| c.0);
+        let e = if ch == '\u{200D}' || ch == '\u{FE0F}' { prec.unwrap_or(true) } else { est_emoji(ch) };
+        let m = plage.as_ref().is_some_and(|(r, _)| r.contains(&i));
+        match courant {
+            Some(p) if p != (e, m) => {
+                runs.push(run(i - debut, p));
                 debut = i;
             }
             _ => {}
         }
-        emoji_courant = Some(e);
+        courant = Some((e, m));
     }
-    if let Some(e) = emoji_courant {
-        runs.push(run(s.len() - debut, e));
+    if let Some(p) = courant {
+        runs.push(run(s.len() - debut, p));
     }
     gpui::StyledText::new(s).with_runs(runs)
+}
+
+/// Où se trouve `q` (déjà plié) dans `texte`, sans accents ni majuscules :
+/// la plage en octets du texte d'origine.
+fn trouver_plie(texte: &str, q: &str) -> Option<Range<usize>> {
+    if q.is_empty() {
+        return None;
+    }
+    // Le texte plié, et pour chacun de ses octets, l'octet d'origine.
+    let mut plie = String::new();
+    let mut origine = Vec::new();
+    for (i, ch) in texte.char_indices() {
+        let p = plier(ch.encode_utf8(&mut [0; 4]));
+        for _ in 0..p.len() {
+            origine.push(i);
+        }
+        plie.push_str(&p);
+    }
+    let debut = plie.find(q)?;
+    let fin_plie = debut + q.len();
+    let a = origine[debut];
+    // La fin : le début du caractère d'origine qui suit le dernier octet trouvé.
+    let dernier = origine[fin_plie - 1];
+    let b = dernier + texte[dernier..].chars().next().map_or(0, char::len_utf8);
+    Some(a..b)
+}
+
+/// Un extrait d'une ligne autour du passage trouvé, et sa plage dans l'extrait.
+fn extrait(texte: &str, q: &str) -> (String, Option<Range<usize>>) {
+    let ligne = une_ligne(texte);
+    let Some(r) = trouver_plie(&ligne, q) else { return (ligne, None) };
+    // Une trentaine de caractères avant le mot, pour le contexte.
+    let avant: Vec<(usize, char)> = ligne[..r.start].char_indices().collect();
+    if avant.len() <= 30 {
+        return (ligne, Some(r));
+    }
+    let coupe = avant[avant.len() - 28].0;
+    let debut = format!("…{}", &ligne[coupe..]);
+    let decal = "…".len() as isize - coupe as isize;
+    let r2 = (r.start as isize + decal) as usize..(r.end as isize + decal) as usize;
+    (debut, Some(r2))
+}
+
+/// La couleur des messages trouvés.
+fn couleur_trouve() -> Hsla {
+    if th().ega { c(EGA_JAUNE) } else { c(0xfbbf24) }
+}
+
+/// Les coches d'un de mes messages, à partir de son `status` (toutes les
+/// valeurs des ponts passent par `statut`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Coche {
+    Envoi,
+    Envoye,
+    Distribue,
+    Lu,
+    Echec,
+}
+
+fn coche(status: &str) -> Option<Coche> {
+    match statut(status) {
+        "Envoi…" => Some(Coche::Envoi),
+        "Envoyé" => Some(Coche::Envoye),
+        "Distribué" => Some(Coche::Distribue),
+        "Lu" => Some(Coche::Lu),
+        "Échec" => Some(Coche::Echec),
+        _ => None,
+    }
 }
 
 fn c(hex: u32) -> Hsla {
@@ -874,7 +966,37 @@ struct Msg {
     tmp_id: String,
     #[serde(default)]
     attachments: Vec<Piece>,
+    /// Les réactions : une par personne (emoji, qui, moi ?).
+    #[serde(default)]
+    reactions: Vec<Reaction>,
+    /// Groupes : qui a lu ce message (si le pont le sait).
+    #[serde(default)]
+    read_by: Vec<String>,
 }
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct Reaction {
+    #[serde(default)]
+    emoji: String,
+    #[serde(default)]
+    sender: String,
+    #[serde(default)]
+    from_me: bool,
+}
+
+/// Un message trouvé par la recherche globale (ids préfixés comme partout).
+#[derive(Clone, Debug)]
+struct Trouve {
+    conv: String,
+    id: String,
+    text: String,
+    sender: String,
+    time: i64,
+    from_me: bool,
+}
+
+/// Les six réactions rapides.
+const REACTIONS_RAPIDES: [&str; 6] = ["❤️", "😂", "😮", "😢", "😡", "👍"];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Etat {
@@ -975,6 +1097,9 @@ struct Reglages {
     /// La teinte du verre (id dans `TEINTES`) ; vide = lavande.
     #[serde(default)]
     teinte: String,
+    /// Afficher l'heure de chaque message (le (i) du fil reste un interrupteur ponctuel).
+    #[serde(default)]
+    heures_messages: bool,
 }
 
 fn vrai() -> bool {
@@ -999,6 +1124,7 @@ impl Default for Reglages {
             serveur: None,
             etoiles: Vec::new(),
             epingles: Vec::new(),
+            heures_messages: false,
         }
     }
 }
@@ -1201,6 +1327,39 @@ struct Jasette {
     active: bool,
     /// La conversation d'une notification cliquée.
     a_ouvrir: Boite<String>,
+    // Recherche dans la conversation ouverte (Ctrl+F) : le champ, le texte
+    // plié, les messages trouvés (du plus vieux au plus récent), le courant,
+    // et « Recherche plus loin… » pendant qu'on charge l'historique.
+    fil_cherche_ouvert: bool,
+    fil_cherche: Entity<InputState>,
+    fil_requete: String,
+    fil_trouves: Vec<String>,
+    fil_courant: Option<String>,
+    fil_plus_loin: bool,
+    /// Combien de pages d'historique chargées pour une même recherche (borne).
+    fil_tours: u32,
+    /// Un message à atteindre dans la conversation ouverte (on charge plus
+    /// d'historique jusqu'à lui), puis à faire défiler à l'écran.
+    cible: Option<String>,
+    a_defiler: Option<String>,
+    /// Le message ouvert depuis la recherche globale : marqué dans le fil.
+    surligne: Option<String>,
+    /// Où chaque message est dessiné (id → boîte), relevé à chaque image.
+    positions: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
+    // Recherche globale : la frappe (pour le délai), le texte envoyé aux
+    // ponts, et les messages trouvés (tous services, les plus récents d'abord).
+    recherche_seq: u64,
+    requete_globale: String,
+    resultats_msgs: Vec<Trouve>,
+    // Réactions : la barre rapide ouverte sur un message, la bulle survolée
+    // (bouton 🙂), l'appui long en cours, et le message visé par le sélecteur.
+    barre_reactions: Option<String>,
+    survol_bulle: Option<String>,
+    appui: Option<(String, u64)>,
+    appui_seq: u64,
+    reaction_cible: Option<String>,
+    /// La page elle-même, focalisée quand rien d'autre ne l'est : Ctrl+F et Échap y arrivent toujours.
+    focus_page: gpui::FocusHandle,
 }
 
 // Les ids venant de Messenger portent le préfixe « m: » dans l'interface, ceux
@@ -1591,8 +1750,49 @@ impl Jasette {
         let recherche = cx.new(|cx| InputState::new(window, cx).placeholder(t("Rechercher")));
         cx.subscribe_in(&recherche, window, |this, state, ev: &InputEvent, _window, cx| {
             if let InputEvent::Change = ev {
-                this.filtre = plier(state.read(cx).value().trim());
+                let brut = state.read(cx).value().trim().to_string();
+                this.filtre = plier(&brut);
+                // La recherche dans les messages part 300 ms après la dernière frappe.
+                this.recherche_seq += 1;
+                let seq = this.recherche_seq;
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(Duration::from_millis(300)).await;
+                    let _ = this.update(cx, |this, cx| {
+                        if this.recherche_seq == seq {
+                            this.chercher_partout(brut);
+                            cx.notify();
+                        }
+                    });
+                })
+                .detach();
                 cx.notify();
+            }
+        })
+        .detach();
+        let fil_cherche = cx.new(|cx| InputState::new(window, cx).placeholder(t("Rechercher dans la conversation")));
+        cx.subscribe_in(&fil_cherche, window, |this, state, ev: &InputEvent, _window, cx| {
+            match ev {
+                InputEvent::Change => {
+                    let q = plier(state.read(cx).value().trim());
+                    if q != this.fil_requete {
+                        this.fil_requete = q;
+                        this.fil_courant = None;
+                        this.fil_plus_loin = false;
+                        this.recalculer_fil();
+                        // Le plus récent d'abord.
+                        if let Some(id) = this.fil_trouves.last().cloned() {
+                            this.fil_courant = Some(id.clone());
+                            this.a_defiler = Some(id);
+                        }
+                        cx.notify();
+                    }
+                }
+                // Entrée : le précédent (plus ancien) ; Maj+Entrée : le suivant.
+                InputEvent::PressEnter { shift, .. } => {
+                    this.fil_aller(if *shift { 1 } else { -1 });
+                    cx.notify();
+                }
+                _ => {}
             }
         })
         .detach();
@@ -1781,7 +1981,7 @@ impl Jasette {
             confirmer_suppression: false,
             nouveau_texte: String::new(),
             resultats_meta: Vec::new(),
-            details_heures: false,
+            details_heures: reglages.heures_messages,
             galerie: None,
             galerie_onglet: 0,
             galerie_chargee: false,
@@ -1818,6 +2018,26 @@ impl Jasette {
             ajout_compte: false,
             active: window.is_window_active(),
             a_ouvrir: Arc::new(Mutex::new(None)),
+            fil_cherche_ouvert: false,
+            fil_cherche,
+            fil_requete: String::new(),
+            fil_trouves: Vec::new(),
+            fil_courant: None,
+            fil_plus_loin: false,
+            fil_tours: 0,
+            cible: None,
+            a_defiler: None,
+            surligne: None,
+            positions: Rc::new(RefCell::new(HashMap::new())),
+            recherche_seq: 0,
+            requete_globale: String::new(),
+            resultats_msgs: Vec::new(),
+            barre_reactions: None,
+            survol_bulle: None,
+            appui: None,
+            appui_seq: 0,
+            reaction_cible: None,
+            focus_page: cx.focus_handle(),
         }
     }
 
@@ -1907,7 +2127,34 @@ impl Jasette {
                     }
                 }
             }
+            "search_messages" => {
+                if !self.requete_globale.is_empty()
+                    && v.get("query").and_then(Value::as_str) == Some(self.requete_globale.as_str())
+                {
+                    let items = v["items"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|x| {
+                                    let champ = |k: &str| x.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
+                                    Some(Trouve {
+                                        conv: x.get("conv")?.as_str()?.to_string(),
+                                        id: x.get("id")?.as_str()?.to_string(),
+                                        text: champ("text"),
+                                        sender: champ("sender"),
+                                        time: x.get("time").and_then(Value::as_i64).unwrap_or(0),
+                                        from_me: x.get("from_me").or(x.get("fromMe")).and_then(Value::as_bool).unwrap_or(false),
+                                    })
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    self.ajouter_trouves(svc, items);
+                }
+            }
             "hello" | "e2ee" | "typing" => {}
+            // Un pont d'avant la recherche globale : il ne la connaît pas, ce n'est pas une panne.
+            "error" if v.get("text").and_then(Value::as_str).is_some_and(|t| t.contains("search_messages")) => {}
             "error" => {
                 if let Some(texte) = v.get("text").and_then(Value::as_str) {
                     self.erreur = Some(format!("{} : {texte}", svc.court()));
@@ -2248,6 +2495,9 @@ impl Jasette {
                 if !older && self.choisie.as_deref() == Some(conv.as_str()) && self.active {
                     self.marquer_lu(&conv);
                 }
+                if self.choisie.as_deref() == Some(conv.as_str()) {
+                    self.apres_chargement();
+                }
             }
             "message" => {
                 if let Ok(m) = serde_json::from_value::<Msg>(v["item"].clone()) {
@@ -2290,6 +2540,9 @@ impl Jasette {
                         }
                     }
                     self.convs.sort_by(|a, b| b.time.cmp(&a.time));
+                    if ouverte && self.fil_cherche_ouvert {
+                        self.recalculer_fil();
+                    }
                     if nouveau && !m.from_me {
                         if ouverte && self.active {
                             self.commande(json!({"cmd": "read", "conv": m.conv, "msg": m.id}));
@@ -2314,6 +2567,8 @@ impl Jasette {
                 self.erreur = Some(texte.to_string());
                 if v.get("where").and_then(Value::as_str) == Some("messages") {
                     self.chargement = None;
+                    self.fil_plus_loin = false;
+                    self.cible = None;
                 }
             }
             "pont_ferme" => self.erreur = Some("Le pont s'est arrêté (voir le terminal).".into()),
@@ -2327,6 +2582,19 @@ impl Jasette {
         self.menu_conv = false;
         self.confirmer_suppression = false;
         self.emojis_ouverts = false;
+        // La recherche dans le fil, les marques et les réactions restent à l'ancienne conversation.
+        if self.choisie.as_deref() != Some(id.as_str()) {
+            self.fil_cherche_ouvert = false;
+            self.fil_requete.clear();
+            self.fil_trouves.clear();
+            self.fil_courant = None;
+            self.fil_plus_loin = false;
+            self.cible = None;
+            self.surligne = None;
+            self.details_heures = self.reglages.heures_messages;
+        }
+        self.barre_reactions = None;
+        self.reaction_cible = None;
         if !self.messages.contains_key(&id) {
             self.chargement = Some(id.clone());
             self.commande(json!({"cmd": "messages", "conv": id, "count": 60}));
@@ -2342,6 +2610,236 @@ impl Jasette {
         let Some(premier) = self.messages.get(&id).and_then(|l| l.first()).cloned() else { return };
         self.chargement = Some(id.clone());
         self.commande(json!({"cmd": "messages", "conv": id, "count": 60, "before": premier.id, "before_time": premier.time}));
+    }
+
+    // ---- Recherche dans la conversation ouverte ----
+
+    fn ouvrir_recherche_fil(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.fil_cherche_ouvert = true;
+        self.menu_conv = false;
+        self.fil_cherche.update(cx, |s, cx| s.focus(window, cx));
+        self.fil_requete = plier(self.fil_cherche.read(cx).value().trim());
+        self.recalculer_fil();
+    }
+
+    fn fermer_recherche_fil(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.fil_cherche_ouvert = false;
+        self.fil_requete.clear();
+        self.fil_trouves.clear();
+        self.fil_courant = None;
+        self.fil_plus_loin = false;
+        self.fil_cherche.update(cx, |s, cx| s.set_value("", window, cx));
+    }
+
+    /// Les messages chargés de la conversation ouverte qui contiennent le
+    /// texte cherché (sans accents ni majuscules), du plus vieux au plus récent.
+    fn recalculer_fil(&mut self) {
+        self.fil_trouves.clear();
+        if self.fil_cherche_ouvert
+            && !self.fil_requete.is_empty()
+            && let Some(liste) = self.choisie.as_ref().and_then(|id| self.messages.get(id))
+        {
+            self.fil_trouves =
+                liste.iter().filter(|m| plier(&m.text).contains(&self.fil_requete)).map(|m| m.id.clone()).collect();
+        }
+        if self.fil_courant.as_ref().is_some_and(|c| !self.fil_trouves.contains(c)) {
+            self.fil_courant = None;
+        }
+    }
+
+    /// Le résultat précédent (-1, plus ancien) ou suivant (+1, plus récent).
+    /// Avant le plus vieux trouvé, on charge plus d'historique et on continue.
+    fn fil_aller(&mut self, sens: i32) {
+        if self.fil_requete.is_empty() {
+            return;
+        }
+        let n = self.fil_trouves.len();
+        let pos = self.fil_courant.as_ref().and_then(|c| self.fil_trouves.iter().position(|x| x == c));
+        let suivant = match pos {
+            None if n > 0 => Some(n - 1),
+            Some(i) if sens < 0 && i > 0 => Some(i - 1),
+            Some(i) if sens > 0 && i + 1 < n => Some(i + 1),
+            _ => None,
+        };
+        if let Some(i) = suivant {
+            let id = self.fil_trouves[i].clone();
+            self.fil_courant = Some(id.clone());
+            self.a_defiler = Some(id);
+            self.fil_plus_loin = false;
+        } else if sens < 0 {
+            self.fil_tours = 0;
+            self.chercher_plus_loin();
+        }
+    }
+
+    /// Charge une page d'historique de plus pour la recherche (bornée).
+    fn chercher_plus_loin(&mut self) {
+        let Some(id) = self.choisie.clone() else { return };
+        if self.chargement.as_deref() == Some(id.as_str()) {
+            // Une page arrive déjà : on continuera à son arrivée.
+            self.fil_plus_loin = true;
+        } else if self.plus_anciens.get(&id).copied().unwrap_or(false) && self.fil_tours < 40 {
+            self.fil_tours += 1;
+            self.fil_plus_loin = true;
+            self.plus_vieux();
+        } else {
+            self.fil_plus_loin = false;
+            self.cible = None;
+        }
+    }
+
+    /// Des messages de la conversation ouverte viennent d'arriver : on
+    /// poursuit la recherche ou la course vers un message visé.
+    fn apres_chargement(&mut self) {
+        if let Some(cible) = self.cible.clone() {
+            let la = self.choisie.as_ref().and_then(|id| self.messages.get(id)).is_some_and(|l| l.iter().any(|m| m.id == cible));
+            if la {
+                self.cible = None;
+                self.fil_plus_loin = false;
+                self.a_defiler = Some(cible);
+            } else {
+                self.chercher_plus_loin();
+            }
+            return;
+        }
+        if !self.fil_cherche_ouvert {
+            return;
+        }
+        let avant = self.fil_courant.clone();
+        self.recalculer_fil();
+        if self.fil_plus_loin {
+            // Le plus proche résultat plus ancien que le courant (ou le plus récent s'il n'y en avait pas).
+            let pos = avant.as_ref().and_then(|c| self.fil_trouves.iter().position(|x| x == c)).unwrap_or(self.fil_trouves.len());
+            if pos > 0 {
+                let id = self.fil_trouves[pos - 1].clone();
+                self.fil_courant = Some(id.clone());
+                self.a_defiler = Some(id);
+                self.fil_plus_loin = false;
+            } else {
+                self.chercher_plus_loin();
+            }
+        }
+    }
+
+    /// Fait défiler le fil pour montrer le message `id` (au tiers de la hauteur).
+    fn defiler_vers(&self, id: String, cx: &mut Context<Self>) {
+        let h = self.defile.clone();
+        let positions = self.positions.clone();
+        cx.spawn(async move |_, cx| {
+            // Plusieurs fois : la mise en page de l'historique tout juste chargé se finit plus tard.
+            for attente in [16, 60, 180, 420] {
+                cx.background_executor().timer(Duration::from_millis(attente)).await;
+                let boite = positions.borrow().get(&id).copied();
+                if let Some(b) = boite {
+                    let vue = h.bounds();
+                    let o = h.offset();
+                    // La place du message dans le contenu, quel que soit le défilement.
+                    let dans_contenu = b.top() - o.y;
+                    let voulu = vue.top() + vue.size.height * 0.35;
+                    let y = (voulu - dans_contenu).min(px(0.)).max(-h.max_offset().y);
+                    h.set_offset(point(o.x, y));
+                }
+                cx.update(|cx| cx.refresh_windows());
+            }
+        })
+        .detach();
+    }
+
+    // ---- Recherche dans tous les messages ----
+
+    /// Envoie la recherche à chaque pont (cache local des messages) ; pour
+    /// Google, dont le pont n'a pas de cache, on cherche dans ce qui est chargé.
+    fn chercher_partout(&mut self, brut: String) {
+        self.resultats_msgs.clear();
+        if brut.chars().count() < 2 {
+            self.requete_globale.clear();
+            return;
+        }
+        self.requete_globale = brut.clone();
+        for svc in SERVICES_META {
+            if self.meta(svc).pont.is_some() && self.meta(svc).associe() {
+                self.commande_svc(svc, json!({"cmd": "search_messages", "text": brut, "limit": 50}));
+            }
+        }
+        let q = plier(&brut);
+        let mut locaux = Vec::new();
+        for (conv, liste) in &self.messages {
+            if service_de(conv) != Service::GoogleMessages {
+                continue;
+            }
+            for m in liste.iter().filter(|m| !m.text.is_empty() && m.id != m.tmp_id && plier(&m.text).contains(&q)) {
+                locaux.push(Trouve {
+                    conv: conv.clone(),
+                    id: m.id.clone(),
+                    text: m.text.clone(),
+                    sender: m.sender.clone(),
+                    time: m.time,
+                    from_me: m.from_me,
+                });
+            }
+        }
+        self.ajouter_trouves(Service::GoogleMessages, locaux);
+    }
+
+    /// Les résultats d'un service remplacent les siens ; tout est trié par date décroissante.
+    fn ajouter_trouves(&mut self, svc: Service, items: Vec<Trouve>) {
+        self.resultats_msgs.retain(|r| service_de(&r.conv) != svc);
+        self.resultats_msgs.extend(items);
+        self.resultats_msgs.sort_by(|a, b| b.time.cmp(&a.time));
+        let mut vus = HashSet::new();
+        self.resultats_msgs.retain(|r| vus.insert((r.conv.clone(), r.id.clone())));
+        self.resultats_msgs.truncate(150);
+    }
+
+    /// Un résultat cliqué : la conversation s'ouvre, défile jusqu'au message et le marque.
+    fn ouvrir_resultat(&mut self, conv: String, id: String) {
+        if self.vue == Vue::Archives && !self.archives.iter().any(|c| c.id == conv) {
+            self.vue = Vue::Tout;
+        }
+        self.choisir(conv.clone());
+        self.surligne = Some(id.clone());
+        self.fil_tours = 0;
+        if self.messages.get(&conv).is_some_and(|l| l.iter().any(|m| m.id == id)) {
+            self.a_defiler = Some(id);
+        } else {
+            // Pas encore chargé : on le cherche dans l'historique, page par page.
+            self.cible = Some(id);
+            self.fil_plus_loin = true;
+            if self.chargement.as_deref() != Some(conv.as_str()) {
+                self.chercher_plus_loin();
+            }
+        }
+    }
+
+    // ---- Réactions ----
+
+    /// Met (ou retire, si c'est déjà la mienne) ma réaction sur un message de
+    /// la conversation ouverte. Tout de suite à l'écran ; le pont réémet le message.
+    fn reagir(&mut self, msg: &str, emoji: &str) {
+        self.barre_reactions = None;
+        self.reaction_cible = None;
+        let Some(conv) = self.choisie.clone() else { return };
+        let Some(m) = self.messages.get_mut(&conv).and_then(|l| l.iter_mut().find(|m| m.id == msg)) else { return };
+        if m.id == m.tmp_id {
+            return;
+        }
+        let mienne = m.reactions.iter().find(|r| r.from_me).map(|r| r.emoji.clone());
+        let emoji = if mienne.as_deref() == Some(emoji) { String::new() } else { emoji.to_string() };
+        m.reactions.retain(|r| !r.from_me);
+        if !emoji.is_empty() {
+            m.reactions.push(Reaction { emoji: emoji.clone(), sender: t("Moi").into(), from_me: true });
+        }
+        self.commande(json!({"cmd": "react", "conv": conv, "id": msg, "emoji": emoji}));
+    }
+
+    /// Renvoie un message texte en échec (envoi local jamais confirmé).
+    fn reessayer(&mut self, id: &str) {
+        let Some(conv) = self.choisie.clone() else { return };
+        let Some(liste) = self.messages.get_mut(&conv) else { return };
+        let Some(i) = liste.iter().position(|m| m.id == id && m.id == m.tmp_id && !m.text.is_empty()) else { return };
+        let m = liste.remove(i);
+        let tmp = self.en_attente(&conv, m.text.clone(), String::new(), Vec::new());
+        self.commande(json!({"cmd": "send", "conv": conv, "text": m.text, "tmp_id": tmp}));
     }
 
     /// Un message local en attente de confirmation du téléphone.
@@ -2360,6 +2858,8 @@ impl Jasette {
             kind: String::new(),
             tmp_id: tmp.clone(),
             attachments: pieces,
+            reactions: Vec::new(),
+            read_by: Vec::new(),
         });
         self.descendre = true;
         tmp
@@ -3482,7 +3982,7 @@ impl Jasette {
             col = col.child(
                 div().p(px(16.)).text_color(th().texte_pale).child(t("Aucun favori : ajoutez-en par le menu « … » d'une conversation.")),
             );
-        } else if visibles.is_empty() {
+        } else if visibles.is_empty() && self.resultats_msgs.is_empty() {
             col = col.child(div().p(px(16.)).text_color(th().texte_pale).child(t("Aucun résultat")));
         }
         // Le Head : une grille d'avatars en tête de liste (sans recherche en cours).
@@ -3682,6 +4182,104 @@ impl Jasette {
                     ),
             );
         }
+        if !self.filtre.is_empty() {
+            col = self.resultats_messages(col, cx);
+        }
+        col
+    }
+
+    /// La section « Messages » de la recherche : les messages qui contiennent
+    /// le texte, dans toutes les conversations, les plus récents d'abord.
+    fn resultats_messages(&self, mut col: gpui::Stateful<Div>, cx: &mut Context<Self>) -> gpui::Stateful<Div> {
+        let q = plier(&self.requete_globale);
+        let resultats: Vec<&Trouve> = self
+            .resultats_msgs
+            .iter()
+            .filter(|r| match self.vue {
+                Vue::Service(s) => service_de(&r.conv) == s,
+                _ => true,
+            })
+            .take(100)
+            .collect();
+        if q.is_empty() || resultats.is_empty() {
+            return col;
+        }
+        col = col.child(
+            div()
+                .px(px(12.))
+                .pt(px(14.))
+                .pb(px(6.))
+                .text_size(px(13.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(th().texte)
+                .child(t("Messages")),
+        );
+        for (i, r) in resultats.into_iter().enumerate() {
+            let conv = self.conv(&r.conv);
+            let nom = conv.map(|c| c.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| t("Sans nom").to_string());
+            let photo = match conv {
+                Some(c) => self.avatar_conv(c, &nom, 40.),
+                None => avatar(&nom, "", false, None, 40.),
+            };
+            // Qui l'a écrit, devant l'extrait (dans un groupe, ou moi).
+            let qui = if r.from_me {
+                format!("{} : ", t("Moi"))
+            } else if conv.is_some_and(|c| c.group) && !r.sender.is_empty() {
+                format!("{} : ", r.sender)
+            } else {
+                String::new()
+            };
+            let (texte, plage) = extrait(&r.text, &q);
+            let plage = plage.map(|p| (p.start + qui.len()..p.end + qui.len(), alpha(couleur_trouve(), if th().ega { 1. } else { 0.45 })));
+            let (cid, mid) = (r.conv.clone(), r.id.clone());
+            col = col.child(
+                div()
+                    .id(("trouve", i))
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(12.))
+                    .px(px(10.))
+                    .py(px(8.))
+                    .rounded(rayon(mesure(14., 10.)))
+                    .cursor_pointer()
+                    .hover(|s| s.bg(th().survol))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.ouvrir_resultat(cid.clone(), mid.clone());
+                        cx.notify();
+                    }))
+                    .child(
+                        div()
+                            .relative()
+                            .flex_none()
+                            .child(photo)
+                            .child(div().absolute().right(px(-3.)).bottom(px(-2.)).child(logo(service_de(&r.conv), 16.))),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .gap(px(2.))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .justify_between()
+                                    .gap(px(8.))
+                                    .child(div().truncate().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(nom))
+                                    .child(div().flex_none().text_size(px(12.)).text_color(th().texte_pale).child(heure(r.time, true))),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(13.))
+                                    .child(texte_surligne(format!("{qui}{texte}"), th().apercu, None, plage)),
+                            ),
+                    ),
+            );
+        }
         col
     }
 
@@ -3809,6 +4407,11 @@ impl Jasette {
                 .child(t("Choisissez une conversation"))
                 .into_any_element();
         };
+        // Un message à montrer (recherche) passe avant la descente en bas du fil.
+        if let Some(id) = self.a_defiler.take() {
+            self.descendre = false;
+            self.defiler_vers(id, cx);
+        }
         if self.descendre {
             self.descendre = false;
             self.descendre_bientot(cx);
@@ -3818,6 +4421,12 @@ impl Jasette {
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.defile)
+            // Un clic ailleurs que sur une bulle ferme la barre des réactions.
+            .on_click(cx.listener(|this, _, _, cx| {
+                if this.barre_reactions.take().is_some() {
+                    cx.notify();
+                }
+            }))
             // La copie floue suit le défilement : on redessine à chaque cran.
             .on_scroll(cx.listener(|_, _, _, cx| cx.notify()))
             .child(contenu)
@@ -3886,6 +4495,12 @@ impl Jasette {
             });
         }
         let liste = self.messages.get(&id).cloned().unwrap_or_default();
+        // Ce que chaque enfant de la colonne montre (un message ou autre chose),
+        // pour relever la place de chaque message à l'écran (défilement vers un résultat).
+        let mut ordre: Vec<Option<String>> = vec![None; if self.chargement.as_deref() == Some(id.as_str()) || self.plus_anciens.get(&id).copied().unwrap_or(false) { 1 } else { 0 }];
+        // La recherche dans le fil : les messages trouvés, et le courant (ou celui ouvert depuis la recherche globale).
+        let trouves: HashSet<&str> = if flou { HashSet::new() } else { self.fil_trouves.iter().map(String::as_str).collect() };
+        let courant = if flou { None } else { self.fil_courant.as_deref().or(self.surligne.as_deref()) };
         let mut jour_prec = String::new();
         for (i, m) in liste.iter().enumerate() {
             let j = jour(m.time);
@@ -3902,17 +4517,32 @@ impl Jasette {
                         .when(!flou, |d| d.bg(th().jour_fond).text_color(th().jour_texte))
                         .child(j.clone()),
                 );
+                ordre.push(None);
                 jour_prec = j;
             }
-            // Le dernier d'une suite du même côté porte l'heure.
+            // Le dernier d'une suite du même côté porte l'heure (et le coin pointu).
             let dernier = liste.get(i + 1).is_none_or(|n| n.from_me != m.from_me || n.sender != m.sender);
             let premier = i == 0 || liste[i - 1].from_me != m.from_me || liste[i - 1].sender != m.sender;
+            let mid = m.id.clone();
             let mut ligne = div()
+                .id(SharedString::from(format!("m-{}", m.id)))
                 .flex()
                 .flex_col()
                 .gap(px(4.))
                 .when(m.from_me, |d| d.items_end())
                 .when(!m.from_me, |d| d.items_start());
+            if !flou {
+                // Le survol d'un message montre le bouton 🙂 (réagir).
+                let survole = mid.clone();
+                ligne = ligne.on_hover(cx.listener(move |this, dessus: &bool, _, cx| {
+                    if *dessus {
+                        this.survol_bulle = Some(survole.clone());
+                    } else if this.survol_bulle.as_deref() == Some(survole.as_str()) {
+                        this.survol_bulle = None;
+                    }
+                    cx.notify();
+                }));
+            }
             if groupe && !m.from_me && premier && !m.sender.is_empty() {
                 ligne = ligne.child(
                     div()
@@ -3943,19 +4573,33 @@ impl Jasette {
                         .child(m.media.clone()),
                 );
             }
+            let echec = statut(&m.status) == "Échec";
+            // Mes messages : les coches, dans la bulle (en bas à droite).
+            let coches = if m.from_me && !flou { coche(&m.status) } else { None };
             // En sombre, l'heure se loge dans la bulle, en bas à droite.
             let heure_dedans = th().sombre && !m.text.is_empty() && !self.details_heures;
+            let trouve = trouves.contains(m.id.as_str());
+            let est_courant = courant == Some(m.id.as_str());
             if !m.text.is_empty() {
+                // Le coin du côté de l'expéditeur se resserre sur la dernière bulle d'une suite.
+                let r_bulle = mesure(20., 18.);
+                let pointu = 5.;
+                let pied_dedans = heure_dedans || coches.is_some();
                 let bulle = div()
                     .max_w(px(520.))
                     .px(px(mesure(14., 12.)))
                     .py(px(mesure(8., 7.)))
-                    .rounded(rayon(mesure(20., 18.)))
+                    .rounded(rayon(r_bulle))
+                    .when(dernier && m.from_me, |d| d.rounded_br(rayon(pointu)))
+                    .when(dernier && !m.from_me, |d| d.rounded_bl(rayon(pointu)))
                     .border_1()
-                    .when(heure_dedans, |d| d.flex().flex_row().flex_wrap().items_end().justify_end().gap_x(px(8.)));
+                    .when(pied_dedans, |d| d.flex().flex_row().flex_wrap().items_end().justify_end().gap_x(px(8.)));
                 let couleur_heure = if flou {
                     invisible
-                } else if statut(&m.status) == "Échec" {
+                } else if echec && m.from_me && !th().ega {
+                    // Sur ma bulle (accent), un rouge clair qui se lit.
+                    c(0xfecaca)
+                } else if echec {
                     th().danger
                 } else if m.from_me {
                     th().heure_envoyee
@@ -3963,63 +4607,360 @@ impl Jasette {
                     th().heure_recue
                 };
                 let mut dans_bulle = heure(m.time, false);
-                if m.from_me && statut(&m.status) == "Échec" {
+                if m.from_me && echec {
                     dans_bulle = format!("{dans_bulle} · {}", t("Échec"));
                 }
-                ligne = ligne.child(
-                    match (flou, m.from_me) {
-                        (true, true) => bulle.border_color(invisible).shadow(tache(tache_envoyee(), 24.)),
-                        (true, false) => bulle.border_color(invisible).shadow(tache(ton(blanc(0.9), th().surface), 24.)),
-                        (false, true) => bulle
-                            .border_color(invisible)
-                            .bg(degrade_accent())
-                            .text_color(blanc(1.))
-                            .shadow(ombre_flottante()),
-                        (false, false) => {
-                            bulle.bg(th().surface).border_color(th().surface_bord).text_color(th().texte_fort)
-                        }
-                    }
-                    // Le texte peut rétrécir sous sa largeur d'une ligne : il se replie
-                    // dans la bulle, et l'heure passe alors en dessous, à droite.
-                    .child(div().min_w(px(0.)).child(if flou {
-                        m.text.clone().into_any_element()
-                    } else {
-                        texte_emoji(m.text.clone(), if m.from_me { blanc(1.) } else { th().texte_fort }, None)
-                            .into_any_element()
-                    }))
-                    .when(heure_dedans
-, |d| {
-                        d.child(div().flex_none().mb(px(-1.)).text_size(px(11.)).text_color(couleur_heure).child(dans_bulle))
-                    }),
-                );
+                // Le passage trouvé, surligné dans le texte.
+                let plage = (trouve || est_courant)
+                    .then(|| {
+                        // Le texte de la recherche du fil, sinon celui de la recherche globale.
+                        let q = if self.fil_requete.is_empty() { plier(&self.requete_globale) } else { self.fil_requete.clone() };
+                        trouver_plie(&m.text, &q).map(|r| (r, alpha(couleur_trouve(), if th().ega { 1. } else { 0.55 })))
+                    })
+                    .flatten();
+                let bulle = match (flou, m.from_me) {
+                    (true, true) => bulle.border_color(invisible).shadow(tache(tache_envoyee(), 24.)),
+                    (true, false) => bulle.border_color(invisible).shadow(tache(ton(blanc(0.9), th().surface), 24.)),
+                    (false, true) => bulle.border_color(invisible).bg(degrade_accent()).text_color(blanc(1.)).shadow(ombre_flottante()),
+                    (false, false) => bulle.bg(th().surface).border_color(th().surface_bord).text_color(th().texte_fort),
+                }
+                // Trouvé par la recherche : un liseré ; le courant : plus épais, avec un halo.
+                .when(trouve && !est_courant, |d| d.border_color(alpha(couleur_trouve(), 0.8)))
+                .when(est_courant, |d| {
+                    d.border_2().border_color(couleur_trouve()).when(!th().ega, |d| {
+                        d.shadow(vec![BoxShadow {
+                            color: alpha(couleur_trouve(), 0.55),
+                            offset: point(px(0.), px(0.)),
+                            blur_radius: px(12.),
+                            spread_radius: px(1.),
+                            inset: false,
+                        }])
+                    })
+                })
+                // Le texte peut rétrécir sous sa largeur d'une ligne : il se replie
+                // dans la bulle, et l'heure passe alors en dessous, à droite.
+                .child(div().min_w(px(0.)).child(if flou {
+                    m.text.clone().into_any_element()
+                } else {
+                    texte_surligne(m.text.clone(), if m.from_me { blanc(1.) } else { th().texte_fort }, None, plage)
+                        .into_any_element()
+                }))
+                .when(pied_dedans, |d| {
+                    d.child(
+                        div()
+                            .flex_none()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(3.))
+                            .mb(px(-1.))
+                            .text_size(px(11.))
+                            .text_color(couleur_heure)
+                            .when(heure_dedans, |d| d.child(dans_bulle))
+                            .when_some(coches, |d, k| d.child(self.coches(m, k, couleur_heure, cx))),
+                    )
+                });
+                ligne = ligne.child(self.bulle_reactive(m, bulle.into_any_element(), flou, cx));
+            } else if !flou && (!m.reactions.is_empty() || self.barre_reactions.as_deref() == Some(m.id.as_str())) {
+                // Un message sans texte (photo, vocal) : la pastille sous la pièce.
+                ligne = ligne.child(self.bulle_reactive(m, div().h(px(2.)).w(px(60.)).into_any_element(), flou, cx));
             }
-            if self.details_heures || (!heure_dedans && (dernier || statut(&m.status) == "Échec")) {
+            if self.details_heures || (!heure_dedans && (dernier || echec)) {
                 let mut pied =
                     if self.details_heures { format!("{} · {}", jour(m.time), heure(m.time, false)) } else { heure(m.time, false) };
-                if m.from_me {
-                    let s = statut(&m.status);
-                    if !s.is_empty() {
-                        pied = format!("{pied} · {}", t(s));
-                    }
+                // Les coches remplacent le statut écrit ; seul l'échec reste en toutes lettres.
+                if m.from_me && echec {
+                    pied = format!("{pied} · {}", t("Échec"));
                 }
                 if !m.kind.is_empty() {
                     pied = format!("{pied} · {}", m.kind.to_uppercase());
                 }
                 let couleur = if flou {
                     invisible
-                } else if statut(&m.status) == "Échec" {
+                } else if echec {
                     th().danger
                 } else {
                     th().texte_pale
                 };
-                ligne = ligne.child(div().mx(px(8.)).mb(px(6.)).text_size(px(11.)).text_color(couleur).child(pied));
+                ligne = ligne.child(
+                    div()
+                        .mx(px(8.))
+                        .mb(px(6.))
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(4.))
+                        .text_size(px(11.))
+                        .text_color(couleur)
+                        .child(pied)
+                        // Sans texte, pas de bulle : les coches suivent l'heure.
+                        .when(m.text.is_empty(), |d| d.when_some(coches, |d, k| d.child(self.coches(m, k, couleur, cx)))),
+                );
             } else if heure_dedans && dernier {
                 // La fin d'une suite garde son souffle.
                 ligne = ligne.child(div().h(px(4.)));
             }
             col = col.child(ligne);
+            ordre.push(Some(m.id.clone()));
+        }
+        if !flou {
+            let positions = self.positions.clone();
+            col = col.on_children_prepainted(move |boites, _, _| {
+                let mut p = positions.borrow_mut();
+                p.clear();
+                for (b, id) in boites.iter().zip(ordre.iter()) {
+                    if let Some(id) = id {
+                        p.insert(id.clone(), *b);
+                    }
+                }
+            });
         }
         Some(col)
+    }
+
+    /// Les coches d'un de mes messages (⏱, ✓, ✓✓, ✓✓ lu, ⚠ échec).
+    fn coches(&self, m: &Msg, k: Coche, couleur: Hsla, cx: &mut Context<Self>) -> AnyElement {
+        let (nom, teinte) = match k {
+            Coche::Envoi => ("clock", couleur),
+            Coche::Envoye => ("check", couleur),
+            Coche::Distribue => ("check-check", couleur),
+            // Lu : la couleur d'accent ; sur ma bulle (déjà en accent), un turquoise vif qui s'en détache.
+            Coche::Lu => (
+                "check-check",
+                if th().ega {
+                    c(EGA_CYAN_VIF)
+                } else if m.text.is_empty() {
+                    th().accent
+                } else {
+                    c(0x5eead4)
+                },
+            ),
+            Coche::Echec => ("triangle-alert", if th().ega { c(EGA_ROUGE_VIF) } else { c(0xfca5a5) }),
+        };
+        let mut boite = div().id(SharedString::from(format!("coche-{}", m.id))).flex_none().child(icone(nom, 13., teinte));
+        // Qui a lu (groupes), si le pont le dit.
+        if k == Coche::Lu && !m.read_by.is_empty() {
+            let qui = format!("{} {}", t("Lu par"), m.read_by.join(", "));
+            boite = boite.tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(qui.clone()).build(w, cx));
+        }
+        // Échec d'un envoi d'ici : un clic le renvoie.
+        if k == Coche::Echec && m.id == m.tmp_id && !m.text.is_empty() {
+            let id = m.id.clone();
+            boite = boite
+                .cursor_pointer()
+                .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(t("Réessayer")).build(w, cx))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.reessayer(&id);
+                    cx.notify();
+                }));
+        }
+        boite.into_any_element()
+    }
+
+    /// Une bulle qu'on peut faire réagir : appui long, clic droit ou bouton 🙂
+    /// au survol ouvrent la barre des réactions rapides ; la pastille des
+    /// réactions déjà là chevauche le bas de la bulle, du côté de l'expéditeur.
+    fn bulle_reactive(&self, m: &Msg, bulle: AnyElement, flou: bool, cx: &mut Context<Self>) -> AnyElement {
+        let mut boite = div().relative().flex_none().max_w(px(540.)).child(bulle);
+        if flou {
+            return boite.into_any_element();
+        }
+        let local = m.id == m.tmp_id;
+        if !m.reactions.is_empty() {
+            boite = boite.mb(px(14.)).child(self.pastille_reactions(m));
+        }
+        if local {
+            return boite.into_any_element();
+        }
+        let id = m.id.clone();
+        let (id_bas, id_haut, id_dehors, id_droit, id_clic) = (id.clone(), id.clone(), id.clone(), id.clone(), id.clone());
+        let mut boite = boite
+            .id(SharedString::from(format!("bulle-{id}")))
+            // Appui long (450 ms) : la barre des réactions.
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, _, cx| {
+                    this.appui_seq += 1;
+                    let seq = this.appui_seq;
+                    this.appui = Some((id_bas.clone(), seq));
+                    let id = id_bas.clone();
+                    cx.spawn(async move |this, cx| {
+                        cx.background_executor().timer(Duration::from_millis(450)).await;
+                        let _ = this.update(cx, |this, cx| {
+                            if this.appui.as_ref().is_some_and(|(a, s)| *a == id && *s == seq) {
+                                this.appui = None;
+                                this.barre_reactions = Some(id);
+                                cx.notify();
+                            }
+                        });
+                    })
+                    .detach();
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(move |this, _, _, _| {
+                    if this.appui.as_ref().is_some_and(|(a, _)| *a == id_haut) {
+                        this.appui = None;
+                    }
+                }),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(move |this, _, _, _| {
+                    if this.appui.as_ref().is_some_and(|(a, _)| *a == id_dehors) {
+                        this.appui = None;
+                    }
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, _, _, cx| {
+                    this.barre_reactions = Some(id_droit.clone());
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            // Un clic sur la bulle ne ferme pas sa propre barre (l'appui long finit par un clic).
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if this.barre_reactions.as_ref().is_some_and(|b| *b != id_clic) {
+                    this.barre_reactions = None;
+                    cx.notify();
+                }
+                cx.stop_propagation();
+            }));
+        // Le bouton 🙂, à côté de la bulle, au survol.
+        if self.survol_bulle.as_deref() == Some(m.id.as_str()) && self.barre_reactions.is_none() {
+            let id_b = id.clone();
+            let bouton = div()
+                .id(SharedString::from(format!("reagir-{id}")))
+                .absolute()
+                .top(px(2.))
+                .size(px(28.))
+                .rounded(rayon(999.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .bg(ton(blanc(0.75), th().surface))
+                .border_1()
+                .border_color(th().trait_fin)
+                .hover(|s| s.bg(th().survol))
+                .when(m.from_me, |d| d.left(px(-36.)))
+                .when(!m.from_me, |d| d.right(px(-36.)))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.barre_reactions = Some(id_b.clone());
+                    cx.notify();
+                }))
+                .child(icone("face-slightly-smiling-plus", 16., th().texte_pale));
+            boite = boite.child(bouton);
+        }
+        // La barre des réactions rapides, au-dessus de la bulle, par-dessus tout le reste.
+        if self.barre_reactions.as_deref() == Some(m.id.as_str()) {
+            let mienne = m.reactions.iter().find(|r| r.from_me).map(|r| r.emoji.clone());
+            let mut barre = div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(2.))
+                .p(px(4.))
+                .rounded(rayon(999.))
+                .bg(ton(blanc(0.97), th().menu))
+                .border_1()
+                .border_color(th().trait_fin)
+                .shadow(ombre_verre());
+            for (i, e) in REACTIONS_RAPIDES.iter().enumerate() {
+                let id_e = id.clone();
+                let choisie = mienne.as_deref() == Some(*e);
+                barre = barre.child(
+                    div()
+                        .id(SharedString::from(format!("rapide-{i}-{id}")))
+                        .size(px(34.))
+                        .rounded(rayon(999.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .font_family(POLICE_EMOJI)
+                        .text_size(px(20.))
+                        .cursor_pointer()
+                        .when(choisie, |d| d.bg(alpha(th().accent, 0.22)))
+                        .hover(|s| s.bg(th().survol))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.reagir(&id_e, e);
+                            cx.notify();
+                        }))
+                        .child(*e),
+                );
+            }
+            let id_plus = id.clone();
+            barre = barre.child(
+                div()
+                    .id(SharedString::from(format!("rapide-plus-{id}")))
+                    .size(px(34.))
+                    .rounded(rayon(999.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .hover(|s| s.bg(th().survol))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        // Le sélecteur d'emojis du composeur, cette fois pour réagir.
+                        this.barre_reactions = None;
+                        this.reaction_cible = Some(id_plus.clone());
+                        this.emojis_ouverts = true;
+                        cx.notify();
+                    }))
+                    .child(icone("plus", 18., th().texte)),
+            );
+            boite = boite.child(gpui::deferred(
+                div()
+                    .absolute()
+                    .top(px(-48.))
+                    .when(m.from_me, |d| d.right(px(0.)))
+                    .when(!m.from_me, |d| d.left(px(0.)))
+                    .child(barre),
+            ));
+        }
+        boite.into_any_element()
+    }
+
+    /// La pastille des réactions : emojis groupés et leur nombre, à moitié
+    /// sur le bas de la bulle ; au survol, qui a réagi.
+    fn pastille_reactions(&self, m: &Msg) -> impl IntoElement {
+        // Les emojis dans l'ordre d'arrivée, chacun avec ses gens.
+        let mut groupes: Vec<(String, Vec<String>)> = Vec::new();
+        for r in &m.reactions {
+            let qui = if r.from_me { t("Moi").to_string() } else if r.sender.is_empty() { "?".into() } else { r.sender.clone() };
+            match groupes.iter_mut().find(|(e, _)| *e == r.emoji) {
+                Some((_, g)) => g.push(qui),
+                None => groupes.push((r.emoji.clone(), vec![qui])),
+            }
+        }
+        let emojis: String = groupes.iter().map(|(e, _)| e.as_str()).collect();
+        let n = m.reactions.len();
+        let texte = if n > 1 { format!("{emojis} {n}") } else { emojis };
+        let infobulle = groupes.iter().map(|(e, g)| format!("{e} {}", g.join(", "))).collect::<Vec<_>>().join("\n");
+        let mienne = m.reactions.iter().any(|r| r.from_me);
+        div()
+            .id(SharedString::from(format!("reactions-{}", m.id)))
+            .absolute()
+            .bottom(px(-15.))
+            .when(m.from_me, |d| d.right(px(10.)))
+            .when(!m.from_me, |d| d.left(px(10.)))
+            .px(px(6.))
+            .py(px(1.))
+            .rounded(rayon(999.))
+            .bg(if mienne { th().choisi } else { th().surface })
+            .border_1()
+            .border_color(if mienne { alpha(th().accent, 0.7) } else { ton(blanc(0.9), th().fil) })
+            .text_size(px(13.))
+            .text_color(if mienne { th().accent } else { th().texte })
+            .child(texte_emoji(texte, if mienne { th().accent } else { th().texte }, mienne.then_some(FontWeight::SEMIBOLD)))
+            .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(infobulle.clone()).build(w, cx))
     }
 
     /// Un vocal : lecture/pause, forme d'onde qui se remplit, durée.
@@ -4247,6 +5188,8 @@ impl Jasette {
                             .hover(|s| s.bg(ton(blanc(0.8), c(0x3a3a3c))))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.emojis_ouverts = !this.emojis_ouverts;
+                                // Ouvert d'ici : pour écrire, pas pour réagir.
+                                this.reaction_cible = None;
                                 cx.notify();
                             }))
                             .child(icone("face-slightly-smiling", 21., if self.emojis_ouverts { th().accent } else { th().icone })),
@@ -4340,6 +5283,18 @@ impl Jasette {
                     .cursor_pointer()
                     .hover(|s| s.bg(ton(blanc(0.95), th().menu_champ)))
                     .on_click(cx.listener(move |this, _, window, cx| {
+                        // Ouvert par le « + » des réactions : c'est une réaction.
+                        if let Some(msg) = this.reaction_cible.take() {
+                            this.emojis_ouverts = false;
+                            this.reagir(&msg, e);
+                            let r = &mut this.reglages.emojis_recents;
+                            r.retain(|x| x != e);
+                            r.insert(0, e.to_string());
+                            r.truncate(32);
+                            this.reglages.garder();
+                            cx.notify();
+                            return;
+                        }
                         this.saisie.update(cx, |s, cx| {
                             let v = format!("{}{e}", s.value());
                             s.set_value(v, window, cx);
@@ -4628,9 +5583,96 @@ impl Jasette {
             .when(self.emojis_ouverts, |d| {
                 d.child(div().absolute().right(px(70.)).bottom(px(HAUT_COMPOSEUR + 4.)).child(self.panneau_emojis(cx)))
             })
+            .when(self.fil_cherche_ouvert && choisie.is_some(), |d| {
+                d.child(div().absolute().right(px(16.)).left(px(16.)).top(px(HAUT_ENTETE - 2.)).flex().flex_row().justify_end().child(self.barre_recherche_fil(cx)))
+            })
+            // Vers un message ouvert depuis la recherche globale : l'historique se charge.
+            .when(!self.fil_cherche_ouvert && self.cible.is_some() && self.fil_plus_loin, |d| {
+                d.child(
+                    div().absolute().left_0().right_0().top(px(HAUT_ENTETE + 4.)).flex().flex_row().justify_center().child(
+                        verre(0.94, 999.)
+                            .when(th().sombre, |d| d.bg(th().menu).border_1().border_color(th().trait_fin))
+                            .shadow(ombre_verre())
+                            .px(px(14.))
+                            .py(px(5.))
+                            .text_size(px(13.))
+                            .text_color(th().texte)
+                            .child(t("Recherche plus loin…")),
+                    ),
+                )
+            })
             .when(self.menu_conv && choisie.is_some(), |d| {
                 d.child(div().absolute().right(px(16.)).top(px(HAUT_ENTETE - 4.)).child(self.menu_conversation(cx)))
             })
+    }
+
+    /// La barre de recherche du fil : champ, compteur, précédent/suivant, fermer.
+    fn barre_recherche_fil(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let n = self.fil_trouves.len();
+        let pos = self.fil_courant.as_ref().and_then(|c| self.fil_trouves.iter().position(|x| x == c));
+        // Compté depuis le plus récent : 1 est le dernier message trouvé.
+        let compteur = if self.fil_plus_loin {
+            t("Recherche plus loin…").to_string()
+        } else if self.fil_requete.is_empty() {
+            String::new()
+        } else {
+            format!("{} / {n}", pos.map_or(0, |i| n - i))
+        };
+        let plus_vieux_possible = pos.is_some_and(|i| i > 0)
+            || (pos.is_none() && n > 0)
+            || self.choisie.as_ref().is_some_and(|id| self.plus_anciens.get(id).copied().unwrap_or(false));
+        let plus_recent_possible = pos.is_some_and(|i| i + 1 < n);
+        let bouton = |id: &'static str, ic: &'static str, actif: bool| {
+            div()
+                .id(id)
+                .flex_none()
+                .size(px(28.))
+                .rounded(rayon(999.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .when(actif, |d| d.cursor_pointer().hover(|s| s.bg(th().survol)))
+                .when(!actif, |d| d.opacity(0.35))
+                .child(icone(ic, 16., th().texte))
+        };
+        verre(0.96, 999.)
+            .when(th().sombre, |d| d.bg(th().menu).border_1().border_color(th().trait_fin))
+            .shadow(ombre_verre())
+            .w(px(440.))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(4.))
+            .pl(px(14.))
+            .pr(px(6.))
+            .py(px(3.))
+            .child(icone("search", 15., th().texte_pale))
+            .child(div().flex_1().min_w(px(0.)).child(Input::new(&self.fil_cherche).appearance(false)))
+            .child(div().flex_none().text_size(px(12.)).text_color(if n == 0 && !self.fil_requete.is_empty() && !self.fil_plus_loin { th().danger } else { th().texte_pale }).child(compteur))
+            .child(
+                bouton("fil-precedent", "chevron-up", plus_vieux_possible)
+                    .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(t("Précédent (Entrée)")).build(w, cx))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.fil_aller(-1);
+                        cx.notify();
+                    })),
+            )
+            .child(
+                bouton("fil-suivant", "chevron-down", plus_recent_possible)
+                    .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(t("Suivant (Maj+Entrée)")).build(w, cx))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.fil_aller(1);
+                        cx.notify();
+                    })),
+            )
+            .child(
+                bouton("fil-fermer", "x", true)
+                    .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(t("Fermer (Échap)")).build(w, cx))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.fermer_recherche_fil(window, cx);
+                        cx.notify();
+                    })),
+            )
     }
 
     /// Le menu « … » : médias, archiver, supprimer.
@@ -4729,6 +5771,12 @@ impl Jasette {
                     cx.notify();
                 })),
             )
+            .child(item("menu-rechercher", "search", t("Rechercher").into(), th().texte_fort, true).on_click(cx.listener(
+                |this, _, window, cx| {
+                    this.ouvrir_recherche_fil(window, cx);
+                    cx.notify();
+                },
+            )))
             .child(item("menu-medias", "images", t("Médias").into(), th().texte_fort, true).on_click(cx.listener(
                 move |this, _, _, cx| {
                     this.menu_conv = false;
@@ -5137,6 +6185,19 @@ impl Jasette {
                                 apercu_ega,
                             )),
                     )
+                    .child(div().h(px(14.)))
+                    .child(groupe().child(ligne_interrupteur(
+                        "a-heures",
+                        t("Afficher l'heure de chaque message"),
+                        t("Le jour et l'heure sous chaque message. Le bouton (i) d'une conversation les bascule."),
+                        self.reglages.heures_messages,
+                        cx.listener(|this, _, _, cx| {
+                            this.reglages.heures_messages = !this.reglages.heures_messages;
+                            this.reglages.garder();
+                            this.details_heures = this.reglages.heures_messages;
+                            cx.notify();
+                        }),
+                    )))
                     .child(
                         div()
                             .pt(px(22.))
@@ -6264,7 +7325,35 @@ impl Jasette {
             self.indication = indication.clone();
             self.saisie.update(cx, |s, cx| s.set_placeholder(indication, window, cx));
         }
+        if window.focused(cx).is_none() {
+            window.focus(&self.focus_page, cx);
+        }
         let page = div()
+            .track_focus(&self.focus_page)
+            // Ctrl+F : chercher dans la conversation ouverte ; Échap : refermer.
+            .capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                let k = &ev.keystroke;
+                if (k.modifiers.control || k.modifiers.platform) && k.key == "f" {
+                    if this.choisie.is_some() && this.section.is_none() && this.galerie.is_none() {
+                        this.ouvrir_recherche_fil(window, cx);
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                } else if k.key == "escape" {
+                    if this.barre_reactions.is_some() || this.reaction_cible.is_some() {
+                        this.barre_reactions = None;
+                        if this.reaction_cible.take().is_some() {
+                            this.emojis_ouverts = false;
+                        }
+                        cx.stop_propagation();
+                        cx.notify();
+                    } else if this.fil_cherche_ouvert {
+                        this.fermer_recherche_fil(window, cx);
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                }
+            }))
             .relative()
             .flex()
             .flex_col()
@@ -6549,6 +7638,8 @@ fn ligne_interrupteur(
         .child(
             div()
                 .flex_1()
+                // Un long détail se replie au lieu de pousser l'interrupteur hors du cadre.
+                .min_w(px(0.))
                 .flex()
                 .flex_col()
                 .gap(px(2.))
@@ -6879,6 +7970,16 @@ fn t(fr: &'static str) -> &'static str {
         "Copié" => "Copied",
         "Port (déjà rempli par défaut) :" => "Port (filled in by default):",
         "Créé par" => "Created by",
+        "Rechercher dans la conversation" => "Search in conversation",
+        "Recherche plus loin…" => "Searching further…",
+        "Précédent (Entrée)" => "Previous (Enter)",
+        "Suivant (Maj+Entrée)" => "Next (Shift+Enter)",
+        "Fermer (Échap)" => "Close (Esc)",
+        "Messages" => "Messages",
+        "Lu par" => "Read by",
+        "Réessayer" => "Retry",
+        "Afficher l'heure de chaque message" => "Show the time of every message",
+        "Le jour et l'heure sous chaque message. Le bouton (i) d'une conversation les bascule." => "The day and time under every message. A conversation's (i) button toggles them.",
         "Archiver" => "Archive",
         "Épingler en haut" => "Pin to top",
         "Désépingler" => "Unpin",
@@ -6941,7 +8042,8 @@ fn statut(s: &str) -> &'static str {
         "ENVOI" => "Envoi…",
         "ÉCHEC" => "Échec",
         s if s.contains("FAILED") => "Échec",
-        s if s.contains("READ") => "Lu",
+        // Google dit « DISPLAYED » pour lu.
+        s if s.contains("READ") || s.contains("DISPLAYED") => "Lu",
         s if s.contains("DELIVERED") => "Distribué",
         s if s.contains("COMPLETE") => "Envoyé",
         s if s.contains("SENDING") || s.contains("YET_TO_SEND") => "Envoi…",

@@ -69,6 +69,8 @@ type Message struct {
 	TmpID  string `json:"tmp_id,omitempty"`
 	// Les pièces jointes : l'interface demande à les télécharger (commande « download »).
 	Attachments []Attachment `json:"attachments,omitempty"`
+	// Les réactions (une par personne), voir reaction.go.
+	Reactions []Reaction `json:"reactions,omitempty"`
 }
 
 type Attachment struct {
@@ -98,6 +100,9 @@ type Cmd struct {
 	Key     []byte            `json:"key"`
 	Mime    string            `json:"mime"`
 	Archive bool              `json:"archived"`
+	// react : le message visé et l'emoji (vide = retirer ma réaction).
+	ID    string `json:"id"`
+	Emoji string `json:"emoji"`
 }
 
 var (
@@ -414,13 +419,14 @@ type Pont struct {
 	cli           *libgm.Client
 	ctx           context.Context
 	convs         map[string]*gmproto.Conversation
+	msgs          map[string]*gmproto.Message  // les messages vus (pour « react »)
 	names         map[string]map[string]string // conv -> participant -> nom
 	pairing       bool
 	chargeEnCours bool
 }
 
 func newPont(ctx context.Context) *Pont {
-	return &Pont{ctx: ctx, convs: map[string]*gmproto.Conversation{}, names: map[string]map[string]string{}}
+	return &Pont{ctx: ctx, convs: map[string]*gmproto.Conversation{}, names: map[string]map[string]string{}, msgs: map[string]*gmproto.Message{}}
 }
 
 func httpSettings() exhttp.ClientSettings {
@@ -701,6 +707,7 @@ func (p *Pont) msgOut(m *gmproto.Message) Message {
 	p.mu.Lock()
 	conv := p.convs[m.GetConversationID()]
 	names := p.names[m.GetConversationID()]
+	p.keepMsg(m)
 	p.mu.Unlock()
 
 	// Comme mautrix : les statuts 1 à 99 sont des envois, 100 à 199 des
@@ -778,6 +785,7 @@ func (p *Pont) msgOut(m *gmproto.Message) Message {
 		TmpID:  m.GetTmpID(),
 
 		Attachments: attachments,
+		Reactions:   reactionsOut(m, conv, names),
 	}
 }
 
@@ -1135,6 +1143,8 @@ func main() {
 			go p.download(cmd)
 		case "send_media":
 			go p.sendMedia(cmd)
+		case "react":
+			go p.sendReaction(cmd)
 		case "new":
 			go p.newChat(cmd)
 		case "unpair":

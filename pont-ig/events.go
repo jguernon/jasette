@@ -545,7 +545,7 @@ func (p *Pont) storeRow(r *msgRow) bool {
 	if old == nil {
 		return true
 	}
-	return old.Text != r.Text || len(old.Attachments) != len(r.Attachments) || old.TmpID != r.TmpID || len(old.Reactions) != len(r.Reactions)
+	return old.Text != r.Text || len(old.Attachments) != len(r.Attachments) || old.TmpID != r.TmpID || !sameReactions(old.Reactions, r.Reactions)
 }
 
 // Garde le dernier message d'un fil pour l'aperçu.

@@ -81,6 +81,9 @@ type Message struct {
 	// Le texte cité est aussi mis en tête de « text ».
 	ReplyTo   string `json:"reply_to,omitempty"`
 	ReplyText string `json:"reply_text,omitempty"`
+
+	// Mes messages dans un groupe : qui les a lus (noms), selon les accusés.
+	ReadBy []string `json:"read_by,omitempty"`
 }
 
 type Attachment struct {
@@ -106,6 +109,7 @@ type Cmd struct {
 	Conv     string `json:"conv"`
 	Text     string `json:"text"`
 	Count    int64  `json:"count"`
+	Limit    int64  `json:"limit"` // search_messages : nombre de résultats au plus
 	Before   string `json:"before"`
 	BeforeT  int64  `json:"before_time"`
 	Msg      string `json:"msg"`
@@ -119,6 +123,9 @@ type Cmd struct {
 	Archived bool   `json:"archived"`
 	// Facultatif : répondre à un message (son identifiant).
 	ReplyTo string `json:"reply_to"`
+	// react : le message visé et l'emoji (vide = retirer ma réaction).
+	ID    string `json:"id"`
+	Emoji string `json:"emoji"`
 }
 
 var (
@@ -293,6 +300,8 @@ func main() {
 			go p.send(cmd)
 		case "send_media":
 			go p.sendMedia(cmd)
+		case "react":
+			go p.sendReaction(cmd)
 		case "read":
 			go p.markRead(cmd)
 		case "download":
@@ -301,6 +310,8 @@ func main() {
 			go p.newChat(cmd)
 		case "search":
 			go p.search(strings.TrimSpace(cmd.Text))
+		case "search_messages":
+			go p.searchMessages(cmd.Text, int(cmd.Limit))
 		case "archive":
 			go p.archive(cmd)
 		case "history_pin":

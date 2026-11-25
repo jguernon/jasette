@@ -431,11 +431,19 @@ func (p *Pont) handleReceipt(evt *events.Receipt) {
 		if r == nil || !r.FromMe {
 			continue
 		}
+		// Dans un groupe, chaque membre envoie ses accusés : on garde qui a lu.
+		added := false
+		if status == "OUTGOING_READ" && isGroupID(r.Conv) && evt.Sender != uuid.Nil {
+			r.Readers, added = addReader(r.Readers, evt.Sender.String())
+		}
 		// Ne jamais revenir en arrière (lu > distribué > envoyé).
 		if r.Status == "OUTGOING_READ" || r.Status == status {
-			continue
+			if !added {
+				continue
+			}
+		} else {
+			r.Status = status
 		}
-		r.Status = status
 		p.putMsg(r)
 		p.emitMsg(r, false)
 	}
@@ -566,6 +574,9 @@ func (p *Pont) storeRow(r *msgRow) bool {
 		if len(r.Reactions) == 0 {
 			r.Reactions = old.Reactions
 		}
+		if len(r.Readers) == 0 {
+			r.Readers = old.Readers
+		}
 		// Une pièce jointe envoyée d'ici : la copie locale reste la bonne.
 		if len(old.Attachments) > 0 && strings.HasPrefix(old.Attachments[0].MediaID, "local:") && len(r.Attachments) == len(old.Attachments) {
 			r.Attachments, r.Media = old.Attachments, old.Media
@@ -576,7 +587,7 @@ func (p *Pont) storeRow(r *msgRow) bool {
 	if old == nil {
 		return true
 	}
-	return old.Text != r.Text || len(old.Attachments) != len(r.Attachments) || old.TmpID != r.TmpID || len(old.Reactions) != len(r.Reactions)
+	return old.Text != r.Text || len(old.Attachments) != len(r.Attachments) || old.TmpID != r.TmpID || !sameReactions(old.Reactions, r.Reactions)
 }
 
 // Garde le dernier message d'un fil pour l'aperçu.

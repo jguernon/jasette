@@ -837,6 +837,9 @@ func (p *Pont) msgOut(r *msgRow) Message {
 			m.Reactions[i].Sender = n
 		}
 	}
+	for _, aci := range r.Readers {
+		m.ReadBy = append(m.ReadBy, cmp.Or(p.contactName(aci), "inconnu"))
+	}
 	return m
 }
 

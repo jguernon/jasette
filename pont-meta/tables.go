@@ -561,7 +561,7 @@ func (p *Pont) storeRow(r *msgRow, isInsert bool) bool {
 		}
 		return isInsert || loaded || time.Since(time.UnixMilli(r.Time)) < 10*time.Minute
 	}
-	return old.Text != r.Text || len(old.Attachments) != len(r.Attachments) || old.TmpID != r.TmpID
+	return old.Text != r.Text || len(old.Attachments) != len(r.Attachments) || old.TmpID != r.TmpID || !sameReactions(old.Reactions, r.Reactions)
 }
 
 // Garde le dernier message d'un fil pour l'aperçu.

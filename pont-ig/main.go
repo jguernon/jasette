@@ -98,6 +98,7 @@ type Cmd struct {
 	Conv     string            `json:"conv"`
 	Text     string            `json:"text"`
 	Count    int64             `json:"count"`
+	Limit    int64             `json:"limit"` // search_messages : nombre de résultats au plus
 	Before   string            `json:"before"`
 	BeforeT  int64             `json:"before_time"`
 	Msg      string            `json:"msg"`
@@ -110,6 +111,9 @@ type Cmd struct {
 	Folder   string            `json:"folder"`
 	Key      []byte            `json:"key"`
 	Mime     string            `json:"mime"`
+	// react : le message visé et l'emoji (vide = retirer ma réaction).
+	ID    string `json:"id"`
+	Emoji string `json:"emoji"`
 }
 
 var (
@@ -277,6 +281,8 @@ func main() {
 			go p.listConversations(int(n), cmd.Folder == "archive")
 		case "messages":
 			go p.messages(cmd)
+		case "react":
+			go p.sendReaction(cmd)
 		case "send":
 			go p.send(cmd)
 		case "send_media":
@@ -289,6 +295,8 @@ func main() {
 			go p.newChat(cmd)
 		case "search":
 			go p.search(strings.TrimSpace(cmd.Text))
+		case "search_messages":
+			go p.searchMessages(cmd.Text, int(cmd.Limit))
 		case "history_pin":
 			// Propre aux fils chiffrés de Messenger : rien à faire ici (et
 			// surtout pas de réponse, l'interface la prendrait pour Messenger).

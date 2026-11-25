@@ -963,6 +963,9 @@ func (p *Pont) msgOut(r *msgRow) Message {
 			m.Reactions[i].Sender = n
 		}
 	}
+	for _, j := range r.Readers {
+		m.ReadBy = append(m.ReadBy, firstOf(p.nameOf(j), strings.SplitN(j, "@", 2)[0]))
+	}
 	return m
 }
 

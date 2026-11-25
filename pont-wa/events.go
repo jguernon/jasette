@@ -239,6 +239,13 @@ func (p *Pont) applyReaction(cli *whatsmeow.Client, info *types.MessageInfo, tar
 		return
 	}
 	actor := p.canon(cli, info.Sender).String()
+	if info.IsFromMe && cli.Store.ID != nil {
+		// Ma réaction (d'un autre de mes appareils) : comme celles envoyées d'ici.
+		r.Reactions = setMyReaction(r.Reactions, cli.Store.ID.ToNonAD().String(), emoji)
+		p.putMsg(r)
+		p.emitMsg(r, false)
+		return
+	}
 	r.Reactions = setReaction(r.Reactions, actor, emoji, info.IsFromMe)
 	p.putMsg(r)
 	p.emitMsg(r, false)
@@ -309,12 +316,26 @@ func (p *Pont) handleReceipt(cli *whatsmeow.Client, evt *events.Receipt) {
 	default:
 		return
 	}
+	// Dans un groupe, chaque membre envoie ses accusés : on garde qui a lu.
+	reader := ""
+	if chat.Server == types.GroupServer && status == "OUTGOING_READ" && !evt.Sender.IsEmpty() {
+		reader = p.canon(cli, evt.Sender).String()
+	}
 	for _, id := range evt.MessageIDs {
 		r := p.getMsg(id)
-		if r == nil || !r.FromMe || r.Status == "OUTGOING_READ" || r.Status == status {
+		if r == nil || !r.FromMe {
 			continue
 		}
-		r.Status = status
+		var added bool
+		r.Readers, added = addReader(r.Readers, reader)
+		// Ne jamais revenir en arrière (lu > distribué > envoyé).
+		if r.Status == "OUTGOING_READ" || r.Status == status {
+			if !added {
+				continue
+			}
+		} else {
+			r.Status = status
+		}
 		p.putMsg(r)
 		p.emitMsg(r, false)
 	}
@@ -684,6 +705,9 @@ func (p *Pont) storeRow(r *msgRow) bool {
 		if len(r.Reactions) == 0 {
 			r.Reactions = old.Reactions
 		}
+		if len(r.Readers) == 0 {
+			r.Readers = old.Readers
+		}
 		// Une pièce jointe envoyée d'ici : la copie locale reste la bonne.
 		if len(old.Attachments) > 0 && strings.HasPrefix(old.Attachments[0].MediaID, "local:") && len(r.Attachments) == len(old.Attachments) {
 			r.Attachments, r.Media = old.Attachments, old.Media
@@ -694,7 +718,7 @@ func (p *Pont) storeRow(r *msgRow) bool {
 	if old == nil {
 		return true
 	}
-	return old.Text != r.Text || len(old.Attachments) != len(r.Attachments) || old.TmpID != r.TmpID || len(old.Reactions) != len(r.Reactions)
+	return old.Text != r.Text || len(old.Attachments) != len(r.Attachments) || old.TmpID != r.TmpID || !sameReactions(old.Reactions, r.Reactions)
 }
 
 func previewOf(text string, atts []Attachment) string {
