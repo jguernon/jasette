@@ -44,6 +44,10 @@ impl Pont {
     /// Le pont Meta, pour « messenger » ou « instagram » : le même programme,
     /// une copie par service, chacune avec son dossier de données.
     pub fn lancer_meta(service: &str) -> Result<Self, String> {
+        // Instagram a changé de protocole : son propre pont (instameow), s'il est là.
+        if service == "instagram" && chemin("jasette-ig", "JASETTE_IG").is_some() {
+            return Self::lancer_nomme("jasette-ig", "JASETTE_IG", Some(service));
+        }
         Self::lancer_nomme("jasette-meta", "JASETTE_META", Some(service))
     }
 

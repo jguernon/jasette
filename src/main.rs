@@ -1652,6 +1652,13 @@ impl Jasette {
                     self.erreur = Some(format!("{} : {texte}", svc.court()));
                 }
             }
+            // Le pont de ce service s'est arrêté : ne pas rester « en association ».
+            "pont_ferme" => {
+                let m = self.meta_mut(svc);
+                m.pont = None;
+                m.etat = Etat::NonAssocie;
+                self.erreur = Some(format!("{} : {}", svc.court(), t("le pont s'est arrêté. Relancez Jasette pour réessayer.")));
+            }
             _ => self.nouvelle(v),
         }
     }
@@ -5856,6 +5863,7 @@ fn t(fr: &'static str) -> &'static str {
         "Pont introuvable" => "Bridge not found",
         "Connectez-vous dans la fenêtre Instagram…" => "Sign in in the Instagram window…",
         "Google Messages est déjà connecté : connectez Messenger ou Instagram ci-dessus." => "Google Messages is already connected: connect Messenger or Instagram above.",
+        "le pont s'est arrêté. Relancez Jasette pour réessayer." => "the bridge stopped. Restart Jasette to try again.",
         "Créé par" => "Created by",
         "Archiver" => "Archive",
         "Épingler en haut" => "Pin to top",
