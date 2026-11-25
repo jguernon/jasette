@@ -1135,6 +1135,8 @@ struct Jasette {
     serveur_occupe: bool,
     /// L'accueil montre la connexion Google (sinon : le choix du service).
     accueil_google: bool,
+    /// L'accueil : « Autonome » choisi (on passe au choix du service).
+    accueil_autonome: bool,
     code_jumelage: Option<(String, String)>,
     appareils: Vec<String>,
     verif_client: Option<(String, String, pont::Verification)>,
@@ -1780,6 +1782,7 @@ impl Jasette {
             reglages,
             serveur_occupe: false,
             accueil_google: false,
+            accueil_autonome: false,
             code_jumelage: None,
             appareils: Vec::new(),
             verif_client: None,
@@ -5950,6 +5953,66 @@ impl Jasette {
             } else {
                 t("Connectez-vous dans la fenêtre Facebook…")
             }));
+        } else if self.serveur_occupe {
+            carte = carte.child(div().mt(px(10.)).text_color(th().texte).child(t("Un instant…")));
+        } else if self.reglages.mode_serveur.is_empty() && !self.accueil_autonome {
+            // D'abord : comment cet appareil utilise Jasette.
+            let mode = |id: &'static str, ic: &'static str, titre: &'static str, detail: &'static str| {
+                div()
+                    .id(id)
+                    .w_full()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(14.))
+                    .px(px(14.))
+                    .py(px(11.))
+                    .rounded(rayon(14.))
+                    .bg(ton(blanc(0.55), th().surface))
+                    .cursor_pointer()
+                    .hover(|s| s.bg(th().survol))
+                    .child(icone(ic, 24., th().accent))
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.))
+                            .child(div().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(t(titre)))
+                            .child(div().text_size(px(12.)).text_color(th().texte_pale).child(t(detail))),
+                    )
+                    .child(icone("chevron-right", 18., th().texte_pale))
+            };
+            carte = carte
+                .child(div().mt(px(6.)).text_size(px(13.)).text_color(th().texte_pale).child(t("Comment utiliser Jasette ici ?")))
+                .child(
+                    mode("mode-autonome", "laptop", "Autonome", "Cet appareil se connecte lui-même à vos services.").on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.accueil_autonome = true;
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    mode(
+                        "mode-serveur",
+                        "server",
+                        "Serveur",
+                        "Cette machine garde les sessions, même Jasette fermée. Vos autres appareils s'y branchent.",
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.devenir_serveur(cx);
+                        cx.notify();
+                    })),
+                )
+                .child(
+                    mode("mode-client", "monitor", "Client", "Se brancher à votre serveur Jasette : rien à connecter ici.").on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.section = Some(Section::Serveur);
+                            cx.notify();
+                        }),
+                    ),
+                );
         } else if !self.accueil_google {
             // Le choix du premier service : aucun n'est obligatoire.
             let service = |id: &'static str, svc: Service| {
@@ -5987,18 +6050,23 @@ impl Jasette {
                 .when(self.reglages.mode_serveur.is_empty(), |d| {
                     d.child(
                         div()
-                            .id("accueil-serveur")
+                            .id("accueil-mode")
                             .mt(px(4.))
                             .text_size(px(13.))
-                            .text_color(th().accent)
+                            .text_color(th().texte_pale)
                             .cursor_pointer()
                             .hover(|s| s.opacity(0.7))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.section = Some(Section::Serveur);
+                                this.accueil_autonome = false;
                                 cx.notify();
                             }))
-                            .child(t("Utiliser mon serveur Jasette")),
+                            .child(t("← Changer de mode")),
                     )
+                })
+                .when(self.reglages.mode_serveur == "serveur", |d| {
+                    d.child(div().mt(px(4.)).text_size(px(12.)).text_color(th().texte_pale).child(t(
+                        "Cette machine est le serveur Jasette : les services connectés ici servent à tous vos appareils.",
+                    )))
                 });
         } else {
             carte = carte
@@ -6672,8 +6740,16 @@ fn t(fr: &'static str) -> &'static str {
         "Blanche" => "White",
         "Google Messages, Messenger et Instagram au même endroit, avec tout l'historique." => "Google Messages, Messenger and Instagram in one place, with your full history.",
         "Connectez un premier service :" => "Connect a first service:",
-        "Utiliser mon serveur Jasette" => "Use my Jasette server",
         "← Autres services" => "← Other services",
+        "Comment utiliser Jasette ici ?" => "How do you want to use Jasette here?",
+        "Autonome" => "Standalone",
+        "Cet appareil se connecte lui-même à vos services." => "This device connects to your services by itself.",
+        "Serveur" => "Server",
+        "Cette machine garde les sessions, même Jasette fermée. Vos autres appareils s'y branchent." => "This machine keeps the sessions, even with Jasette closed. Your other devices connect to it.",
+        "Client" => "Client",
+        "Se brancher à votre serveur Jasette : rien à connecter ici." => "Connect to your Jasette server: nothing to sign in to here.",
+        "← Changer de mode" => "← Change mode",
+        "Cette machine est le serveur Jasette : les services connectés ici servent à tous vos appareils." => "This machine is the Jasette server: services connected here serve all your devices.",
         "Créé par" => "Created by",
         "Archiver" => "Archive",
         "Épingler en haut" => "Pin to top",
