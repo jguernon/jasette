@@ -1,0 +1,441 @@
+package ca.jasette.android.ui
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import ca.jasette.android.Conv
+import ca.jasette.android.Depot
+import ca.jasette.android.Marques
+import ca.jasette.android.Service
+import ca.jasette.android.t
+
+/**
+ * Une action à faire dans le fil qui s'ouvre, demandée par le menu d'une
+ * conversation de la liste : (id, "medias" ou "recherche").
+ */
+object DemandeFil {
+    var action by mutableStateOf<Pair<String, String>?>(null)
+}
+
+/** Le menu de la liste : Médias et Rechercher ouvrent d'abord le fil. */
+@Composable
+fun MenuDeListe(c: Conv, ouvert: Boolean, fermer: () -> Unit, retiree: (String) -> Unit, ouvrir: () -> Unit) {
+    MenuConversation(
+        c, ouvert, fermer, retiree,
+        medias = {
+            DemandeFil.action = c.id to "medias"
+            ouvrir()
+        },
+        rechercher = {
+            DemandeFil.action = c.id to "recherche"
+            ouvrir()
+        },
+    )
+}
+
+/** Le nombre de conversations non lues d'une vue (la pastille du rail). */
+fun nonLus(v: Vue): Int = when (v) {
+    Vue.Tout -> Depot.convs.count { it.unread }
+    Vue.Favoris -> Marques.favoris.count { id -> Depot.conv(id)?.unread == true }
+    Vue.Archives -> Depot.archives.count { it.unread }
+    is Vue.DuService -> Depot.convs.count { it.service == v.service && it.unread }
+}
+
+/** Les services connectés, dans l'ordre du rail du bureau. */
+fun servicesConnectes(): List<Service> = Service.entries.filter { Depot.etat(it).associe }
+
+/** Une icône avec la pastille du nombre de non-lus. */
+@Composable
+private fun AvecPastille(n: Int, contenu: @Composable () -> Unit) {
+    BadgedBox(badge = {
+        if (n > 0) Badge(containerColor = P.accent, contentColor = P.texteFort) { Text(if (n > 99) "99+" else "$n") }
+    }) { contenu() }
+}
+
+@Composable
+private fun LogoService(s: Service, taille: androidx.compose.ui.unit.Dp) {
+    Image(painterResource(iconeService(s)), s.court, Modifier.size(taille).clip(formeLogo(taille)))
+}
+
+/**
+ * Le rail de gauche sur grand écran (`fn rail` du bureau) : Inbox, Favoris,
+ * Archives, un trait, une tuile par service connecté, et Réglages en bas.
+ */
+@Composable
+fun Rail(vue: Vue, enReglages: Boolean, choisir: (Vue) -> Unit, reglages: () -> Unit) {
+    val couleurs = NavigationRailItemDefaults.colors(
+        selectedIconColor = P.texteFort, unselectedIconColor = P.icone,
+        selectedTextColor = P.texteFort, unselectedTextColor = P.textePale, indicatorColor = P.choisi,
+    )
+    NavigationRail(containerColor = P.liste, modifier = Modifier.width(76.dp)) {
+        Spacer(Modifier.height(8.dp))
+        val fixes = listOf(
+            Triple(Vue.Tout, Icones.inbox, t("Boîte de réception")),
+            Triple(Vue.Favoris, Icons.Filled.Star, t("Favoris")),
+            Triple(Vue.Archives, Icones.archive, t("Archives")),
+        )
+        for ((v, ic, nom) in fixes) {
+            NavigationRailItem(
+                selected = !enReglages && vue == v,
+                onClick = { choisir(v) },
+                icon = { AvecPastille(nonLus(v)) { Icon(ic, nom) } },
+                colors = couleurs,
+            )
+        }
+        HorizontalDivider(Modifier.width(32.dp).padding(vertical = 8.dp), color = P.choisi)
+        for (s in servicesConnectes()) {
+            val v = Vue.DuService(s)
+            NavigationRailItem(
+                selected = !enReglages && vue == v,
+                onClick = { choisir(v) },
+                icon = { AvecPastille(nonLus(v)) { LogoService(s, 30.dp) } },
+                colors = couleurs,
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        NavigationRailItem(
+            selected = enReglages,
+            onClick = reglages,
+            icon = { Icon(Icons.Filled.Settings, t("Réglages")) },
+            colors = couleurs,
+        )
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+/**
+ * La barre du bas sur écran étroit (Fold plié) : Inbox, Favoris, Archives et
+ * Services, qui ouvre le choix du service.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
+    var choixService by remember { mutableStateOf(false) }
+    val couleurs = NavigationBarItemDefaults.colors(
+        selectedIconColor = P.texteFort, unselectedIconColor = P.icone,
+        selectedTextColor = P.texteFort, unselectedTextColor = P.textePale, indicatorColor = P.choisi,
+    )
+    NavigationBar(containerColor = P.liste) {
+        val fixes = listOf(
+            Triple(Vue.Tout, Icones.inbox, t("Inbox")),
+            Triple(Vue.Favoris, Icons.Filled.Star, t("Favoris")),
+            Triple(Vue.Archives, Icones.archive, t("Archives")),
+        )
+        for ((v, ic, nom) in fixes) {
+            NavigationBarItem(
+                selected = vue == v,
+                onClick = { choisir(v) },
+                icon = { AvecPastille(nonLus(v)) { Icon(ic, null) } },
+                label = { Text(nom, maxLines = 1) },
+                colors = couleurs,
+            )
+        }
+        val duService = vue as? Vue.DuService
+        NavigationBarItem(
+            selected = duService != null,
+            onClick = { choixService = true },
+            icon = {
+                if (duService != null) {
+                    AvecPastille(nonLus(duService)) { LogoService(duService.service, 24.dp) }
+                } else {
+                    Icon(Icones.services, null)
+                }
+            },
+            label = { Text(duService?.service?.court ?: t("Services"), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            colors = couleurs,
+        )
+    }
+    if (choixService) {
+        ModalBottomSheet(onDismissRequest = { choixService = false }, containerColor = P.surface) {
+            Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
+                Text(
+                    t("Services"), color = P.texteFort, fontWeight = FontWeight.Bold, fontSize = 18.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                )
+                val liste = servicesConnectes()
+                if (liste.isEmpty()) {
+                    Text(t("Aucun service connecté."), color = P.textePale, modifier = Modifier.padding(20.dp))
+                }
+                for (s in liste) {
+                    val v = Vue.DuService(s)
+                    Row(
+                        Modifier.fillMaxWidth().clickable {
+                            choixService = false
+                            choisir(v)
+                        }.padding(horizontal = 20.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        LogoService(s, 34.dp)
+                        Spacer(Modifier.width(14.dp))
+                        Text(s.titre, color = P.texteFort, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        val n = nonLus(v)
+                        if (n > 0) Badge(containerColor = P.accent, contentColor = P.texteFort) { Text("$n") }
+                        if (vue == v) {
+                            Spacer(Modifier.width(10.dp))
+                            Icon(Icons.Filled.Check, null, tint = P.accent)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Le « Head » : la grille des favoris en haut de la boîte de réception. */
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
+@Composable
+fun Head(favoris: List<Conv>, choisie: String?, ouvrir: (String) -> Unit, retiree: (String) -> Unit) {
+    Column {
+        FlowRow(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp)) {
+            for (c in favoris) key(c.id) {
+                var menu by remember { mutableStateOf(false) }
+                val nom = c.name.ifEmpty { t("Sans nom") }
+                val prenom = if (c.group) nom else nom.split(Regex("\\s+")).firstOrNull() ?: nom
+                Box {
+                    Column(
+                        Modifier.width(80.dp).clip(RoundedCornerShape(14.dp))
+                            .background(if (c.id == choisie) P.choisi else androidx.compose.ui.graphics.Color.Transparent)
+                            .combinedClickable(onClick = { ouvrir(c.id) }, onLongClick = { menu = true })
+                            .padding(vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Box {
+                            Avatar(c, 54.dp)
+                            if (c.unread) {
+                                Box(
+                                    Modifier.align(Alignment.TopEnd).size(13.dp).clip(CircleShape).background(P.fond)
+                                        .padding(2.dp).clip(CircleShape).background(P.accent),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            prenom, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
+                            color = if (c.unread) P.texteFort else P.texte,
+                            modifier = Modifier.padding(horizontal = 4.dp),
+                        )
+                    }
+                    MenuDeListe(c, menu, fermer = { menu = false }, retiree = retiree, ouvrir = { ouvrir(c.id) })
+                }
+            }
+        }
+        HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), color = P.traitFin)
+    }
+}
+
+/** Une conversation de la liste ; un appui long ouvre son menu. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun Rangee(
+    c: Conv,
+    choisie: Boolean,
+    epinglee: Boolean,
+    badge: Boolean,
+    reorganiser: Boolean,
+    retiree: (String) -> Unit,
+    onClick: () -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            Modifier.fillMaxWidth()
+                .background(if (choisie) P.choisi else androidx.compose.ui.graphics.Color.Transparent)
+                .combinedClickable(onClick = onClick, onLongClick = { menu = true })
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Avatar(c, 52.dp, badge = badge)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        c.name.ifEmpty { c.members.joinToString(", ") }, color = P.texteFort,
+                        fontWeight = if (c.unread) FontWeight.Bold else FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), fontSize = 16.sp,
+                    )
+                    if (c.e2ee) Icon(Icons.Filled.Lock, t("Chiffré"), tint = P.textePale, modifier = Modifier.size(14.dp))
+                    if (epinglee && !reorganiser) {
+                        Spacer(Modifier.width(4.dp))
+                        Icon(Icones.epingle, t("Épinglée"), tint = P.textePale, modifier = Modifier.size(14.dp))
+                    }
+                    if (!reorganiser) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(heureListe(c.time), color = if (c.unread) P.accent else P.textePale, fontSize = 12.sp)
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        (if (c.fromMe && c.preview.isNotEmpty()) t("Vous : ") else "") + c.preview.replace('\n', ' '),
+                        color = if (c.unread) P.texteFort else P.apercu, fontSize = 14.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                    )
+                    if (c.unread) {
+                        Spacer(Modifier.width(8.dp))
+                        Box(Modifier.size(10.dp).clip(CircleShape).background(P.accent))
+                    }
+                }
+            }
+            if (reorganiser) {
+                // Réorganiser les favoris : monter ou descendre d'un cran.
+                val i = Marques.favoris.indexOf(c.id)
+                IconButton(onClick = { Marques.deplacerFavori(c.id, -1) }, enabled = i > 0) {
+                    Icon(Icons.Filled.KeyboardArrowUp, t("Monter"), tint = if (i > 0) P.texteFort else P.choisi)
+                }
+                IconButton(onClick = { Marques.deplacerFavori(c.id, 1) }, enabled = i < Marques.favoris.size - 1) {
+                    Icon(
+                        Icons.Filled.KeyboardArrowDown, t("Descendre"),
+                        tint = if (i < Marques.favoris.size - 1) P.texteFort else P.choisi,
+                    )
+                }
+            }
+        }
+        MenuDeListe(c, menu, fermer = { menu = false }, retiree = retiree, ouvrir = onClick)
+    }
+}
+
+/**
+ * Le menu d'une conversation (`menu_conversation` du bureau), le même dans la
+ * liste (appui long) et dans l'en-tête du fil (« … ») : Head, favoris,
+ * épingler, médias, archiver et supprimer (ces deux-là pour Google seulement,
+ * comme au bureau ; supprimer demande une confirmation), puis rechercher.
+ */
+@Composable
+fun MenuConversation(
+    c: Conv,
+    ouvert: Boolean,
+    fermer: () -> Unit,
+    retiree: (String) -> Unit,
+    medias: () -> Unit,
+    rechercher: () -> Unit,
+) {
+    var confirmer by remember { mutableStateOf(false) }
+    val google = c.service == Service.GOOGLE
+    val archivee = c.archived || Depot.archives.any { it.id == c.id }
+    val epinglee = Marques.estEpinglee(c.id)
+    val favori = Marques.estFavori(c.id)
+    val dansHead = Marques.estDansHead(c.id)
+
+    @Composable
+    fun Item(texte: String, icone: ImageVector, couleur: androidx.compose.ui.graphics.Color = P.texteFort, actif: Boolean = true, action: () -> Unit) {
+        DropdownMenuItem(
+            text = { Text(texte, color = if (actif) couleur else P.textePale) },
+            leadingIcon = { Icon(icone, null, tint = if (actif) couleur else P.textePale) },
+            enabled = actif,
+            onClick = {
+                fermer()
+                action()
+            },
+        )
+    }
+
+    DropdownMenu(
+        expanded = ouvert, onDismissRequest = fermer, containerColor = P.menu,
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Item(if (dansHead) t("Retirer du Head") else t("Ajouter au Head"), Icones.grille) { Marques.basculerHead(c.id) }
+        Item(if (favori) t("Retirer des favoris") else t("Ajouter aux favoris"), Icons.Filled.Star) { Marques.basculerFavori(c.id) }
+        Item(if (epinglee) t("Désépingler") else t("Épingler en haut"), Icones.epingle) { Marques.basculerEpingle(c.id) }
+        Item(t("Médias"), Icones.images, action = medias)
+        Item(
+            if (archivee) t("Désarchiver") else t("Archiver"),
+            if (archivee) Icones.desarchiver else Icones.archive,
+            actif = google,
+        ) {
+            Depot.archiver(c.id, !archivee)
+            retiree(c.id)
+        }
+        if (!google) {
+            Text(
+                t("Archiver et supprimer : bientôt pour Messenger."), color = P.textePale, fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp).width(220.dp),
+            )
+        }
+        HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = P.traitFin)
+        Item(t("Supprimer la conversation"), Icons.Filled.Delete, couleur = P.danger, actif = google) { confirmer = true }
+        HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = P.traitFin)
+        Item(t("Rechercher"), Icons.Filled.Search, action = rechercher)
+    }
+
+    if (confirmer) {
+        AlertDialog(
+            onDismissRequest = { confirmer = false },
+            containerColor = P.surface,
+            title = { Text(t("Supprimer la conversation ?"), color = P.texteFort) },
+            text = {
+                Text(
+                    t("Elle sera supprimée de Google Messages, sur ton téléphone aussi. C'est définitif."),
+                    color = P.texte,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmer = false
+                    Depot.supprimer(c.id)
+                    retiree(c.id)
+                }) { Text(t("Supprimer"), color = P.danger) }
+            },
+            dismissButton = { TextButton(onClick = { confirmer = false }) { Text(t("Annuler"), color = P.texte) } },
+        )
+    }
+}

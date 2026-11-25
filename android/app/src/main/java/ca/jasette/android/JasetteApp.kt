@@ -7,5 +7,6 @@ class JasetteApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Langue.charger(this)
+        Marques.charger(this)
     }
 }

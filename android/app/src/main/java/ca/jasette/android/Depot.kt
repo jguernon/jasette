@@ -41,6 +41,13 @@ object Depot {
 
     /** Les conversations (boîte de réception) des deux comptes, les plus récentes d'abord. */
     val convs = mutableStateListOf<Conv>()
+    /** Les conversations archivées, à part (comme `archives` du bureau), les plus récentes d'abord. */
+    val archives = mutableStateListOf<Conv>()
+    /** Les services à qui on a demandé leurs archives, et ceux qui ont répondu. */
+    private val archivesDemandees = mutableStateMapOf<Service, Boolean>()
+    val archivesRecues = mutableStateMapOf<Service, Boolean>()
+    /** La vue Archives a été ouverte : un pont qui (re)devient prêt renvoie ses archives. */
+    private var archivesVoulues = false
     val messages = mutableStateMapOf<String, List<Msg>>()
     /** Y a-t-il des messages plus anciens à charger ? */
     val plusAnciens = mutableStateMapOf<String, Boolean>()
@@ -49,6 +56,12 @@ object Depot {
     /** media_id → fichier téléchargé. */
     val medias = mutableStateMapOf<String, String>()
     val echecs = mutableStateMapOf<String, Boolean>()
+    /** La vignette (jpg) d'une vidéo en cours d'envoi : media_id local → fichier. */
+    val vignettes = mutableStateMapOf<String, String>()
+    /** Les envois pas encore confirmés : tmp_id → commande `send` ou `send_media` (pour Réessayer). */
+    private val envois = HashMap<String, String>()
+    /** Les réactions d'avant une réaction optimiste : id du message → (conv, réactions). */
+    private val reactionsAvant = HashMap<String, Pair<String, List<Reaction>>>()
     private val demandes = HashSet<String>()
 
     /** L'état de chaque compte. */
@@ -122,11 +135,18 @@ object Depot {
     /** Oublie tout ce qui vient des ponts d'avant. */
     private fun vider() {
         convs.clear()
+        archives.clear()
+        archivesDemandees.clear()
+        archivesRecues.clear()
+        archivesVoulues = false
         messages.clear()
         plusAnciens.clear()
         avatars.clear()
         medias.clear()
         echecs.clear()
+        vignettes.clear()
+        envois.clear()
+        reactionsAvant.clear()
         demandes.clear()
         Service.entries.forEach { etats[it] = Etat.DEMARRAGE }
         noms.clear()
@@ -302,6 +322,7 @@ object Depot {
                 etats[service] = apres
                 if (apres == Etat.PRET && avant != Etat.PRET) {
                     commande(service, JSONObject().put("cmd", "conversations").put("count", 50))
+                    pretPourArchives(service)
                 }
                 if (apres == Etat.NON_ASSOCIE) oublier(service)
             }
@@ -317,9 +338,23 @@ object Depot {
                 v.optBoolean("declined") -> besoinNip = false
                 v.chaine("text").isNotEmpty() -> erreurNip = v.chaine("text")
             }
-            "hello", "e2ee", "typing", "search" -> {}
+            "search" -> if (v.chaine("query") == requeteContacts) {
+                // Les résultats de chaque service s'ajoutent (ids préfixés), comme `resultats_meta`.
+                val items = v.optJSONArray("items")
+                val trouves = (0 until (items?.length() ?: 0)).mapNotNull { i ->
+                    val o = items!!.optJSONObject(i) ?: return@mapNotNull null
+                    val id = o.chaine("id")
+                    val nom = o.chaine("name")
+                    if (id.isEmpty() || nom.isEmpty()) null else id to nom
+                }
+                val autres = resultatsMeta.filter { Service.de(it.first) != service }
+                resultatsMeta.clear()
+                resultatsMeta.addAll(autres + trouves)
+            }
+            "hello", "e2ee", "typing" -> {}
             "error" -> {
                 val texte = v.chaine("text")
+                if (v.chaine("where") == "react") annulerReactions()
                 if (texte.isNotEmpty()) erreur = "${service.court} : ${t(texte)}"
             }
             "pont_ferme" -> pontFerme(service)
@@ -336,7 +371,10 @@ object Depot {
                         emoji = null
                         oublier(Service.GOOGLE)
                     }
-                    Etat.PRET -> emoji = null
+                    Etat.PRET -> {
+                        emoji = null
+                        pretPourArchives(Service.GOOGLE)
+                    }
                     else -> {}
                 }
             }
@@ -347,22 +385,31 @@ object Depot {
                 etats[Service.GOOGLE] = Etat.CONNEXION
             }
             "conversations" -> {
-                // Les archives ne sont pas (encore) affichées sur Android.
-                if (v.chaine("folder") == "archive") return
                 val items = v.optJSONArray("items") ?: return
                 erreur = null
                 val vues = HashSet<String>()
                 val nouvelles = (0 until items.length())
                     .map { Conv.de(items.getJSONObject(it)) }
                     .filter { vues.add(it.id) }
-                // Chaque pont ne remplace que ses propres conversations.
-                val gardees = convs.filter { it.service != service }
-                remplacerConvs(gardees + nouvelles)
+                // Chaque pont ne remplace que ses propres conversations (archives à part).
+                if (v.chaine("folder") == "archive" || v.optBoolean("archive")) {
+                    remplacerArchives(archives.filter { it.service != service } + nouvelles)
+                    archivesRecues[service] = true
+                } else {
+                    remplacerConvs(convs.filter { it.service != service } + nouvelles)
+                }
             }
             "conversation" -> {
                 val c = Conv.de(v.optJSONObject("item") ?: return)
                 val autres = convs.filter { it.id != c.id }
-                remplacerConvs(if (c.archived) autres else autres + c)
+                val autresArchives = archives.filter { it.id != c.id }
+                if (c.archived) {
+                    remplacerConvs(autres)
+                    remplacerArchives(autresArchives + c)
+                } else {
+                    remplacerConvs(autres + c)
+                    if (autresArchives.size != archives.size) remplacerArchives(autresArchives)
+                }
                 if (v.optBoolean("open")) aOuvrir = c.id
             }
             "avatar" -> {
@@ -424,6 +471,7 @@ object Depot {
             }
             "error" -> {
                 val texte = v.chaine("text")
+                if (v.chaine("where") == "react") annulerReactions()
                 if (texte.isNotEmpty()) erreur = t(texte)
                 if (v.chaine("where") == "messages") chargement = null
             }
@@ -434,6 +482,8 @@ object Depot {
 
     private fun recevoirMessage(m: Msg) {
         telechargerImages(listOf(m))
+        if (m.tmpId.isNotEmpty()) envois.remove(m.tmpId)
+        reactionsAvant.remove(m.id)
         val ouverteIci = ouverte == m.conv && visible
         val liste = messages[m.conv].orEmpty().toMutableList()
         val i = liste.indexOfFirst { it.id == m.id || (m.tmpId.isNotEmpty() && it.tmpId == m.tmpId) }
@@ -448,13 +498,17 @@ object Depot {
         }
         messages[m.conv] = liste
 
-        val conv = convs.firstOrNull { it.id == m.conv }
+        val conv = conv(m.conv)
         if (conv != null) {
             var c = conv
             if (nouveau || c.time <= m.time) c = c.copy(preview = m.apercu(), fromMe = m.fromMe)
             c = c.copy(time = maxOf(c.time, m.time))
             if (nouveau && !m.fromMe && !ouverteIci) c = c.copy(unread = true)
-            remplacerConvs(convs.map { if (it.id == c.id) c else it })
+            if (convs.any { it.id == c.id }) {
+                remplacerConvs(convs.map { if (it.id == c.id) c else it })
+            } else {
+                remplacerArchives(archives.map { if (it.id == c.id) c else it })
+            }
         }
         if (nouveau && !m.fromMe) {
             if (ouverteIci) {
@@ -471,10 +525,50 @@ object Depot {
         convs.addAll(triee)
     }
 
-    /** Un compte déconnecté : ses conversations disparaissent de la liste. */
+    private fun remplacerArchives(liste: List<Conv>) {
+        val triee = liste.sortedByDescending { it.time }
+        archives.clear()
+        archives.addAll(triee)
+    }
+
+    /** Une conversation, dans la boîte de réception ou les archives. */
+    fun conv(id: String): Conv? = convs.firstOrNull { it.id == id } ?: archives.firstOrNull { it.id == id }
+
+    /** Un compte déconnecté : ses conversations disparaissent de la liste (et des archives). */
     private fun oublier(service: Service) {
         if (convs.any { it.service == service }) remplacerConvs(convs.filter { it.service != service })
+        if (archives.any { it.service == service }) remplacerArchives(archives.filter { it.service != service })
+        archivesDemandees.remove(service)
+        archivesRecues.remove(service)
     }
+
+    // ---- Les archives ----
+
+    /**
+     * La vue Archives s'ouvre : chaque pont prêt reçoit
+     * `{"cmd":"conversations","folder":"archive"}` (une fois ; le bureau fait
+     * pareil au premier clic sur l'icône des archives).
+     */
+    fun chargerArchives() {
+        archivesVoulues = true
+        for (s in Service.entries) if (pret(s)) demanderArchives(s)
+    }
+
+    /** Un pont (re)devient prêt : s'il le faut, il renvoie ses archives. */
+    private fun pretPourArchives(service: Service) {
+        if (!archivesVoulues) return
+        archivesDemandees.remove(service)
+        demanderArchives(service)
+    }
+
+    private fun demanderArchives(service: Service) {
+        if (archivesDemandees.put(service, true) == true) return
+        commande(service, JSONObject().put("cmd", "conversations").put("folder", "archive").put("count", 100))
+    }
+
+    /** Les archives sont-elles encore attendues d'un pont ? */
+    val archivesEnAttente get() = archivesDemandees.keys.any { archivesRecues[it] != true }
+
 
     /** Un pont s'est arrêté tout seul : on le relance après quelques secondes. */
     private fun pontFerme(service: Service) {
@@ -517,6 +611,58 @@ object Depot {
 
     fun pret(service: Service) = etat(service) == Etat.PRET
 
+    /**
+     * Archive ou désarchive (Google seulement, comme au bureau), et le montre
+     * tout de suite ; le téléphone confirmera par une nouvelle « conversation ».
+     */
+    fun archiver(id: String, archiver: Boolean) {
+        commande(JSONObject().put("cmd", "archive").put("conv", id).put("archived", archiver))
+        if (archiver) {
+            val c = convs.firstOrNull { it.id == id } ?: return
+            remplacerConvs(convs.filter { it.id != id })
+            remplacerArchives(archives + c.copy(archived = true))
+        } else {
+            val c = archives.firstOrNull { it.id == id } ?: return
+            remplacerArchives(archives.filter { it.id != id })
+            remplacerConvs(convs + c.copy(archived = false))
+        }
+    }
+
+    // ---- Nouveau message ----
+
+    /** Les personnes trouvées par les ponts Meta pour « À : » : (id préfixé, nom). */
+    val resultatsMeta = mutableStateListOf<Pair<String, String>>()
+    private var requeteContacts = ""
+
+    /** « À : » a changé : Messenger et Instagram cherchent parmi les amis et contacts. */
+    fun chercherContacts(texte: String) {
+        val q = texte.trim()
+        if (q == requeteContacts) return
+        requeteContacts = q
+        resultatsMeta.clear()
+        if (q.length >= 2 && !estNumero(q)) {
+            for (s in Service.META) if (pret(s)) commande(s, JSONObject().put("cmd", "search").put("text", q))
+        }
+    }
+
+    /**
+     * Crée (ou retrouve) une conversation avec la commande `new` : un numéro par
+     * Google Messages, ou l'id d'une personne trouvée sur Messenger ou Instagram.
+     * Le pont répond par une nouvelle « conversation » avec open, qui l'ouvre.
+     */
+    fun nouvelleConversation(service: Service, numero: String) {
+        commande(service, JSONObject().put("cmd", "new").put("number", numero.removePrefix(service.prefixe)))
+    }
+
+    /** Supprime une conversation (Google seulement, comme au bureau). */
+    fun supprimer(id: String) {
+        commande(JSONObject().put("cmd", "delete").put("conv", id))
+        remplacerConvs(convs.filter { it.id != id })
+        remplacerArchives(archives.filter { it.id != id })
+        messages.remove(id)
+        Marques.oublier(id)
+    }
+
     fun envoyer(conv: String, texte: String) {
         val t = texte.trim()
         if (t.isEmpty()) return
@@ -528,7 +674,82 @@ object Depot {
             status = "ENVOI", kind = "", tmpId = tmp, attachments = emptyList(), reactions = emptyList(),
         )
         messages[conv] = messages[conv].orEmpty() + local
-        commande(JSONObject().put("cmd", "send").put("conv", conv).put("text", t).put("tmp_id", tmp))
+        val cmd = JSONObject().put("cmd", "send").put("conv", conv).put("text", t).put("tmp_id", tmp)
+        envois[tmp] = cmd.toString()
+        commande(cmd)
+    }
+
+    // ---- Envoyer des fichiers ----
+
+    /**
+     * Envoie un fichier déjà copié dans le cache de l'app (`send_media`, comme
+     * `envoyer_fichier` du bureau) : une bulle locale « Envoi… » le montre tout
+     * de suite. En mode client, le serveur reçoit d'abord le fichier (`put`).
+     * [texte] part avec le fichier (ponts Meta seulement ; Google l'envoie à part).
+     */
+    fun envoyerFichier(conv: String, fichier: File, mime: String, nom: String, texte: String, vignette: String?) {
+        envoiSeq++
+        val maintenant = System.currentTimeMillis()
+        val tmp = "jasette_${maintenant}_$envoiSeq"
+        val idLocal = "local:${fichier.path}"
+        medias[idLocal] = fichier.path
+        if (vignette != null) vignettes[idLocal] = vignette
+        var w = 0L
+        var h = 0L
+        if (mime.startsWith("image/")) {
+            val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeFile(fichier.path, o)
+            w = o.outWidth.toLong().coerceAtLeast(0)
+            h = o.outHeight.toLong().coerceAtLeast(0)
+        }
+        val piece = Piece(idLocal, "", mime, nom, fichier.length(), w, h)
+        val local = Msg(
+            id = tmp, conv = conv, text = texte, media = "", fromMe = true, sender = "", time = maintenant,
+            status = "ENVOI", kind = "", tmpId = tmp, attachments = listOf(piece), reactions = emptyList(),
+        )
+        messages[conv] = messages[conv].orEmpty() + local
+        val cmd = JSONObject().put("cmd", "send_media").put("conv", conv).put("path", fichier.path)
+            .put("tmp_id", tmp).put("mime", mime)
+        if (texte.isNotEmpty()) cmd.put("text", texte)
+        // commande() retire les préfixes sur place : on garde une copie intacte.
+        envois[tmp] = cmd.toString()
+        commande(cmd)
+    }
+
+    fun peutReessayer(tmp: String) = envois.containsKey(tmp)
+
+    /** Renvoie un message ou un fichier dont l'envoi a échoué (même tmp_id). */
+    fun reessayer(conv: String, tmp: String) {
+        val cmd = envois[tmp] ?: return
+        messages[conv] = messages[conv].orEmpty().map { if (it.tmpId == tmp) it.copy(status = "ENVOI") else it }
+        commande(JSONObject(cmd))
+    }
+
+    // ---- Les réactions ----
+
+    /**
+     * Réagit à un message (`react`), tout de suite à l'écran. Re-choisir ma
+     * réaction la retire (emoji vide). Une erreur `react` revient en arrière.
+     */
+    fun reagir(conv: String, msg: String, emoji: String) {
+        val liste = messages[conv] ?: return
+        val m = liste.firstOrNull { it.id == msg } ?: return
+        if (m.local) return
+        val mienne = m.reactions.firstOrNull { it.fromMe }?.emoji
+        val choix = if (mienne == emoji) "" else emoji
+        if (!reactionsAvant.containsKey(msg)) reactionsAvant[msg] = conv to m.reactions
+        val apres = m.reactions.filter { !it.fromMe } + if (choix.isEmpty()) emptyList() else listOf(Reaction(choix, "", true))
+        messages[conv] = liste.map { if (it.id == msg) it.copy(reactions = apres) else it }
+        commande(JSONObject().put("cmd", "react").put("conv", conv).put("id", msg).put("emoji", choix))
+    }
+
+    /** Un pont a refusé une réaction : les réactions optimistes reviennent en arrière. */
+    private fun annulerReactions() {
+        for ((msg, avant) in reactionsAvant) {
+            val (conv, reactions) = avant
+            messages[conv]?.let { l -> messages[conv] = l.map { if (it.id == msg) it.copy(reactions = reactions) else it } }
+        }
+        reactionsAvant.clear()
     }
 
     private fun telechargerImages(msgs: List<Msg>) {

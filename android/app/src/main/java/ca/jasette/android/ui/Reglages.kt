@@ -134,6 +134,11 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
             ChoixLangue()
 
             Spacer(Modifier.height(12.dp))
+            Text(t("Apparence"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            ChoixVolets()
+            ChoixHeures()
+
+            Spacer(Modifier.height(12.dp))
             Text(t("Icône de l'app"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             ChoixIcone()
 
@@ -440,7 +445,7 @@ private fun Carte(s: Service, boutons: @Composable () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Image(painterResource(iconeService(s)), null, Modifier.size(40.dp).clip(CircleShape))
+            Image(painterResource(iconeService(s)), null, Modifier.size(40.dp).clip(formeLogo(40.dp)))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(s.titre, color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
@@ -549,4 +554,50 @@ private fun ChoixIcone() {
         color = P.textePale,
         fontSize = 12.sp,
     )
+}
+
+/** Réglages → Affichage : deux volets (liste + fil) sur grand écran, Automatique ou Désactivé. */
+@Composable
+private fun ChoixVolets() {
+    val oui = ca.jasette.android.Marques.deuxVolets
+    Text(t("Affichage en deux volets sur grand écran"), color = P.textePale, fontSize = 13.sp)
+    Groupe {
+        ChoixRangee(
+            icone = Icones.volets,
+            titre = t("Automatique"),
+            detail = t("La liste et la conversation côte à côte quand l'écran est large (téléphone déplié, tablette)."),
+            actif = oui,
+        ) { ca.jasette.android.Marques.choisirDeuxVolets(true) }
+        androidx.compose.material3.HorizontalDivider(color = P.fond)
+        ChoixRangee(
+            icone = Icones.pleinEcran,
+            titre = t("Désactivé"),
+            detail = t("La liste, puis la conversation en plein écran, comme sur un téléphone plié."),
+            actif = !oui,
+        ) { ca.jasette.android.Marques.choisirDeuxVolets(false) }
+    }
+}
+
+/** Réglages → Apparence : « Afficher l'heure de chaque message » (comme `details_heures` du bureau). */
+@Composable
+private fun ChoixHeures() {
+    val oui = ca.jasette.android.Marques.heureChaqueMessage
+    Groupe {
+        Row(
+            Modifier.fillMaxWidth().clickable { ca.jasette.android.Marques.choisirHeureChaqueMessage(!oui) }
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(t("Afficher l'heure de chaque message"), color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text(t("Chaque bulle montre son heure, et sa date si ce n'est pas aujourd'hui."), color = P.textePale, fontSize = 13.sp)
+            }
+            Spacer(Modifier.width(12.dp))
+            androidx.compose.material3.Switch(
+                checked = oui,
+                onCheckedChange = { ca.jasette.android.Marques.choisirHeureChaqueMessage(it) },
+                colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = P.accent),
+            )
+        }
+    }
 }

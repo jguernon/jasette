@@ -15,6 +15,15 @@ enum class Service(val titre: String, val court: String, val prefixe: String, va
 
     val meta get() = this != GOOGLE
 
+    /**
+     * La taille d'envoi maximale d'un fichier (octets) : environ 100 Mo pour
+     * Google Messages (RCS), 25 Mo pour Messenger et Instagram.
+     */
+    val limiteEnvoi: Long get() = if (this == GOOGLE) 100L shl 20 else 25L shl 20
+
+    /** Le texte peut-il partir avec un fichier (champ `text` de `send_media`) ? */
+    val texteAvecFichier get() = meta
+
     companion object {
         /** Les services servis par le pont Meta (une copie du pont par service). */
         val META = listOf(MESSENGER, INSTAGRAM)
@@ -154,6 +163,34 @@ fun statut(s: String): String = when {
     else -> ""
 }
 
+/** La coche d'un de mes messages (comme WhatsApp). */
+enum class Coche { AUCUNE, ENVOI, ENVOYE, DISTRIBUE, LU, ECHEC }
+
+/**
+ * Le `status` d'un message, tel que les ponts l'écrivent, ramené à une coche.
+ * Google Messages : noms de `MessageStatusType` (OUTGOING_COMPLETE, _DELIVERED,
+ * _DISPLAYED pour lu, _FAILED_*, _SENDING, _YET_TO_SEND, _RESENDING…).
+ * Les autres ponts : OUTGOING_SENDING, _COMPLETE, _DELIVERED, _READ, et
+ * INCOMING_* pour les messages reçus. Un service qui ne signale pas la
+ * distribution passe de ✓ à ✓✓ accent : jamais de faux ✓✓ gris.
+ * Dans un groupe, le pont passe à « lu » dès qu'une personne a lu.
+ */
+fun coche(m: Msg): Coche {
+    if (!m.fromMe) return Coche.AUCUNE
+    val s = m.status
+    return when {
+        s == "ÉCHEC" -> Coche.ECHEC
+        s == "ENVOI" -> Coche.ENVOI
+        s.startsWith("INCOMING") -> Coche.AUCUNE
+        s.contains("FAILED") || s.contains("CANCELED") || s.contains("CANCELLED") -> Coche.ECHEC
+        s.contains("READ") || s.contains("DISPLAYED") -> Coche.LU
+        s.contains("DELIVERED") -> Coche.DISTRIBUE
+        s.contains("SENDING") || s.contains("YET_TO_SEND") || s.contains("RESENDING") || s.contains("AWAITING_RETRY") -> Coche.ENVOI
+        s.contains("COMPLETE") || s.contains("SENT") -> Coche.ENVOYE
+        else -> Coche.AUCUNE
+    }
+}
+
 /** L'état d'un pont, tel qu'annoncé par ses nouvelles « state ». */
 enum class Etat(private val fr: String) {
     DEMARRAGE("Démarrage"),
@@ -222,3 +259,13 @@ fun deprefixerMeta(v: JSONObject): Service? {
     }
     return service
 }
+
+/** Un numéro de téléphone tapé (comme `est_numero` du bureau). */
+fun estNumero(s: String): Boolean {
+    val chiffres = s.count { it.isDigit() }
+    return chiffres >= 3 && s.all { it.isDigit() || it in " +-()." }
+}
+
+/** Pour chercher : minuscules et sans accents (comme `plier` du bureau). */
+fun plier(s: String): String =
+    java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "")

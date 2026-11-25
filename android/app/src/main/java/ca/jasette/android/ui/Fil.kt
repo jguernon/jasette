@@ -2,6 +2,36 @@ package ca.jasette.android.ui
 
 import ca.jasette.android.t
 import android.app.Activity
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import ca.jasette.android.Coche
+import ca.jasette.android.coche
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -46,6 +76,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
@@ -58,19 +89,102 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.app.NotificationManagerCompat
 import ca.jasette.android.Appels
 import ca.jasette.android.Depot
+import ca.jasette.android.Marques
+import ca.jasette.android.plier
+import androidx.compose.foundation.border
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import kotlinx.coroutines.launch
 import ca.jasette.android.Msg
 import ca.jasette.android.Piece
 import ca.jasette.android.PontService
 import ca.jasette.android.Service
 import ca.jasette.android.statut
 
-/** Le fil d'une conversation : bulles, images, réactions, et la barre d'envoi. */
+/**
+ * Le fil d'une conversation : bulles, images, réactions, et la barre d'envoi.
+ * [volet] : affiché à droite de la liste (deux volets) ; pas de flèche retour alors.
+ * [retiree] : la conversation vient d'être archivée ou supprimée par le menu.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun Fil(activite: Activity, id: String, retour: () -> Unit) {
-    val conv = Depot.convs.firstOrNull { it.id == id }
+fun Fil(activite: Activity, id: String, retour: () -> Unit, volet: Boolean = false, retiree: (String) -> Unit = {}) {
+    val conv = Depot.conv(id)
     val liste = Depot.messages[id].orEmpty()
     var plein by remember { mutableStateOf<String?>(null) }
+    var menu by remember { mutableStateOf(false) }
+    var galerie by remember { mutableStateOf(false) }
+    // La recherche dans les messages chargés : la requête et le message courant.
+    var recherche by remember { mutableStateOf(false) }
+    var requete by remember { mutableStateOf("") }
+    var courant by remember { mutableStateOf<String?>(null) }
+    var attendPlus by remember { mutableStateOf(false) }
+    val etat = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
+    // Médias ou Rechercher choisis dans le menu de la liste.
+    val demande = DemandeFil.action
+    LaunchedEffect(demande) {
+        if (demande != null && demande.first == id) {
+            if (demande.second == "medias") galerie = true else recherche = true
+            DemandeFil.action = null
+        }
+    }
+
+    // Les résultats, du plus récent au plus ancien.
+    val q = plier(requete.trim())
+    val resultats = if (!recherche || q.isEmpty()) emptyList()
+        else liste.filter { plier(it.text).contains(q) }.map { it.id }.asReversed()
+    fun allerA(mid: String) {
+        courant = mid
+        val i = liste.indexOfFirst { it.id == mid }
+        if (i >= 0) scope.launch { etat.animateScrollToItem(liste.size - 1 - i) }
+    }
+    // Plus d'historique est arrivé : on passe au résultat plus ancien suivant.
+    LaunchedEffect(resultats.size, liste.size) {
+        if (attendPlus && Depot.chargement != id) {
+            val k = resultats.indexOf(courant)
+            if (k + 1 < resultats.size) {
+                attendPlus = false
+                allerA(resultats[k + 1])
+            } else if (Depot.plusAnciens[id] == true) {
+                Depot.plusVieux(id)
+            } else {
+                attendPlus = false
+            }
+        }
+    }
+    // Une nouvelle requête : le résultat le plus récent.
+    LaunchedEffect(q) {
+        attendPlus = false
+        courant = null
+        resultats.firstOrNull()?.let { allerA(it) }
+    }
+    fun plusAncien() {
+        val k = resultats.indexOf(courant)
+        if (k + 1 < resultats.size) {
+            allerA(resultats[k + 1])
+        } else if (Depot.plusAnciens[id] == true && q.isNotEmpty()) {
+            // Au-delà des messages chargés : on charge plus d'historique.
+            attendPlus = true
+            Depot.plusVieux(id)
+        }
+    }
+    fun plusRecent() {
+        val k = resultats.indexOf(courant)
+        if (k > 0) allerA(resultats[k - 1])
+    }
 
     // Ouvrir : charge les messages, marque lu, retire la notification.
     DisposableEffect(id) {
@@ -81,10 +195,10 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit) {
 
     Scaffold(
         containerColor = P.fil,
-        topBar = {
+        topBar = { Column {
             TopAppBar(
                 navigationIcon = {
-                    IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Filled.ArrowBack, t("Retour")) }
+                    if (!volet) IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Filled.ArrowBack, t("Retour")) }
                 },
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -102,13 +216,44 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit) {
                         }
                     }
                 },
-                actions = { if (conv != null) BoutonsAppel(activite, conv) },
+                actions = {
+                    if (conv != null) {
+                        BoutonsAppel(activite, conv)
+                        Box {
+                            IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, t("Plus")) }
+                            MenuConversation(
+                                conv, menu, fermer = { menu = false }, retiree = retiree,
+                                medias = { galerie = true },
+                                rechercher = { recherche = true },
+                            )
+                        }
+                    }
+                },
                 colors = barreCouleurs(),
             )
-        },
+            if (recherche) {
+                val k = resultats.indexOf(courant)
+                BarreRecherche(
+                    requete, { requete = it },
+                    compteur = when {
+                        q.isEmpty() -> ""
+                        attendPlus -> t("Recherche…")
+                        resultats.isEmpty() -> t("Aucun résultat")
+                        else -> "${if (k >= 0) k + 1 else 0} / ${resultats.size}"
+                    },
+                    plusAncien = ::plusAncien,
+                    plusRecent = ::plusRecent,
+                    peutAncien = k + 1 < resultats.size || (Depot.plusAnciens[id] == true && q.isNotEmpty()),
+                    peutRecent = k > 0,
+                    fermer = {
+                        recherche = false
+                        requete = ""
+                    },
+                )
+            }
+        } },
         bottomBar = { Saisie(id, actif = Depot.pret(Service.de(id)) && conv?.readOnly != true) },
     ) { marges ->
-        val etat = rememberLazyListState()
         // Le plus récent en bas : la liste est inversée.
         val inverse = liste.asReversed()
         LaunchedEffect(liste.lastOrNull()?.id) { if (liste.isNotEmpty()) etat.animateScrollToItem(0) }
@@ -126,7 +271,10 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit) {
                     if (avant == null || jourDe(avant.time) != jourDe(m.time)) Jour(m.time)
                     val premier = avant == null || avant.fromMe != m.fromMe || avant.sender != m.sender
                     val dernier = apres == null || apres.fromMe != m.fromMe || apres.sender != m.sender
-                    Message(m, groupe = conv?.group == true, premier = premier, dernier = dernier) { plein = it }
+                    Message(
+                        m, groupe = conv?.group == true, premier = premier, dernier = dernier,
+                        surligne = if (recherche) q else "", courant = m.id == courant,
+                    ) { plein = it }
                 }
             }
             item {
@@ -140,6 +288,8 @@ fun Fil(activite: Activity, id: String, retour: () -> Unit) {
             }
         }
     }
+
+    if (galerie) Galerie(liste, fermer = { galerie = false }) { plein = it }
 
     plein?.let { chemin ->
         Dialog(onDismissRequest = { plein = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -176,11 +326,54 @@ private fun Jour(ms: Long) {
     }
 }
 
+/** Les réactions rapides de la barre (appui long sur une bulle). */
+private val RAPIDES = listOf("❤️", "😂", "😮", "😢", "😡", "👍")
+
+/** La grille du « + » : des emojis courants. */
+private val EMOJIS = (
+    "😀 😃 😄 😁 😆 😅 🤣 😂 🙂 😉 😊 😇 🥰 😍 🤩 😘 😋 😛 😜 🤪 😝 🤗 🤭 🤫 🤔 🤐 🤨 😐 😑 😶 😏 😒 🙄 " +
+        "😬 😌 😔 😪 😴 😷 🤒 🤕 🤢 🤮 🥵 🥶 🥴 😵 🤯 🤠 🥳 😎 🤓 🧐 😕 😟 🙁 😮 😯 😲 😳 🥺 😦 😧 😨 😰 😥 " +
+        "😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 😈 💀 💩 🤡 👻 👽 🤖 😺 🙈 🙉 🙊 💋 💌 💘 💝 💖 💗 💓 💞 " +
+        "💕 💟 ❣️ 💔 ❤️ 🧡 💛 💚 💙 💜 🤎 🖤 🤍 💯 💢 💥 💫 💦 💨 👋 🤚 ✋ 👌 🤌 🤏 ✌️ 🤞 🤟 🤘 🤙 👈 👉 👆 " +
+        "👇 ☝️ 👍 👎 ✊ 👊 🤛 🤜 👏 🙌 👐 🤲 🙏 💪 🔥 ✨ 🎉 🎊 🎂 🎁 ⭐ 🌟 ☀️ 🌈 ⚡ ❄️ 🍕 🍔 🍟 🍺 🍷 ☕ ✅ ❌ ❓ ❗"
+    ).split(" ").filter { it.isNotBlank() }
+
+/** Le bleu clair des coches « lu » sur une bulle déjà couleur accent. */
+private val ACCENT_SUR_BULLE = Color(0xFFA8DCFF)
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun Message(m: Msg, groupe: Boolean, premier: Boolean, dernier: Boolean, agrandir: (String) -> Unit) {
+private fun Message(
+    m: Msg,
+    groupe: Boolean,
+    premier: Boolean,
+    dernier: Boolean,
+    surligne: String,
+    courant: Boolean,
+    agrandir: (String) -> Unit,
+) {
+    // « Afficher l'heure de chaque message » : l'heure (et la date) sur chaque bulle.
+    val details = Marques.heureChaqueMessage
+    val quand = if (details && jourDe(m.time) != java.time.LocalDate.now()) "${jour(m.time)} · ${heure(m.time)}" else heure(m.time)
     val alignement = if (m.fromMe) Alignment.End else Alignment.Start
+    val c = coche(m)
+    val echec = c == Coche.ECHEC
+    val haptique = LocalHapticFeedback.current
+    val presse = LocalClipboardManager.current
+    var barre by remember { mutableStateOf(false) }
+    var grille by remember { mutableStateOf(false) }
+    var qui by remember { mutableStateOf(false) }
+    // L'appui long : la barre des réactions (pas sur un envoi pas encore confirmé).
+    val appuiLong = {
+        if (!m.local) {
+            haptique.performHapticFeedback(HapticFeedbackType.LongPress)
+            barre = true
+        }
+    }
+    val reessayer = { Depot.reessayer(m.conv, m.tmpId) }
+    val aReactions = m.reactions.isNotEmpty()
     Column(
-        Modifier.fillMaxWidth().padding(top = if (premier) 8.dp else 2.dp),
+        Modifier.fillMaxWidth().padding(top = if (premier) 8.dp else 2.dp, bottom = if (aReactions) 14.dp else 0.dp),
         horizontalAlignment = alignement,
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
@@ -190,119 +383,572 @@ private fun Message(m: Msg, groupe: Boolean, premier: Boolean, dernier: Boolean,
                 modifier = Modifier.padding(start = 12.dp),
             )
         }
-        for (p in m.attachments) {
-            if (p.estImage) PieceImage(p, agrandir) else PieceAutre(p.name.ifEmpty { p.mime })
-        }
-        if (m.attachments.isEmpty() && m.media.isNotEmpty()) PieceAutre(m.media)
-        val echec = statut(m.status) == t("Échec")
-        if (m.text.isNotEmpty()) {
-            val rayon = 18.dp
-            val forme = if (m.fromMe) {
-                RoundedCornerShape(rayon, rayon, if (dernier) 4.dp else rayon, rayon)
-            } else {
-                RoundedCornerShape(rayon, rayon, rayon, if (dernier) 4.dp else rayon)
+        // Le corps (pièces et bulle), avec la pastille des réactions à cheval sur son bord inférieur.
+        Box {
+            Column(horizontalAlignment = alignement, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                for (p in m.attachments) {
+                    if (p.estImage || Depot.vignettes.containsKey(p.mediaId)) {
+                        PieceImage(p, envoi = c == Coche.ENVOI && m.local, appuiLong = appuiLong, agrandir = agrandir)
+                    } else {
+                        PieceAutre(p.name.ifEmpty { p.mime }, Modifier.combinedClickable(onClick = {}, onLongClick = appuiLong))
+                    }
+                }
+                if (m.attachments.isEmpty() && m.media.isNotEmpty()) PieceAutre(m.media)
+                if (m.text.isNotEmpty()) {
+                    val rayon = 18.dp
+                    val forme = if (m.fromMe) {
+                        RoundedCornerShape(rayon, rayon, if (dernier) 4.dp else rayon, rayon)
+                    } else {
+                        RoundedCornerShape(rayon, rayon, rayon, if (dernier) 4.dp else rayon)
+                    }
+                    Column(
+                        Modifier.widthIn(max = 300.dp).clip(forme).background(if (m.fromMe) P.accent else P.surface)
+                            .let { if (courant) it.border(2.dp, JAUNE, forme) else it }
+                            .combinedClickable(onClick = { if (echec) reessayer() }, onLongClick = appuiLong)
+                            .padding(horizontal = 13.dp, vertical = 8.dp),
+                    ) {
+                        Text(surligner(m.text, surligne, courant), color = P.texteFort, fontSize = 15.sp)
+                        Row(
+                            Modifier.align(Alignment.End),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            Text(quand, color = if (m.fromMe) P.heureEnvoyee else P.heureRecue, fontSize = 11.sp)
+                            IconeCoche(c, surBulle = true)
+                        }
+                    }
+                }
             }
-            Column(
-                Modifier.widthIn(max = 300.dp).clip(forme).background(if (m.fromMe) P.accent else P.surface)
-                    .padding(horizontal = 13.dp, vertical = 8.dp),
-            ) {
-                Text(m.text, color = if (m.fromMe) P.texteFort else P.texteFort, fontSize = 15.sp)
-                Text(
-                    heure(m.time) + (if (m.fromMe) statut(m.status).let { if (it.isEmpty()) "" else " · $it" } else ""),
-                    color = if (echec) P.danger else if (m.fromMe) P.heureEnvoyee else P.heureRecue,
-                    fontSize = 11.sp, modifier = Modifier.align(Alignment.End),
+            if (aReactions) {
+                Reactions(
+                    m,
+                    Modifier.align(if (m.fromMe) Alignment.BottomEnd else Alignment.BottomStart)
+                        .offset(x = if (m.fromMe) (-10).dp else 10.dp, y = 12.dp),
+                ) { qui = true }
+            }
+            if (barre) {
+                BarreReactions(
+                    m,
+                    fermer = { barre = false },
+                    choisir = { e ->
+                        barre = false
+                        Depot.reagir(m.conv, m.id, e)
+                    },
+                    plus = {
+                        barre = false
+                        grille = true
+                    },
+                    copier = if (m.text.isNotEmpty()) {
+                        {
+                            barre = false
+                            presse.setText(AnnotatedString(m.text))
+                        }
+                    } else {
+                        null
+                    },
                 )
             }
-        } else if (dernier || echec) {
+        }
+        // Sous les pièces seules : l'heure et la coche (toujours pour mes messages).
+        if (m.text.isEmpty() && (dernier || details || m.fromMe)) {
+            Row(
+                Modifier.padding(horizontal = 6.dp)
+                    .let { if (echec) it.clickable(onClick = reessayer) else it },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(quand, color = P.textePale, fontSize = 11.sp)
+                IconeCoche(c, surBulle = false)
+            }
+        }
+        if (echec && Depot.peutReessayer(m.tmpId)) {
             Text(
-                heure(m.time) + if (echec) " · ${t("Échec")}" else "",
-                color = if (echec) P.danger else P.textePale, fontSize = 11.sp,
-                modifier = Modifier.padding(horizontal = 6.dp),
+                t("Échec de l'envoi · Réessayer"), color = P.danger, fontSize = 12.sp,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = reessayer)
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
-        if (m.reactions.isNotEmpty()) Reactions(m)
+    }
+    if (grille) GrilleEmojis(fermer = { grille = false }) { e ->
+        grille = false
+        Depot.reagir(m.conv, m.id, e)
+    }
+    if (qui) QuiAReagi(m) { qui = false }
+}
+
+/**
+ * La coche d'un de mes messages : ⏱ envoi, ✓ envoyé, ✓✓ gris distribué,
+ * ✓✓ accent lu, ⚠ rouge échec (on touche la bulle pour réessayer).
+ */
+@Composable
+private fun IconeCoche(c: Coche, surBulle: Boolean) {
+    val pale = if (surBulle) P.heureEnvoyee else P.textePale
+    val lu = if (surBulle) ACCENT_SUR_BULLE else P.accent
+    val (icone, couleur, nom) = when (c) {
+        Coche.AUCUNE -> return
+        Coche.ENVOI -> Triple(Icones.horloge, pale, t("Envoi…"))
+        Coche.ENVOYE -> Triple(Icons.Filled.Check, pale, t("Envoyé"))
+        Coche.DISTRIBUE -> Triple(Icones.doubleCoche, pale, t("Distribué"))
+        Coche.LU -> Triple(Icones.doubleCoche, lu, t("Lu"))
+        Coche.ECHEC -> Triple(Icons.Filled.Warning, if (surBulle) Color(0xFFFFB4AE) else P.danger, t("Échec"))
+    }
+    Icon(icone, nom, tint = couleur, modifier = Modifier.size(14.dp))
+}
+
+/** La barre flottante des réactions, au-dessus de la bulle. */
+@Composable
+private fun BarreReactions(m: Msg, fermer: () -> Unit, choisir: (String) -> Unit, plus: () -> Unit, copier: (() -> Unit)?) {
+    val mienne = m.reactions.firstOrNull { it.fromMe }?.emoji
+    val hauteur = with(LocalDensity.current) { 58.dp.roundToPx() }
+    Popup(
+        alignment = if (m.fromMe) Alignment.TopEnd else Alignment.TopStart,
+        offset = IntOffset(0, -hauteur),
+        onDismissRequest = fermer,
+        properties = PopupProperties(focusable = true),
+    ) {
+        Row(
+            Modifier.shadow(8.dp, RoundedCornerShape(26.dp)).clip(RoundedCornerShape(26.dp)).background(P.menu)
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            for (e in RAPIDES) {
+                Box(
+                    Modifier.size(42.dp).clip(CircleShape)
+                        .background(if (e == mienne) P.accent.copy(alpha = 0.35f) else Color.Transparent)
+                        .clickable { choisir(e) },
+                    contentAlignment = Alignment.Center,
+                ) { Text(e, fontSize = 24.sp) }
+            }
+            Box(
+                Modifier.size(38.dp).clip(CircleShape).background(P.choisi).clickable(onClick = plus),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Add, t("Plus de réactions"), tint = P.texteFort, modifier = Modifier.size(20.dp)) }
+            if (copier != null) {
+                IconButton(onClick = copier) { Icon(Icones.copier, t("Copier le texte"), tint = P.icone) }
+            }
+        }
     }
 }
 
-/** Les réactions groupées par emoji, sous la bulle. */
+/** Le « + » des réactions : une grille simple d'emojis. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Reactions(m: Msg) {
+private fun GrilleEmojis(fermer: () -> Unit, choisir: (String) -> Unit) {
+    ModalBottomSheet(onDismissRequest = fermer, containerColor = P.surface) {
+        LazyVerticalGrid(
+            GridCells.Adaptive(48.dp),
+            Modifier.fillMaxWidth().heightIn(max = 420.dp).padding(horizontal = 8.dp),
+        ) {
+            items(EMOJIS) { e ->
+                Box(
+                    Modifier.size(48.dp).clip(CircleShape).clickable { choisir(e) },
+                    contentAlignment = Alignment.Center,
+                ) { Text(e, fontSize = 26.sp) }
+            }
+        }
+        Spacer(Modifier.size(24.dp))
+    }
+}
+
+/** Toucher la pastille : qui a réagi avec quoi. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun QuiAReagi(m: Msg, fermer: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = fermer, containerColor = P.surface) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+            Text(
+                t("Réactions"), color = P.texteFort, fontWeight = FontWeight.Bold, fontSize = 17.sp,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            )
+            for (r in m.reactions.sortedByDescending { it.fromMe }) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(r.emoji, fontSize = 24.sp)
+                    Spacer(Modifier.width(14.dp))
+                    Text(
+                        if (r.fromMe) t("Vous") else r.sender.ifEmpty { t("Quelqu'un") },
+                        color = P.texteFort, modifier = Modifier.weight(1f),
+                    )
+                    if (r.fromMe) {
+                        TextButton(onClick = {
+                            fermer()
+                            Depot.reagir(m.conv, m.id, r.emoji)
+                        }) { Text(t("Retirer"), color = P.accent) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * La pastille des réactions, embarquée sur le bas de la bulle : emojis groupés
+ * avec leur compte, les miennes légèrement accentuées.
+ */
+@Composable
+private fun Reactions(m: Msg, modifier: Modifier, toucher: () -> Unit) {
     val groupes = m.reactions.groupBy { it.emoji }
+    val forme = RoundedCornerShape(50)
     Row(
-        Modifier.padding(horizontal = 6.dp).clip(RoundedCornerShape(50)).background(P.surface)
-            .padding(horizontal = 8.dp, vertical = 2.dp),
+        modifier.clip(forme).background(P.surface).border(1.5.dp, P.fil, forme).clickable(onClick = toucher)
+            .padding(horizontal = 7.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        for ((emoji, qui) in groupes) {
-            Text(emoji, fontSize = 15.sp)
-            if (qui.size > 1) Text(qui.size.toString(), color = P.texte, fontSize = 12.sp)
+        for ((emoji, quiLaMis) in groupes) {
+            val mienne = quiLaMis.any { it.fromMe }
+            Row(
+                Modifier.clip(forme).background(if (mienne) P.accent.copy(alpha = 0.30f) else Color.Transparent)
+                    .padding(horizontal = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(emoji, fontSize = 14.sp)
+                if (quiLaMis.size > 1) {
+                    Spacer(Modifier.width(2.dp))
+                    Text(quiLaMis.size.toString(), color = if (mienne) P.texteFort else P.texte, fontSize = 12.sp)
+                }
+            }
         }
     }
 }
 
+/** Une image (ou la vignette d'une vidéo en cours d'envoi, avec ▶). */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PieceImage(p: Piece, agrandir: (String) -> Unit) {
-    val chemin = Depot.medias[p.mediaId]
+private fun PieceImage(p: Piece, envoi: Boolean, appuiLong: () -> Unit, agrandir: (String) -> Unit) {
+    val vignette = Depot.vignettes[p.mediaId]
+    val chemin = if (p.estImage) Depot.medias[p.mediaId] else vignette
     val ratio = if (p.w > 0 && p.h > 0) (p.w.toFloat() / p.h).coerceIn(0.5f, 2.5f) else 1.3f
     val cadre = Modifier.widthIn(max = 260.dp).fillMaxWidth(0.7f).aspectRatio(ratio)
         .clip(RoundedCornerShape(16.dp)).background(P.surface)
-    if (chemin != null) {
-        ImageFichier(chemin, cadre.clickable { agrandir(chemin) })
-    } else {
-        Box(cadre, contentAlignment = Alignment.Center) {
-            if (Depot.echecs.containsKey(p.mediaId)) {
-                Text(t("Image indisponible"), color = P.textePale, fontSize = 12.sp)
-            } else {
-                CircularProgressIndicator(Modifier.size(22.dp), color = P.textePale, strokeWidth = 2.dp)
+    Box(contentAlignment = Alignment.Center) {
+        if (chemin != null) {
+            ImageFichier(
+                chemin,
+                cadre.combinedClickable(onClick = { if (p.estImage) agrandir(chemin) }, onLongClick = appuiLong),
+            )
+        } else {
+            Box(cadre.combinedClickable(onClick = {}, onLongClick = appuiLong), contentAlignment = Alignment.Center) {
+                if (Depot.echecs.containsKey(p.mediaId)) {
+                    Text(t("Image indisponible"), color = P.textePale, fontSize = 12.sp)
+                } else {
+                    CircularProgressIndicator(Modifier.size(22.dp), color = P.textePale, strokeWidth = 2.dp)
+                }
+            }
+        }
+        if (vignette != null && !p.estImage) {
+            Icon(
+                Icons.Filled.PlayArrow, null, tint = Color.White,
+                modifier = Modifier.size(44.dp).clip(CircleShape).background(Color(0x88000000)).padding(6.dp),
+            )
+        }
+        // Envoi en cours : un voile et une roue (la progression n'est pas connue).
+        if (envoi && chemin != null) {
+            Box(Modifier.matchParentSize().clip(RoundedCornerShape(16.dp)).background(Color(0x66000000)), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(Modifier.size(30.dp), color = Color.White, strokeWidth = 3.dp)
             }
         }
     }
 }
 
 @Composable
-private fun PieceAutre(nom: String) {
+private fun PieceAutre(nom: String, modifier: Modifier = Modifier) {
     Text(
         "📎 $nom", color = P.texte, fontSize = 13.sp,
-        modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(P.surface).padding(horizontal = 12.dp, vertical = 8.dp),
+        modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(P.surface).then(modifier)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
     )
 }
 
-/** La barre d'envoi : un champ arrondi et le bouton d'envoi. */
+/**
+ * La barre d'envoi : le bouton (+) des pièces jointes, le champ arrondi et le
+ * bouton d'envoi. Les pièces choisies s'affichent en vignettes au-dessus, avec
+ * un ✕ pour retirer chacune, jusqu'à l'envoi.
+ */
 @Composable
 private fun Saisie(conv: String, actif: Boolean) {
+    val ctx = LocalContext.current
     var texte by remember(conv) { mutableStateOf("") }
-    Row(
-        Modifier.fillMaxWidth().background(P.fil).navigationBarsPadding().imePadding()
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.Bottom,
-    ) {
-        Box(
-            Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(22.dp)).background(P.surface)
-                .padding(horizontal = 16.dp, vertical = 11.dp),
-            contentAlignment = Alignment.CenterStart,
+    val pieces = remember(conv) { mutableStateListOf<Uri>() }
+    var choix by remember { mutableStateOf(false) }
+    var erreurEnvoi by remember(conv) { mutableStateOf<String?>(null) }
+    var capture by remember { mutableStateOf<Uri?>(null) }
+    fun ajouter(l: List<Uri>) {
+        erreurEnvoi = null
+        for (u in l) if (u !in pieces) pieces.add(u)
+    }
+    val galerie = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(10)) { ajouter(it) }
+    val fichiers = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { ajouter(it) }
+    val photo = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        capture?.let { if (ok) ajouter(listOf(it)) }
+    }
+    val video = rememberLauncherForActivityResult(ActivityResultContracts.CaptureVideo()) { ok ->
+        capture?.let { if (ok) ajouter(listOf(it)) }
+    }
+    Column(Modifier.fillMaxWidth().background(P.fil).navigationBarsPadding().imePadding()) {
+        erreurEnvoi?.let {
+            Text(it, color = P.danger, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
+        }
+        if (pieces.isNotEmpty()) {
+            LazyRow(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(pieces.toList(), key = { it.toString() }) { u ->
+                    VignetteAEnvoyer(u) { pieces.remove(u) }
+                }
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.Bottom,
         ) {
-            if (texte.isEmpty()) Text(if (actif) t("Message") else t("Envoi impossible pour l'instant"), color = P.textePale)
-            BasicTextField(
-                texte, { texte = it },
-                enabled = actif,
-                textStyle = TextStyle(color = P.texteFort, fontSize = 16.sp),
-                cursorBrush = SolidColor(P.accent),
-                maxLines = 6,
-                modifier = Modifier.fillMaxWidth(),
+            Box {
+                IconButton(onClick = { choix = true }, enabled = actif, modifier = Modifier.size(44.dp)) {
+                    Icon(Icons.Filled.Add, t("Joindre"), tint = if (actif) P.icone else P.choisi)
+                }
+                DropdownMenu(expanded = choix, onDismissRequest = { choix = false }, containerColor = P.menu) {
+                    DropdownMenuItem(
+                        text = { Text(t("Photos et vidéos")) },
+                        leadingIcon = { Icon(Icones.images, null) },
+                        onClick = {
+                            choix = false
+                            galerie.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(t("Appareil photo")) },
+                        leadingIcon = { Icon(Icones.photo, null) },
+                        onClick = {
+                            choix = false
+                            Envoi.uriCapture(ctx, "jpg").let {
+                                capture = it
+                                photo.launch(it)
+                            }
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(t("Vidéo")) },
+                        leadingIcon = { Icon(Icones.video, null) },
+                        onClick = {
+                            choix = false
+                            Envoi.uriCapture(ctx, "mp4").let {
+                                capture = it
+                                video.launch(it)
+                            }
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(t("Fichier")) },
+                        leadingIcon = { Icon(Icones.fichier, null) },
+                        onClick = {
+                            choix = false
+                            fichiers.launch(arrayOf("*/*"))
+                        },
+                    )
+                }
+            }
+            Box(
+                Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(22.dp)).background(P.surface)
+                    .padding(horizontal = 16.dp, vertical = 11.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                if (texte.isEmpty()) Text(if (actif) t("Message") else t("Envoi impossible pour l'instant"), color = P.textePale)
+                BasicTextField(
+                    texte, { texte = it },
+                    enabled = actif,
+                    textStyle = TextStyle(color = P.texteFort, fontSize = 16.sp),
+                    cursorBrush = SolidColor(P.accent),
+                    maxLines = 6,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            val peut = actif && (texte.isNotBlank() || pieces.isNotEmpty())
+            IconButton(
+                onClick = {
+                    val l = pieces.toList()
+                    val tx = texte.trim()
+                    pieces.clear()
+                    texte = ""
+                    erreurEnvoi = null
+                    if (l.isEmpty()) {
+                        Depot.envoyer(conv, tx)
+                    } else {
+                        Envoi.envoyer(ctx, conv, l, tx) { erreurEnvoi = it }
+                    }
+                },
+                enabled = peut,
+                modifier = Modifier.size(44.dp).clip(CircleShape).background(if (peut) P.accent else P.surface),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Send, t("Envoyer"), tint = if (peut) P.texteFort else P.textePale)
+            }
+        }
+    }
+}
+
+/** La vignette d'une pièce choisie, avant l'envoi, avec son ✕. */
+@Composable
+private fun VignetteAEnvoyer(u: Uri, retirer: () -> Unit) {
+    val ctx = LocalContext.current
+    val image by produceState<ImageBitmap?>(null, u) { value = Envoi.vignette(ctx, u) }
+    val nom = remember(u) { Envoi.nom(ctx, u) }
+    val video = remember(u) { ctx.contentResolver.getType(u)?.startsWith("video/") == true }
+    Box(Modifier.size(72.dp)) {
+        val cadre = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(P.surface)
+        val img = image
+        if (img != null) {
+            androidx.compose.foundation.Image(img, nom, cadre, contentScale = ContentScale.Crop)
+        } else {
+            Box(cadre.padding(6.dp), contentAlignment = Alignment.Center) {
+                Text("📎 $nom", color = P.texte, fontSize = 10.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        if (video) {
+            Icon(
+                Icons.Filled.PlayArrow, null, tint = Color.White,
+                modifier = Modifier.align(Alignment.Center).size(26.dp).clip(CircleShape).background(Color(0x88000000)),
             )
         }
-        Spacer(Modifier.width(8.dp))
-        val peut = actif && texte.isNotBlank()
-        IconButton(
-            onClick = {
-                Depot.envoyer(conv, texte)
-                texte = ""
-            },
-            enabled = peut,
-            modifier = Modifier.size(44.dp).clip(CircleShape).background(if (peut) P.accent else P.surface),
+        Icon(
+            Icons.Filled.Close, t("Retirer"), tint = Color.White,
+            modifier = Modifier.align(Alignment.TopEnd).padding(3.dp).size(20.dp).clip(CircleShape)
+                .background(Color(0xAA000000)).clickable(onClick = retirer).padding(2.dp),
+        )
+    }
+}
+
+/** Le jaune des résultats de recherche. */
+private val JAUNE = Color(0xFFFFD60A)
+
+/**
+ * Le texte avec les passages qui correspondent à [q] (déjà « plié ») surlignés,
+ * plus fort dans le message [courant].
+ */
+private fun surligner(texte: String, q: String, courant: Boolean): AnnotatedString {
+    if (q.isEmpty()) return AnnotatedString(texte)
+    // Le texte plié, caractère par caractère, avec l'indice d'origine de chacun.
+    val plie = StringBuilder()
+    val origine = ArrayList<Int>()
+    texte.forEachIndexed { i, ch ->
+        for (x in plier(ch.toString())) {
+            plie.append(x)
+            origine.add(i)
+        }
+    }
+    val style = if (courant) SpanStyle(background = JAUNE, color = Color.Black) else SpanStyle(background = JAUNE.copy(alpha = 0.35f))
+    return buildAnnotatedString {
+        append(texte)
+        var d = plie.indexOf(q)
+        while (d >= 0) {
+            val f = d + q.length - 1
+            addStyle(style, origine[d], origine[f] + 1)
+            d = plie.indexOf(q, d + q.length)
+        }
+    }
+}
+
+/** Le champ de recherche en haut du fil : compteur « 2 / 7 », précédent et suivant. */
+@Composable
+private fun BarreRecherche(
+    texte: String,
+    changer: (String) -> Unit,
+    compteur: String,
+    plusAncien: () -> Unit,
+    plusRecent: () -> Unit,
+    peutAncien: Boolean,
+    peutRecent: Boolean,
+    fermer: () -> Unit,
+) {
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    Row(
+        Modifier.fillMaxWidth().background(P.fond).padding(start = 12.dp, end = 4.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            Modifier.weight(1f).heightIn(min = 40.dp).clip(RoundedCornerShape(20.dp)).background(P.surface)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.AutoMirrored.Filled.Send, t("Envoyer"), tint = if (peut) P.texteFort else P.textePale)
+            Icon(Icons.Filled.Search, null, tint = P.textePale, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                if (texte.isEmpty()) Text(t("Rechercher dans la conversation"), color = P.textePale, fontSize = 15.sp)
+                BasicTextField(
+                    texte, changer, singleLine = true,
+                    textStyle = TextStyle(color = P.texteFort, fontSize = 15.sp),
+                    cursorBrush = SolidColor(P.accent),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { plusAncien() }),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                )
+            }
+            if (compteur.isNotEmpty()) Text(compteur, color = P.textePale, fontSize = 13.sp)
+        }
+        IconButton(onClick = plusAncien, enabled = peutAncien) {
+            Icon(Icons.Filled.KeyboardArrowUp, t("Résultat précédent"), tint = if (peutAncien) P.texteFort else P.choisi)
+        }
+        IconButton(onClick = plusRecent, enabled = peutRecent) {
+            Icon(Icons.Filled.KeyboardArrowDown, t("Résultat suivant"), tint = if (peutRecent) P.texteFort else P.choisi)
+        }
+        IconButton(onClick = fermer) { Icon(Icons.Filled.Close, t("Fermer"), tint = P.icone) }
+    }
+}
+
+/**
+ * Les médias du fil (« Médias » du menu) : une grille des images des messages
+ * chargés, puis les autres fichiers. Toucher une image l'ouvre en grand.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun Galerie(liste: List<Msg>, fermer: () -> Unit, agrandir: (String) -> Unit) {
+    val pieces = liste.asReversed().flatMap { it.attachments }.distinctBy { it.mediaId }
+    val images = pieces.filter { it.estImage }
+    val autres = pieces.filter { !it.estImage }
+    LaunchedEffect(images.size) { images.forEach { Depot.telecharger(it) } }
+    Dialog(onDismissRequest = fermer, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Scaffold(
+            containerColor = P.fond,
+            topBar = {
+                TopAppBar(
+                    navigationIcon = { IconButton(onClick = fermer) { Icon(Icons.Filled.Close, t("Fermer")) } },
+                    title = { Text(t("Médias"), fontWeight = FontWeight.Bold) },
+                    colors = barreCouleurs(),
+                )
+            },
+        ) { marges ->
+            if (pieces.isEmpty()) {
+                Text(
+                    t("Aucun média dans les messages chargés."), color = P.textePale,
+                    modifier = Modifier.padding(marges).padding(24.dp),
+                )
+            }
+            LazyVerticalGrid(
+                GridCells.Adaptive(110.dp),
+                Modifier.fillMaxSize().padding(marges).padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                items(images, key = { it.mediaId }) { p ->
+                    val chemin = Depot.medias[p.mediaId]
+                    val cadre = Modifier.aspectRatio(1f).clip(RoundedCornerShape(6.dp)).background(P.surface)
+                    if (chemin != null) {
+                        ImageFichier(chemin, cadre.clickable { agrandir(chemin) }, cote = 384)
+                    } else {
+                        Box(cadre, contentAlignment = Alignment.Center) {
+                            if (Depot.echecs.containsKey(p.mediaId)) {
+                                Text("✕", color = P.textePale)
+                            } else {
+                                CircularProgressIndicator(Modifier.size(20.dp), color = P.textePale, strokeWidth = 2.dp)
+                            }
+                        }
+                    }
+                }
+                items(autres.size, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) { i ->
+                    PieceAutre(autres[i].name.ifEmpty { autres[i].mime })
+                }
+            }
         }
     }
 }

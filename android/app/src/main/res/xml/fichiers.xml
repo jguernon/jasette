@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Les fichiers que l'appareil photo écrit pour Jasette (FileProvider). -->
+<paths>
+    <cache-path name="capture" path="capture/" />
+</paths>
