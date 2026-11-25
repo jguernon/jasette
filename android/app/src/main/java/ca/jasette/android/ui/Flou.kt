@@ -281,13 +281,10 @@ fun BoutonNouveau(onClick: () -> Unit) {
                     listOf(Color.White.copy(alpha = 0.18f), Color.Transparent),
                     startY = 0f, endY = size.height * 0.45f,
                 )
-                val largeurReflet = size.width * 0.72f
                 onDrawWithContent {
-                    drawOval(
-                        reflet,
-                        topLeft = Offset((size.width - largeurReflet) / 2f, size.height * 0.05f),
-                        size = Size(largeurReflet, size.height * 0.42f),
-                    )
+                    // Le reflet suit la forme du bouton : une bande en haut, découpée
+                    // par le carré arrondi (clip), qui s'efface vers le milieu.
+                    drawRect(reflet, size = Size(size.width, size.height * 0.45f))
                     val r = 16.dp.toPx() - trait / 2f
                     drawRoundRect(
                         lisere, topLeft = Offset(trait / 2f, trait / 2f),
