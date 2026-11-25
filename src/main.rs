@@ -17,7 +17,7 @@ mod pont;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::Child;
-use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -935,6 +935,9 @@ struct Reglages {
     langue: String,
     /// Le « Head » : la grille d'avatars en tête de liste (ids, préfixés pour
     /// Messenger), dans l'ordre d'ajout. Gardé sous l'ancien nom « favoris ».
+    /// L'icône de l'app : « sombre » (défaut) ou « blanche ».
+    #[serde(default)]
+    icone: String,
     #[serde(default, rename = "favoris")]
     head: Vec<String>,
     /// Les favoris : la vue de l'étoile, dans le rail.
@@ -968,6 +971,7 @@ impl Default for Reglages {
             teinte: String::new(),
             langue: String::new(),
             head: Vec::new(),
+            icone: String::new(),
             etoiles: Vec::new(),
             epingles: Vec::new(),
         }
@@ -1178,21 +1182,83 @@ fn carre(chemin: PathBuf) -> PathBuf {
     }
 }
 
+/// Les deux icônes de Jasette (sombre et blanche), à toutes les tailles du thème d'icônes.
+macro_rules! tailles_icone {
+    ($dossier:literal, $nom:literal) => {
+        [
+            (16, include_bytes!(concat!("../assets/", $dossier, "/", $nom, "-16.png")).as_slice()),
+            (24, include_bytes!(concat!("../assets/", $dossier, "/", $nom, "-24.png")).as_slice()),
+            (32, include_bytes!(concat!("../assets/", $dossier, "/", $nom, "-32.png")).as_slice()),
+            (48, include_bytes!(concat!("../assets/", $dossier, "/", $nom, "-48.png")).as_slice()),
+            (64, include_bytes!(concat!("../assets/", $dossier, "/", $nom, "-64.png")).as_slice()),
+            (128, include_bytes!(concat!("../assets/", $dossier, "/", $nom, "-128.png")).as_slice()),
+            (256, include_bytes!(concat!("../assets/", $dossier, "/", $nom, "-256.png")).as_slice()),
+            (512, include_bytes!(concat!("../assets/", $dossier, "/", $nom, "-512.png")).as_slice()),
+        ]
+    };
+}
+const ICONE_SOMBRE: [(u32, &[u8]); 8] = tailles_icone!("png", "jasette");
+const ICONE_BLANCHE: [(u32, &[u8]); 8] = tailles_icone!("png-blanc", "jasette-blanc");
+const ICONE_SOMBRE_SVG: &[u8] = include_bytes!("../assets/jasette.svg");
+const ICONE_BLANCHE_SVG: &[u8] = include_bytes!("../assets/jasette-blanc.svg");
+
+/// L'icône voulue (sombre ou blanche) à une taille donnée, en image GPUI.
+fn icone_variante(blanche: bool, taille: u32) -> Arc<gpui::Image> {
+    static CACHE: std::sync::OnceLock<Mutex<HashMap<(bool, u32), Arc<gpui::Image>>>> = std::sync::OnceLock::new();
+    let mut cache = CACHE.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    cache
+        .entry((blanche, taille))
+        .or_insert_with(|| {
+            let liste = if blanche { &ICONE_BLANCHE } else { &ICONE_SOMBRE };
+            let octets = liste.iter().find(|(t, _)| *t == taille).map(|(_, o)| *o).unwrap_or(liste[3].1);
+            Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, octets.to_vec()))
+        })
+        .clone()
+}
+
+/// L'icône choisie dans les réglages est-elle la blanche ?
+static ICONE_EST_BLANCHE: AtomicBool = AtomicBool::new(false);
+
 /// L'icône de Jasette : petite pour la barre de titre, grande pour l'accueil.
 fn icone_app() -> Arc<gpui::Image> {
-    static I: std::sync::OnceLock<Arc<gpui::Image>> = std::sync::OnceLock::new();
-    I.get_or_init(|| {
-        Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, include_bytes!("../assets/png/jasette-48.png").to_vec()))
-    })
-    .clone()
+    icone_variante(ICONE_EST_BLANCHE.load(Ordering::Relaxed), 48)
 }
 
 fn icone_app_grande() -> Arc<gpui::Image> {
-    static I: std::sync::OnceLock<Arc<gpui::Image>> = std::sync::OnceLock::new();
-    I.get_or_init(|| {
-        Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, include_bytes!("../assets/png/jasette-256.png").to_vec()))
-    })
-    .clone()
+    icone_variante(ICONE_EST_BLANCHE.load(Ordering::Relaxed), 256)
+}
+
+/// Pose l'icône choisie dans le thème d'icônes de l'utilisateur
+/// (~/.local/share/icons/hicolor) : le menu, le dock et la barre des tâches
+/// la reprennent. Le lanceur .desktop est retouché pour que GNOME relise.
+fn installer_icone(blanche: bool) -> Result<(), String> {
+    ICONE_EST_BLANCHE.store(blanche, Ordering::Relaxed);
+    let donnees = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+        .ok_or("Dossier de données introuvable")?;
+    let theme = donnees.join("icons/hicolor");
+    let liste = if blanche { &ICONE_BLANCHE } else { &ICONE_SOMBRE };
+    for (t, octets) in liste {
+        let d = theme.join(format!("{t}x{t}/apps"));
+        std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
+        std::fs::write(d.join("jasette.png"), octets).map_err(|e| e.to_string())?;
+    }
+    let d = theme.join("scalable/apps");
+    std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
+    std::fs::write(d.join("jasette.svg"), if blanche { ICONE_BLANCHE_SVG } else { ICONE_SOMBRE_SVG }).map_err(|e| e.to_string())?;
+    // Le cache du thème, s'il existe, et le lanceur : de quoi faire relire l'icône.
+    let _ = std::process::Command::new("gtk-update-icon-cache")
+        .args(["-q", "-t", "-f"])
+        .arg(&theme)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    let lanceur = donnees.join("applications/jasette.desktop");
+    if let Ok(contenu) = std::fs::read(&lanceur) {
+        let _ = std::fs::write(&lanceur, contenu);
+    }
+    Ok(())
 }
 
 /// Un numéro de téléphone (chiffres, espaces, +, -, parenthèses) ?
@@ -4929,6 +4995,49 @@ impl Jasette {
                                 }),
                         ),
                     )
+                    .child(
+                        div()
+                            .pt(px(22.))
+                            .pb(px(12.))
+                            .text_size(px(15.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(th().texte)
+                            .child(t("Icône de l'app")),
+                    )
+                    .child(groupe().child({
+                        let blanche = self.reglages.icone == "blanche";
+                        let tuile = |id: &'static str, nom: &'static str, choisie: bool, image: Arc<gpui::Image>, valeur: &'static str| {
+                            div()
+                                .id(id)
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .gap(px(8.))
+                                .p(px(10.))
+                                .rounded(rayon(14.))
+                                .cursor_pointer()
+                                .border_2()
+                                .border_color(if choisie { th().accent } else { hsla(0., 0., 0., 0.) })
+                                .hover(|s| s.bg(th().survol))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.reglages.icone = valeur.into();
+                                    this.reglages.garder();
+                                    if let Err(e) = installer_icone(valeur == "blanche") {
+                                        this.erreur = Some(e);
+                                    }
+                                    cx.notify();
+                                }))
+                                .child(img(image).size(px(64.)))
+                                .child(div().text_size(px(13.)).text_color(th().texte).child(t(nom)))
+                        };
+                        div()
+                            .flex()
+                            .flex_row()
+                            .gap(px(12.))
+                            .p(px(14.))
+                            .child(tuile("icone-sombre", "Sombre", !blanche, icone_variante(false, 128), "sombre"))
+                            .child(tuile("icone-blanche", "Blanche", blanche, icone_variante(true, 128), "blanche"))
+                    }))
                     .into_any_element()
             }
             Section::Langue => {
@@ -5913,6 +6022,8 @@ fn t(fr: &'static str) -> &'static str {
         "le pont s'est arrêté. Relancez Jasette pour réessayer." => "the bridge stopped. Restart Jasette to try again.",
         "Ouvrir avec l'ordinateur" => "Open at startup",
         "Jasette s'ouvre toute seule à l'ouverture de session : les messages arrivent dès le départ." => "Jasette opens by itself when you log in, so messages arrive right away.",
+        "Icône de l'app" => "App icon",
+        "Blanche" => "White",
         "Créé par" => "Created by",
         "Archiver" => "Archive",
         "Épingler en haut" => "Pin to top",
@@ -6003,6 +6114,7 @@ fn main() {
         });
         let reglages = Reglages::charger();
         ANGLAIS.store(reglages.langue == "en", std::sync::atomic::Ordering::Relaxed);
+        ICONE_EST_BLANCHE.store(reglages.icone == "blanche", Ordering::Relaxed);
         appliquer_theme(Theme::depuis(&reglages.theme), &reglages.teinte, cx);
 
         let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
