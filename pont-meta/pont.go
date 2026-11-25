@@ -741,6 +741,18 @@ func (p *Pont) messages(cmd Cmd) {
 		emit("messages", map[string]any{"conv": conv, "items": []Message{}, "older": cmd.Before != "", "more": false})
 		return
 	}
+	// Première ouverture du fil depuis la (re)connexion : un fil chiffré a pu
+	// recevoir des messages pendant que Jasette était fermée. Le cache local
+	// ne les a pas ; la page la plus récente de l'historique chiffré, oui.
+	p.mu.Lock()
+	_, dejaVu := p.loaded[conv]
+	s := p.sess
+	p.mu.Unlock()
+	if cmd.Before == "" && !dejaVu && c.Type.IsWhatsApp() && s != nil && s.HistoryDevice != nil && s.HistoryDevice.ID != "" && p.client() != nil {
+		if _, err := p.fetchSecureHistory(conv, c, 0, count); err != nil {
+			log.Warn().Err(err).Str("fil", conv).Msg("historique chiffré récent")
+		}
+	}
 	rows := p.queryMsgs(conv, cmd.BeforeT, cmd.Before, count)
 	more := len(rows) >= count
 	if len(rows) < count && p.client() != nil {

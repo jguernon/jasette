@@ -1043,6 +1043,8 @@ struct Jasette {
     menu_avatar: bool,
     /// Le menu « … » de la conversation ouverte, et la confirmation de suppression.
     menu_conv: bool,
+    /// La vue Favoris en mode « réorganiser » (flèches sur chaque rangée).
+    reorganiser: bool,
     confirmer_suppression: bool,
     /// Le champ « nouveau message » et les personnes que Messenger propose (id préfixé, nom, photo).
     nouveau_texte: String,
@@ -1435,6 +1437,7 @@ impl Jasette {
             emojis_ouverts: false,
             menu_avatar: false,
             menu_conv: false,
+            reorganiser: false,
             confirmer_suppression: false,
             nouveau_texte: String::new(),
             resultats_meta: Vec::new(),
@@ -2746,7 +2749,7 @@ impl Jasette {
             || self.messages.get(&conv.id).is_some_and(|l| l.iter().any(|m| plier(&m.text).contains(&self.filtre)))
     }
 
-    fn bouton_icone(id: &'static str, nom: &'static str, actif: bool) -> gpui::Stateful<Div> {
+    fn bouton_icone(id: impl Into<gpui::ElementId>, nom: &'static str, actif: bool) -> gpui::Stateful<Div> {
         div()
             .id(id)
             .size(px(32.))
@@ -2791,6 +2794,15 @@ impl Jasette {
                             .text_color(th().texte_fort)
                             .child(titre),
                     )
+                    .when(self.vue == Vue::Favoris && self.reglages.etoiles.len() > 1, |d| {
+                        d.child(
+                            Self::bouton_icone("f-ordre", if self.reorganiser { "check" } else { "arrow-up-down" }, self.reorganiser)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.reorganiser = !this.reorganiser;
+                                    cx.notify();
+                                })),
+                        )
+                    })
                     .child(Self::bouton_icone("f-nonlus", "list-filter", self.non_lus_seulement).on_click(
                         cx.listener(|this, _, _, cx| {
                             this.non_lus_seulement = !this.non_lus_seulement;
@@ -2943,6 +2955,18 @@ impl Jasette {
             )
     }
 
+    /// Monte (-1) ou descend (+1) un favori d'un cran, et garde l'ordre.
+    fn deplacer_favori(&mut self, id: &str, sens: i32) {
+        let f = &mut self.reglages.etoiles;
+        if let Some(i) = f.iter().position(|x| x == id) {
+            let j = i as i32 + sens;
+            if j >= 0 && (j as usize) < f.len() {
+                f.swap(i, j as usize);
+                self.reglages.garder();
+            }
+        }
+    }
+
     /// Les choix sous « nouveau message » : conversations existantes (tous les
     /// comptes), personnes trouvées sur Messenger, ou SMS au numéro tapé.
     fn suggestions(&self, cx: &mut Context<Self>) -> (Div, usize) {
@@ -3046,6 +3070,11 @@ impl Jasette {
         // Les épinglées d'abord, dans l'ordre où elles ont été épinglées.
         let rang = |c: &Conv| self.reglages.epingles.iter().position(|x| x == &c.id).unwrap_or(usize::MAX);
         visibles.sort_by_key(|c| rang(c));
+        if self.vue == Vue::Favoris {
+            let ordre = |c: &Conv| self.reglages.etoiles.iter().position(|x| x == &c.id).unwrap_or(usize::MAX);
+            visibles.sort_by_key(|c| ordre(c));
+        }
+        let reorganiser = self.vue == Vue::Favoris && self.reorganiser;
         let nb_epingles = visibles.iter().filter(|c| rang(c) != usize::MAX).count();
         if source.is_empty() {
             let t = if self.vue == Vue::Archives && !self.archives_chargees {
@@ -3201,8 +3230,27 @@ impl Jasette {
                                             .gap(px(4.))
                                             .text_size(px(12.))
                                             .text_color(if conv.unread { th().accent } else { th().texte_pale })
-                                            .when(epinglee, |d| d.child(icone("pin", 12., th().texte_pale)))
-                                            .child(heure(conv.time, true)),
+                                            .when(epinglee && !reorganiser, |d| d.child(icone("pin", 12., th().texte_pale)))
+                                            .when(!reorganiser, |d| d.child(heure(conv.time, true)))
+                                            .when(reorganiser, |d| {
+                                                let (h, b) = (conv.id.clone(), conv.id.clone());
+                                                d.child(
+                                                    Self::bouton_icone(SharedString::from(format!("monte-{}", conv.id)), "chevron-up", false)
+                                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                                            cx.stop_propagation();
+                                                            this.deplacer_favori(&h, -1);
+                                                            cx.notify();
+                                                        })),
+                                                )
+                                                .child(
+                                                    Self::bouton_icone(SharedString::from(format!("descend-{}", conv.id)), "chevron-down", false)
+                                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                                            cx.stop_propagation();
+                                                            this.deplacer_favori(&b, 1);
+                                                            cx.notify();
+                                                        })),
+                                                )
+                                            }),
                                     ),
                             )
                             .child(
