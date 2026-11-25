@@ -83,6 +83,9 @@ class Connexion(Gtk.ApplicationWindow):
         reglages.set_user_agent(AGENT)
         reglages.set_enable_developer_extras(False)
         self.vue.connect("load-changed", self.charge)
+        # « Continuer avec Google / Apple » ouvre une fenêtre surgissante :
+        # sans elle, X affiche « Something went wrong ».
+        self.vue.connect("create", self.surgissante)
         # X est une appli d'une seule page : l'adresse change sans nouveau
         # chargement. On vérifie aussi quand l'adresse change.
         self.vue.connect("notify::uri", lambda v, _p: self.verifier())
@@ -92,6 +95,21 @@ class Connexion(Gtk.ApplicationWindow):
         # on revérifie toutes les 2 secondes.
         GLib.timeout_add_seconds(2, self.minuterie)
         self.vue.load_uri(DEBUT)
+
+    def surgissante(self, vue, _action):
+        """Une fenêtre surgissante (connexion Google ou Apple), liée à la vue
+        principale : même session, et X reçoit la réponse par window.opener."""
+        nouvelle = WebKit.WebView(related_view=vue)
+        # Google refuse les navigateurs « intégrés » qui se disent Chrome :
+        # comme la fenêtre de Google Messages, on se présente comme Firefox.
+        nouvelle.get_settings().set_user_agent(
+            "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0")
+        fen = Gtk.Window(title="Connexion — Jasette", transient_for=self)
+        fen.set_default_size(500, 680)
+        fen.set_child(nouvelle)
+        nouvelle.connect("ready-to-show", lambda _v: fen.present())
+        nouvelle.connect("close", lambda _v: fen.destroy())
+        return nouvelle
 
     def fermee(self, _fen):
         if not self.fini:
