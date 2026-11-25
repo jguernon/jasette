@@ -834,6 +834,7 @@ impl Etat {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Vue {
     Tout,
+    Favoris,
     Archives,
     Service(Service),
 }
@@ -866,9 +867,13 @@ struct Reglages {
     /// "fr" (ou vide) ou "en".
     #[serde(default)]
     langue: String,
-    /// Les conversations favorites (ids, préfixés pour Messenger), dans l'ordre d'ajout.
+    /// Le « Head » : la grille d'avatars en tête de liste (ids, préfixés pour
+    /// Messenger), dans l'ordre d'ajout. Gardé sous l'ancien nom « favoris ».
+    #[serde(default, rename = "favoris")]
+    head: Vec<String>,
+    /// Les favoris : la vue de l'étoile, dans le rail.
     #[serde(default)]
-    favoris: Vec<String>,
+    etoiles: Vec<String>,
     /// Les conversations épinglées en haut de la liste, dans l'ordre d'épinglage.
     #[serde(default)]
     epingles: Vec<String>,
@@ -896,7 +901,8 @@ impl Default for Reglages {
             theme: String::new(),
             teinte: String::new(),
             langue: String::new(),
-            favoris: Vec::new(),
+            head: Vec::new(),
+            etoiles: Vec::new(),
             epingles: Vec::new(),
         }
     }
@@ -2620,6 +2626,16 @@ impl Jasette {
                     .when(non_lus > 0, |d| d.child(pastille_nombre(non_lus, th().accent))),
             )
             .child(
+                Self::bouton_rail("r-favoris", !en_reglages && self.galerie.is_none() && self.vue == Vue::Favoris)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.section = None;
+                        this.galerie = None;
+                        this.vue = Vue::Favoris;
+                        cx.notify();
+                    }))
+                    .child(icone("star", 22., ton(th().texte_fort, th().icone))),
+            )
+            .child(
                 Self::bouton_rail("r-archives", !en_reglages && self.vue == Vue::Archives)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.section = None;
@@ -2718,6 +2734,9 @@ impl Jasette {
         {
             return false;
         }
+        if self.vue == Vue::Favoris && !self.reglages.etoiles.contains(&conv.id) {
+            return false;
+        }
         if self.filtre.is_empty() {
             return true;
         }
@@ -2742,11 +2761,12 @@ impl Jasette {
     }
 
     fn colonne_liste(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let titre = match self.vue {
+        let titre = t(match self.vue {
             Vue::Tout => "Boîte de réception",
+            Vue::Favoris => "Favoris",
             Vue::Archives => "Archives",
             Vue::Service(s) => s.nom(),
-        };
+        });
         // La hauteur de l'en-tête flottant : rangée du titre, champs, bannière.
         let mut haut = 58.;
         let mut col = div()
@@ -3036,12 +3056,16 @@ impl Jasette {
                 t("Chargement des conversations…")
             };
             col = col.child(div().p(px(16.)).text_color(th().texte_pale).child(t));
+        } else if visibles.is_empty() && self.vue == Vue::Favoris && self.filtre.is_empty() {
+            col = col.child(
+                div().p(px(16.)).text_color(th().texte_pale).child(t("Aucun favori : ajoutez-en par le menu « … » d'une conversation.")),
+            );
         } else if visibles.is_empty() {
             col = col.child(div().p(px(16.)).text_color(th().texte_pale).child(t("Aucun résultat")));
         }
-        // Les favoris : une grille d'avatars en tête de liste (sans recherche en cours).
-        let favoris: Vec<&Conv> = if self.filtre.is_empty() && !self.non_lus_seulement && self.vue != Vue::Archives {
-            self.reglages.favoris.iter().filter_map(|id| self.conv(id)).filter(|c| self.correspond(c)).collect()
+        // Le Head : une grille d'avatars en tête de liste (sans recherche en cours).
+        let favoris: Vec<&Conv> = if self.filtre.is_empty() && !self.non_lus_seulement && self.vue == Vue::Tout {
+            self.reglages.head.iter().filter_map(|id| self.conv(id)).filter(|c| self.correspond(c)).collect()
         } else {
             Vec::new()
         };
@@ -4167,7 +4191,9 @@ impl Jasette {
         let id_m = id.clone();
         let id_a = id.clone();
         let id_f = id.clone();
-        let favori = self.reglages.favoris.contains(&id);
+        let favori = self.reglages.head.contains(&id);
+        let etoile = self.reglages.etoiles.contains(&id);
+        let id_t = id.clone();
         let epinglee = self.reglages.epingles.contains(&id);
         let id_e = id.clone();
         let mut menu = verre(0.96, 16.)
@@ -4178,18 +4204,38 @@ impl Jasette {
             .flex_col()
             .child(
                 item(
-                    "menu-favori",
-                    "star",
-                    if favori { t("Retirer des favoris") } else { t("Ajouter aux favoris") }.into(),
+                    "menu-head",
+                    "layout-grid",
+                    if favori { t("Retirer du Head") } else { t("Ajouter au Head") }.into(),
                     th().texte_fort,
                     true,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    let f = &mut this.reglages.favoris;
+                    let f = &mut this.reglages.head;
                     if favori {
                         f.retain(|x| x != &id_f);
                     } else {
                         f.push(id_f.clone());
+                    }
+                    this.reglages.garder();
+                    this.menu_conv = false;
+                    cx.notify();
+                })),
+            )
+            .child(
+                item(
+                    "menu-etoile",
+                    "star",
+                    if etoile { t("Retirer des favoris") } else { t("Ajouter aux favoris") }.into(),
+                    th().texte_fort,
+                    true,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    let f = &mut this.reglages.etoiles;
+                    if etoile {
+                        f.retain(|x| x != &id_t);
+                    } else {
+                        f.push(id_t.clone());
                     }
                     this.reglages.garder();
                     this.menu_conv = false;
@@ -5605,6 +5651,10 @@ fn t(fr: &'static str) -> &'static str {
         "Épingler en haut" => "Pin to top",
         "Désépingler" => "Unpin",
         "Ajouter aux favoris" => "Add to favorites",
+        "Ajouter au Head" => "Add to Head",
+        "Retirer du Head" => "Remove from Head",
+        "Favoris" => "Favorites",
+        "Aucun favori : ajoutez-en par le menu « … » d'une conversation." => "No favorites yet: add some from a conversation's “…” menu.",
         "Retirer des favoris" => "Remove from favorites",
         "Désarchiver" => "Unarchive",
         "Supprimer la conversation" => "Delete conversation",
