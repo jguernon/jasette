@@ -1275,6 +1275,38 @@ fn script_connexion() -> Option<PathBuf> {
     essais.into_iter().find(|p| p.is_file())
 }
 
+/// Le lanceur de démarrage automatique (norme XDG, lu par GNOME, KDE, etc.).
+fn fichier_demarrage() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+    Some(base.join("autostart").join("jasette.desktop"))
+}
+
+/// Jasette s'ouvre-t-elle avec l'ordinateur ? (le fichier sur disque fait foi)
+fn demarrage_auto() -> bool {
+    fichier_demarrage().is_some_and(|f| f.is_file())
+}
+
+fn regler_demarrage_auto(actif: bool) -> Result<(), String> {
+    let fichier = fichier_demarrage().ok_or("Dossier de configuration introuvable")?;
+    if !actif {
+        return match std::fs::remove_file(&fichier) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+            _ => Ok(()),
+        };
+    }
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    if let Some(d) = fichier.parent() {
+        std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
+    }
+    let contenu = format!(
+        "[Desktop Entry]\nType=Application\nName=Jasette\nComment=Messagerie\nExec=\"{}\"\nIcon=jasette\nTerminal=false\nX-GNOME-Autostart-enabled=true\nX-GNOME-Autostart-Delay=5\n",
+        exe.display()
+    );
+    std::fs::write(&fichier, contenu).map_err(|e| e.to_string())
+}
+
 /// Ouvre une adresse (https:, tel:) avec l'application par défaut.
 fn ouvrir_adresse(adresse: &str) {
     let _ = std::process::Command::new("xdg-open")
@@ -4721,6 +4753,21 @@ impl Jasette {
                             }),
                         )),
                 )
+                .child(div().h(px(14.)))
+                .child(
+                    groupe().child(ligne_interrupteur(
+                        "n-demarrage",
+                        t("Ouvrir avec l'ordinateur"),
+                        t("Jasette s'ouvre toute seule à l'ouverture de session : les messages arrivent dès le départ."),
+                        demarrage_auto(),
+                        cx.listener(|this, _, _, cx| {
+                            if let Err(e) = regler_demarrage_auto(!demarrage_auto()) {
+                                this.erreur = Some(e);
+                            }
+                            cx.notify();
+                        }),
+                    )),
+                )
                 .into_any_element(),
             Section::Apparence => {
                 // Les rangées d'un groupe arrondi : GPUI ne découpe pas les enfants
@@ -5864,6 +5911,8 @@ fn t(fr: &'static str) -> &'static str {
         "Connectez-vous dans la fenêtre Instagram…" => "Sign in in the Instagram window…",
         "Google Messages est déjà connecté : connectez Messenger ou Instagram ci-dessus." => "Google Messages is already connected: connect Messenger or Instagram above.",
         "le pont s'est arrêté. Relancez Jasette pour réessayer." => "the bridge stopped. Restart Jasette to try again.",
+        "Ouvrir avec l'ordinateur" => "Open at startup",
+        "Jasette s'ouvre toute seule à l'ouverture de session : les messages arrivent dès le départ." => "Jasette opens by itself when you log in, so messages arrive right away.",
         "Créé par" => "Created by",
         "Archiver" => "Archive",
         "Épingler en haut" => "Pin to top",
