@@ -854,15 +854,15 @@ private fun ChoixGrilleHead() {
     val choisie = ca.jasette.android.Marques.headGrille
     Text(t("Grille du Head"), color = P.textePale, fontSize = 13.sp)
     Groupe {
-        FlowRow(
+        // Les quatre choix sur une seule ligne, qui se partagent la largeur.
+        Row(
             Modifier.fillMaxWidth().padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             for (g in ca.jasette.android.Marques.GRILLES) {
                 val actif = g == choisie
                 Column(
-                    Modifier.width(80.dp).clip(forme(12.dp))
+                    Modifier.weight(1f).clip(forme(12.dp))
                         .border(if (actif) 2.dp else 1.dp, if (actif) P.accent else P.filet, forme(12.dp))
                         .clickable { ca.jasette.android.Marques.choisirHeadGrille(g) }
                         .padding(vertical = 8.dp),
@@ -872,9 +872,9 @@ private fun ChoixGrilleHead() {
                     Spacer(Modifier.height(6.dp))
                     Text(
                         t("%d de large").format(ca.jasette.android.Marques.colonnes(g)),
-                        color = if (actif) P.texteFort else P.texte, fontSize = 12.sp,
+                        color = if (actif) P.texteFort else P.texte, fontSize = 11.sp,
                         fontWeight = if (actif) FontWeight.SemiBold else FontWeight.Normal,
-                        maxLines = 1,
+                        maxLines = 1, softWrap = false,
                     )
                 }
             }
@@ -891,7 +891,7 @@ private fun ChoixGrilleHead() {
 @Composable
 private fun SchemaGrille(grille: String, couleur: androidx.compose.ui.graphics.Color) {
     val colonnes = ca.jasette.android.Marques.colonnes(grille)
-    androidx.compose.foundation.Canvas(Modifier.size(width = 56.dp, height = 34.dp)) {
+    androidx.compose.foundation.Canvas(Modifier.size(width = 50.dp, height = 30.dp)) {
         // Les colonnes choisies, sur deux rangées (la hauteur suit le Head).
         val rangees = 2
         val cote = minOf(size.width / colonnes, size.height / rangees)

@@ -7136,10 +7136,21 @@ impl Jasette {
                     .items_center()
                     .justify_center()
                     .cursor_pointer()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.reglages.taille_messages = e;
-                        this.reglages.garder();
-                        cx.notify();
+                    // Un clic, ou glisser le bouton : chaque cran survolé, bouton gauche
+                    // enfoncé, devient la valeur.
+                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                        if this.reglages.taille_messages != e {
+                            this.reglages.taille_messages = e;
+                            this.reglages.garder();
+                            cx.notify();
+                        }
+                    }))
+                    .on_mouse_move(cx.listener(move |this, ev: &gpui::MouseMoveEvent, _, cx| {
+                        if ev.pressed_button == Some(MouseButton::Left) && this.reglages.taille_messages != e {
+                            this.reglages.taille_messages = e;
+                            this.reglages.garder();
+                            cx.notify();
+                        }
                     }))
                     .child(div().absolute().left_0().w(gpui::relative(0.5)).top(px(14.)).h(px(4.)).bg(gauche))
                     .child(div().absolute().right_0().w(gpui::relative(0.5)).top(px(14.)).h(px(4.)).bg(droite))
