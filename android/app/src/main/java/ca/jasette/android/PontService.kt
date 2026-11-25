@@ -96,12 +96,25 @@ class PontService : ServiceAndroid() {
         ) return
         val titre = conv?.name?.ifEmpty { null } ?: m.sender.ifEmpty { Service.de(m.conv).court }
         val texte = if (conv?.group == true && m.sender.isNotEmpty()) "${m.sender}${t(" : ")}${m.apercu()}" else m.apercu()
+        // L'avatar de la personne : photo du contact si on l'utilise, sinon celle du service.
+        val photo = conv?.let { Contacts.photoPour(it, grande = true) } ?: Depot.avatars[m.conv]
+        val image = photo?.let { chargerAvatar(it) }
+        // MessagingStyle : Android montre la photo ronde de l'expéditeur à côté du message.
+        val personne = androidx.core.app.Person.Builder()
+            .setName(if (conv?.group == true && m.sender.isNotEmpty()) m.sender else titre)
+            .apply { if (image != null && conv?.group != true) setIcon(androidx.core.graphics.drawable.IconCompat.createWithBitmap(image)) }
+            .build()
+        val moi = androidx.core.app.Person.Builder().setName(t("Moi")).build()
+        val style = NotificationCompat.MessagingStyle(moi)
+            .addMessage(m.apercu(), m.time, personne)
+            .apply { if (conv?.group == true) { conversationTitle = titre; isGroupConversation = true } }
         val n = NotificationCompat.Builder(this, CANAL_MESSAGES)
             .setSmallIcon(R.drawable.ic_notif)
             .setColor(0xFF2F6BFF.toInt())
             .setContentTitle(titre)
             .setContentText(texte)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(texte))
+            .setStyle(style)
+            .apply { if (image != null) setLargeIcon(image) }
             .setSubText(Service.de(m.conv).court)
             .setWhen(m.time)
             .setShowWhen(true)
@@ -114,6 +127,22 @@ class PontService : ServiceAndroid() {
             NotificationManagerCompat.from(this).notify(idNotification(m.conv), n)
         } catch (_: SecurityException) {
         }
+    }
+
+    /** Une photo d'avatar (fichier ou content://), réduite à 256 px, ou null. */
+    private fun chargerAvatar(chemin: String): android.graphics.Bitmap? = try {
+        val bmp = if (chemin.startsWith("content:")) {
+            contentResolver.openInputStream(android.net.Uri.parse(chemin))?.use { android.graphics.BitmapFactory.decodeStream(it) }
+        } else {
+            android.graphics.BitmapFactory.decodeFile(chemin.removePrefix("file://"))
+        }
+        bmp?.let {
+            val cote = minOf(it.width, it.height)
+            val carre = android.graphics.Bitmap.createBitmap(it, (it.width - cote) / 2, (it.height - cote) / 2, cote, cote)
+            if (cote > 256) android.graphics.Bitmap.createScaledBitmap(carre, 256, 256, true) else carre
+        }
+    } catch (_: Exception) {
+        null
     }
 
     companion object {

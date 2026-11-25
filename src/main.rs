@@ -3209,16 +3209,21 @@ impl Jasette {
         } else {
             t("📎 Pièce jointe").into()
         };
-        let icone = self
-            .avatars
-            .get(&m.conv)
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| "mail-message-new".into());
+        // L'avatar de la personne (photo du contact s'il y en a une), en image
+        // de la notification : GNOME et KDE l'affichent par l'indice image-path
+        // (l'icône -i est souvent remplacée par celle de l'app).
+        let photo = conv
+            .and_then(|c| self.photo_conv(c))
+            .or_else(|| self.avatars.get(&m.conv))
+            .filter(|p| p.is_file())
+            .map(|p| p.to_string_lossy().to_string());
+        let icone = photo.clone().unwrap_or_else(|| "mail-message-new".into());
         let conv_id = m.conv.clone();
         let boite = self.a_ouvrir.clone();
         std::thread::spawn(move || {
             let sortie = std::process::Command::new("notify-send")
                 .args(["-a", "Jasette", "-i", &icone, "-h", "string:desktop-entry:jasette"])
+                .args(photo.iter().flat_map(|p| ["-h".to_string(), format!("string:image-path:{p}")]))
                 .args(["-A", "default=Ouvrir"])
                 .arg(&titre)
                 .arg(&corps)
