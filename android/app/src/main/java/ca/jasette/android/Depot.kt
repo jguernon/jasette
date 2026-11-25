@@ -213,6 +213,7 @@ object Depot {
             when {
                 m.id in ids -> {}
                 m.tmpId.isNotEmpty() && m.tmpId in tmps -> {}
+                recus.any { m.localPour(it) } -> {}
                 m.local -> locaux.add(m)
                 autorite && m.time in debut..fin -> {}
                 else -> autres.add(m)
@@ -747,6 +748,7 @@ object Depot {
         val ouverteIci = ouverte == m.conv && visible
         val liste = messages[m.conv].orEmpty().toMutableList()
         val i = liste.indexOfFirst { it.id == m.id || (m.tmpId.isNotEmpty() && it.tmpId == m.tmpId) }
+            .let { if (it >= 0) it else liste.indexOfFirst { x -> x.localPour(m) } }
         val nouveau: Boolean
         if (i >= 0) {
             nouveau = liste[i].local && !m.fromMe

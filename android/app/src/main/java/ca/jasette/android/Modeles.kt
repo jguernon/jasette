@@ -166,6 +166,18 @@ data class Msg(
     /** Un envoi local pas encore confirmé par le pont. */
     val local get() = id == tmpId
 
+    /**
+     * Cet envoi local est-il le même que [m], le message confirmé ? Par tmp_id,
+     * sinon (le service ne renvoie pas toujours notre tmp_id, ex. RCS) : de moi,
+     * même texte, même nombre de pièces, à moins de 10 minutes d'écart.
+     */
+    fun localPour(m: Msg): Boolean {
+        if (!local || m.local) return false
+        if (m.tmpId.isNotEmpty() && tmpId == m.tmpId) return true
+        return m.fromMe && text == m.text && attachments.size == m.attachments.size &&
+            kotlin.math.abs(m.time - time) < 10 * 60 * 1000L
+    }
+
     /** Les mêmes champs que ceux du pont (pour le cache sur disque, relu par [de]). */
     fun json(): JSONObject {
         val o = JSONObject().put("id", id).put("conv", conv).put("text", text).put("media", media)

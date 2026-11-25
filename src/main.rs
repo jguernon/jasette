@@ -3467,6 +3467,7 @@ impl Jasette {
                     if let Some(i) = liste
                         .iter()
                         .position(|x| x.id == m.id || (!m.tmp_id.is_empty() && x.tmp_id == m.tmp_id))
+                        .or_else(|| cache::local_confirme(liste, &m))
                     {
                         let etait_local = liste[i].id == liste[i].tmp_id;
                         liste[i] = m.clone();

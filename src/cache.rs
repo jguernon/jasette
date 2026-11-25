@@ -152,6 +152,28 @@ impl Msg {
     pub fn local(&self) -> bool {
         !self.tmp_id.is_empty() && self.id == self.tmp_id
     }
+
+    /// Cet envoi local est-il le même que `m`, le message confirmé ? Par
+    /// tmp_id, sinon (le service ne renvoie pas toujours notre tmp_id, ex. RCS
+    /// par le serveur) : de moi, même texte, même nombre de pièces, à moins de
+    /// 10 minutes d'écart.
+    pub fn local_pour(&self, m: &Msg) -> bool {
+        if !self.local() || m.local() {
+            return false;
+        }
+        if !m.tmp_id.is_empty() && self.tmp_id == m.tmp_id {
+            return true;
+        }
+        m.from_me
+            && self.text == m.text
+            && self.attachments.len() == m.attachments.len()
+            && (m.time - self.time).abs() < 10 * 60 * 1000
+    }
+}
+
+/// L'indice de l'envoi local que `m` confirme, s'il y en a un.
+pub fn local_confirme(liste: &[Msg], m: &Msg) -> Option<usize> {
+    liste.iter().position(|x| x.local_pour(m))
 }
 
 /// La page la plus récente d'un fil (`page`, réponse fraîche du pont) fusionnée
@@ -169,6 +191,8 @@ pub fn fusionner_page(anc: &[Msg], page: Vec<Msg>) -> Vec<Msg> {
     let mut garde: Vec<Msg> = anc
         .iter()
         .filter(|m| !ids.contains(m.id.as_str()) && !(!m.tmp_id.is_empty() && tmps.contains(m.tmp_id.as_str())))
+        // Un envoi local que la page confirme (même sans tmp_id) disparaît.
+        .filter(|m| !page.iter().any(|p| m.local_pour(p)))
         .filter(|m| {
             m.local()
                 || dernier.is_some_and(|d| m.time > d)
@@ -189,7 +213,7 @@ pub fn fusionner_page(anc: &[Msg], page: Vec<Msg>) -> Vec<Msg> {
 pub fn fusionner_copie(anc: &[Msg], copie: Vec<Msg>) -> Vec<Msg> {
     let mut r: Vec<Msg> = anc.to_vec();
     for m in copie {
-        match r.iter().position(|x| x.id == m.id || (!m.tmp_id.is_empty() && x.tmp_id == m.tmp_id)) {
+        match r.iter().position(|x| x.id == m.id || (!m.tmp_id.is_empty() && x.tmp_id == m.tmp_id)).or_else(|| local_confirme(&r, &m)) {
             Some(i) => r[i] = m,
             None => r.push(m),
         }
