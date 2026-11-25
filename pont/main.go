@@ -1147,6 +1147,8 @@ func main() {
 			go p.sendReaction(cmd)
 		case "new":
 			go p.newChat(cmd)
+		case "search":
+			go p.searchContacts(strings.TrimSpace(cmd.Text))
 		case "unpair":
 			go p.unpair()
 		case "quit":

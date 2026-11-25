@@ -868,9 +868,12 @@ fn logo(s: Service, taille: f32) -> Div {
         .flex_none()
         .size(px(taille))
         .rounded(rayon)
-        .bg(blanc(1.))
-        .border_1()
-        .border_color(ton(rgba(0x0000001a).into(), hsla(0., 0., 0., 0.)))
+        // Sombre, comme sur Android : le logo seul, sans fond blanc ni filet ;
+        // en pastille sur un avatar (petite taille), un anneau foncé le détache.
+        .when(th().sombre && taille <= 20., |d| d.border_2().border_color(th().liste))
+        .when(!th().sombre, |d| {
+            d.bg(blanc(1.)).border_1().border_color(ton(rgba(0x0000001a).into(), hsla(0., 0., 0., 0.)))
+        })
         .child(img(image_service(s, taille)).size_full().rounded(rayon).object_fit(ObjectFit::Contain))
 }
 
@@ -1823,8 +1826,11 @@ impl Jasette {
                 if texte != this.nouveau_texte {
                     this.nouveau_texte = texte.clone();
                     this.resultats_meta.clear();
-                    // Messenger cherche parmi tes amis et contacts.
+                    // Messenger cherche parmi tes amis et contacts ; Google, dans les contacts du téléphone.
                     if texte.chars().count() >= 2 && !est_numero(&texte) {
+                        if this.etat == Etat::Pret {
+                            this.commande(json!({"cmd": "search", "text": texte}));
+                        }
                         for svc in SERVICES_META {
                             if this.meta(svc).etat == Etat::Pret {
                                 this.commande_svc(svc, json!({"cmd": "search", "text": texte}));
@@ -2430,6 +2436,17 @@ impl Jasette {
                         .collect::<Vec<_>>();
                     if !liste.is_empty() {
                         self.mosaiques.insert(conv.to_string(), liste);
+                    }
+                }
+            }
+            "search" => {
+                // Les contacts du téléphone (pont Google) : ids = numéros, sans préfixe.
+                if v.get("query").and_then(Value::as_str) == Some(self.nouveau_texte.as_str()) {
+                    self.resultats_meta.retain(|(id, _)| service_de(id) != Service::GoogleMessages);
+                    if let Some(a) = v["items"].as_array() {
+                        self.resultats_meta.extend(a.iter().filter_map(|x| {
+                            Some((x.get("id")?.as_str()?.to_string(), x.get("name")?.as_str()?.to_string()))
+                        }));
                     }
                 }
             }
@@ -3919,17 +3936,25 @@ impl Jasette {
             n += 1;
         }
         // Les personnes trouvées par Messenger, sans conversation ici.
-        for (id, nom) in self.resultats_meta.iter().take(5) {
+        for (id, nom) in self.resultats_meta.iter().take(8) {
             if self.conv(id).is_some() {
                 continue;
             }
             let svc = service_de(id);
             let fbid = id[svc.prefixe().len()..].to_string();
-            let detail = if svc == Service::Instagram { t("Nouvelle conversation Instagram") } else { t("Nouvelle conversation Messenger") };
+            let detail = match svc {
+                Service::Instagram => t("Nouvelle conversation Instagram").to_string(),
+                Service::GoogleMessages => format!("{} · {id}", t("Contact")),
+                _ => t("Nouvelle conversation Messenger").to_string(),
+            };
             boite = boite.child(
                 ligne(SharedString::from(format!("sugg-{id}")), nom.clone(), detail.into(), svc, None)
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.commande_svc(svc, json!({"cmd": "new", "number": fbid}));
+                        if svc == Service::GoogleMessages {
+                            this.commande(json!({"cmd": "new", "number": fbid}));
+                        } else {
+                            this.commande_svc(svc, json!({"cmd": "new", "number": fbid}));
+                        }
                         this.nouveau_ouvert = false;
                         this.numero.update(cx, |s, cx| s.set_value("", window, cx));
                         cx.notify();
@@ -7969,6 +7994,7 @@ fn t(fr: &'static str) -> &'static str {
         "Copier" => "Copy",
         "Copié" => "Copied",
         "Port (déjà rempli par défaut) :" => "Port (filled in by default):",
+        "Contact" => "Contact",
         "Créé par" => "Created by",
         "Rechercher dans la conversation" => "Search in conversation",
         "Recherche plus loin…" => "Searching further…",
