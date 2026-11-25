@@ -351,8 +351,9 @@ func (p *Pont) avatars(convs []*gmproto.Conversation) {
 		resp, err := cli.GetParticipantThumbnail(ctx, lot...)
 		annule()
 		if err != nil {
-			log.Warn().Err(err).Msg("avatars")
-			return
+			// Un lot raté ne doit pas priver les suivants (ni les mosaïques des groupes).
+			log.Warn().Err(err).Int("lot", i/10).Msg("avatars")
+			continue
 		}
 		for _, t := range resp.GetThumbnail() {
 			data := t.GetData().GetImageBuffer()
