@@ -6905,9 +6905,19 @@ impl Jasette {
     /// Client, étape 2 : les codes correspondent, on jumelle et on passe par le serveur.
     fn jumeler_client(&mut self, cx: &mut Context<Self>) {
         let Some((adresse, code, v)) = self.verif_client.take() else { return };
+        let etait_serveur = self.reglages.mode_serveur == "serveur";
         self.tache_serveur(
             cx,
-            move || pont::jumeler(&adresse, &code, &nom_machine(), &v.empreinte),
+            move || {
+                let cfg = pont::jumeler(&adresse, &code, &nom_machine(), &v.empreinte)?;
+                // Cette machine était le serveur : on arrête son service (ses
+                // sessions restent sur le disque) pour qu'il n'y ait plus qu'un
+                // serveur, donc une seule session Google Messages.
+                if etait_serveur {
+                    systemctl(&["disable", "--now", "jasette-serveur"]);
+                }
+                Ok(cfg)
+            },
             |this, cfg, _| {
                 this.reglages.serveur = Some(cfg);
                 this.reglages.mode_serveur = "client".into();
@@ -6979,7 +6989,7 @@ impl Jasette {
                         "server",
                         "Je suis le serveur Jasette",
                         "Cette machine garde les sessions, même Jasette fermée. Vos autres appareils s'y branchent.",
-                        mode == "serveur",
+                        mode == "serveur" && !self.choix_client,
                     )
                     .when(mode != "serveur" && !occupe, |d| {
                         d.on_click(cx.listener(|this, _, _, cx| {
@@ -6996,7 +7006,7 @@ impl Jasette {
                         "monitor",
                         "Utiliser mon serveur Jasette",
                         "Tous les services passent par votre serveur : rien à connecter ici.",
-                        mode == "client" || (mode.is_empty() && self.choix_client),
+                        mode == "client" || self.choix_client,
                     )
                     .when(mode != "client" && !occupe, |d| {
                         d.on_click(cx.listener(|this, _, window, cx| {
@@ -7015,6 +7025,49 @@ impl Jasette {
         };
         let champ_serveur = |e: &Entity<InputState>| verre(0.8, 999.).pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
         match mode {
+            m if self.choix_client && m != "client" => {
+                let mut boite = div().flex().flex_col().gap(px(10.)).p(px(16.));
+                if let Some((adresse, _, v)) = &self.verif_client {
+                    boite = boite
+                        .child(div().text_size(px(13.)).text_color(th().texte).child(format!(
+                            "{} {adresse} {}",
+                            t("Le serveur"),
+                            t("affiche-t-il ce code de vérification ?")
+                        )))
+                        .child(div().text_size(px(28.)).font_weight(FontWeight::BOLD).text_color(th().texte_fort).child(format!(
+                            "{} {}",
+                            &v.code_verification[..3.min(v.code_verification.len())],
+                            &v.code_verification[3.min(v.code_verification.len())..]
+                        )))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_row()
+                                .gap(px(10.))
+                                .child(bouton_texte("srv-oui", t("Oui, jumeler"), ACCENT).on_click(cx.listener(|this, _, _, cx| {
+                                    this.jumeler_client(cx);
+                                    cx.notify();
+                                })))
+                                .child(bouton_texte("srv-non", t("Non, annuler"), DANGER).on_click(cx.listener(|this, _, _, cx| {
+                                    this.verif_client = None;
+                                    this.erreur = Some(t("Jumelage annulé : les codes ne correspondaient pas.").into());
+                                    cx.notify();
+                                }))),
+                        );
+                } else {
+                    boite = boite
+                        .child(div().text_size(px(13.)).text_color(th().texte).child(t(
+                            "Sur le serveur : Réglages > Serveur Jasette > Jumeler un appareil. Entrez ici son adresse et le code affiché.",
+                        )))
+                        .child(champ_serveur(&self.adresse_serveur))
+                        .child(champ_serveur(&self.code_serveur))
+                        .child(bouton_texte("srv-continuer", t("Continuer"), ACCENT).on_click(cx.listener(|this, _, _, cx| {
+                            this.verifier_client(cx);
+                            cx.notify();
+                        })));
+                }
+                carte = carte.child(titre("Utiliser mon serveur Jasette")).child(groupe().child(boite));
+            }
             "serveur" => {
                 let adresse = self.reglages.serveur.as_ref().map(|c| c.adresse.clone()).unwrap_or_default();
                 // Chaque adresse avec un bouton Copier (le texte de GPUI ne se sélectionne pas).
@@ -7145,49 +7198,6 @@ impl Jasette {
                             ))),
                     ),
                 );
-            }
-            _ if self.choix_client => {
-                let mut boite = div().flex().flex_col().gap(px(10.)).p(px(16.));
-                if let Some((adresse, _, v)) = &self.verif_client {
-                    boite = boite
-                        .child(div().text_size(px(13.)).text_color(th().texte).child(format!(
-                            "{} {adresse} {}",
-                            t("Le serveur"),
-                            t("affiche-t-il ce code de vérification ?")
-                        )))
-                        .child(div().text_size(px(28.)).font_weight(FontWeight::BOLD).text_color(th().texte_fort).child(format!(
-                            "{} {}",
-                            &v.code_verification[..3.min(v.code_verification.len())],
-                            &v.code_verification[3.min(v.code_verification.len())..]
-                        )))
-                        .child(
-                            div()
-                                .flex()
-                                .flex_row()
-                                .gap(px(10.))
-                                .child(bouton_texte("srv-oui", t("Oui, jumeler"), ACCENT).on_click(cx.listener(|this, _, _, cx| {
-                                    this.jumeler_client(cx);
-                                    cx.notify();
-                                })))
-                                .child(bouton_texte("srv-non", t("Non, annuler"), DANGER).on_click(cx.listener(|this, _, _, cx| {
-                                    this.verif_client = None;
-                                    this.erreur = Some(t("Jumelage annulé : les codes ne correspondaient pas.").into());
-                                    cx.notify();
-                                }))),
-                        );
-                } else {
-                    boite = boite
-                        .child(div().text_size(px(13.)).text_color(th().texte).child(t(
-                            "Sur le serveur : Réglages > Serveur Jasette > Jumeler un appareil. Entrez ici son adresse et le code affiché.",
-                        )))
-                        .child(champ_serveur(&self.adresse_serveur))
-                        .child(champ_serveur(&self.code_serveur))
-                        .child(bouton_texte("srv-continuer", t("Continuer"), ACCENT).on_click(cx.listener(|this, _, _, cx| {
-                            this.verifier_client(cx);
-                            cx.notify();
-                        })));
-                }
-                carte = carte.child(titre("Utiliser mon serveur Jasette")).child(groupe().child(boite));
             }
             _ => {}
         }
