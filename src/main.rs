@@ -477,6 +477,8 @@ fn appliquer_theme(choix: Theme, teinte_id: &str, cx: &mut App) {
     gpui_component::Theme::update(cx, |g| {
         g.font_family = police().into();
         g.foreground = t.texte_fort;
+        // Le filet autour de la fenêtre (décorations côté client) : la couleur du rail.
+        g.window_border = t.rail;
         g.muted_foreground = t.texte_pale;
         if t.ega {
             // Comme ega-theme.css : curseur jaune, sélection blanc sur bleu,
@@ -2376,7 +2378,12 @@ impl Jasette {
                         cx.notify();
                     }))
                     .child(logo(Service::GoogleMessages, 32.))
-                    .when(gm_probleme, |d| d.child(pastille_alerte()))
+                    .when(matches!(self.etat, Etat::Association | Etat::Connexion | Etat::Reconnexion), |d| {
+                        d.child(pastille_chargement("chargement-google"))
+                    })
+                    .when(gm_probleme && !matches!(self.etat, Etat::Association | Etat::Connexion | Etat::Reconnexion), |d| {
+                        d.child(pastille_alerte())
+                    })
                     .when(!gm_probleme && non_lus > 0, |d| d.child(pastille_nombre(non_lus, ton(c(DANGER), th().accent)))),
             ))
             .when(!matches!(self.etat_meta, Etat::NonAssocie | Etat::Demarrage), |d| d.child(
@@ -2387,7 +2394,10 @@ impl Jasette {
                         cx.notify();
                     }))
                     .child(logo(Service::Messenger, 32.))
-                    .when(!matches!(self.etat_meta, Etat::Pret), |d| d.child(pastille_alerte())),
+                    .when(matches!(self.etat_meta, Etat::Association | Etat::Connexion | Etat::Reconnexion), |d| {
+                        d.child(pastille_chargement("chargement-messenger"))
+                    })
+                    .when(matches!(self.etat_meta, Etat::TelephoneHorsLigne), |d| d.child(pastille_alerte())),
             ))
             // Les services non connectés n'ont pas d'icône : « ••• » mène à l'ajout de compte.
             .child(
@@ -4349,7 +4359,8 @@ impl Render for Jasette {
     /// pour une app qui demande des décorations côté client) et son bord.
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let contenu = self.rendu(window, cx);
-        gpui_component::window_border().child(
+        // Sans ombre : son bord était peint en blanc autour de la fenêtre.
+        gpui_component::window_border().shadow_size(px(0.)).child(
             div()
                 .size_full()
                 .flex()
@@ -4497,6 +4508,41 @@ fn pastille_nombre(n: usize, couleur: Hsla) -> impl IntoElement {
         .font_weight(FontWeight::BOLD)
         .text_color(blanc(1.))
         .child(if n > 99 { "99+".to_string() } else { n.to_string() })
+}
+
+/// Une petite bulle « … » dont les points s'allument tour à tour : le
+/// service est en train de se connecter.
+fn pastille_chargement(id: &'static str) -> impl IntoElement {
+    use gpui::{Animation, AnimationExt};
+    let mut bulle = div()
+        .absolute()
+        .top(px(-4.))
+        .right(px(-6.))
+        .h(px(14.))
+        .px(px(4.))
+        .rounded(rayon(999.))
+        .bg(th().accent)
+        .border_1()
+        .border_color(ton(blanc(0.9), th().rail))
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(2.));
+    for i in 0..3usize {
+        bulle = bulle.child(
+            div().size(px(3.)).rounded(rayon(999.)).bg(blanc(1.)).with_animation(
+                (id, i),
+                Animation::new(Duration::from_millis(1100)).repeat(),
+                move |d, t| {
+                    // Chaque point culmine à son tiers du cycle.
+                    let phase = (t - i as f32 / 3.).rem_euclid(1.);
+                    let eclat = (1. - (phase * 2. - 1.).abs()).powf(2.);
+                    d.opacity(0.3 + 0.7 * eclat).mt(px(-2. * eclat))
+                },
+            ),
+        );
+    }
+    bulle
 }
 
 fn pastille_alerte() -> impl IntoElement {
