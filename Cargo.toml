@@ -1,6 +1,7 @@
 [package]
 name = "jasette"
 version = "0.1.0"
+authors = ["Jonathan Guernon"]
 edition = "2024"
 description = "Jasette : Google Messages (SMS + RCS) sur le bureau, en EGA, avec GPUI"
 license = "AGPL-3.0-or-later"

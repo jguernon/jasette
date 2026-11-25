@@ -24,7 +24,6 @@
     </mask>
   </defs>
   <use href="#tuile" fill="url(#gTuile)"/>
-  <use href="#tuile" fill="none" stroke="#fff" stroke-opacity="0.1" stroke-width="4"/>
   <use href="#arriere" fill="#f08a6c" mask="url(#mDecoupe)"/>
   <use href="#avant" fill="#2f6bff"/>
   <g fill="#fff">

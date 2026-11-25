@@ -19,24 +19,35 @@ pub struct Pont {
     nouvelles: Mutex<Receiver<Value>>,
 }
 
-/// `JASETTE_PONT`, sinon à côté de l'exécutable, sinon dans `.cache/bin` du projet.
-fn chemin() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("JASETTE_PONT") {
+/// La variable d'environnement `var`, sinon `nom` à côté de l'exécutable,
+/// sinon dans `.cache/bin` du projet.
+fn chemin(nom: &str, var: &str) -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os(var) {
         return Some(PathBuf::from(p));
     }
     let mut essais = Vec::new();
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
     {
-        essais.push(dir.join("jasette-pont"));
+        essais.push(dir.join(nom));
     }
-    essais.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".cache/bin/jasette-pont"));
+    essais.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".cache/bin").join(nom));
     essais.into_iter().find(|p| p.is_file())
 }
 
 impl Pont {
+    /// Le pont Google Messages.
     pub fn lancer() -> Result<Self, String> {
-        let chemin = chemin().ok_or("jasette-pont introuvable (compile pont/ avec ./compiler.sh)")?;
+        Self::lancer_nomme("jasette-pont", "JASETTE_PONT")
+    }
+
+    /// Le pont Messenger.
+    pub fn lancer_meta() -> Result<Self, String> {
+        Self::lancer_nomme("jasette-meta", "JASETTE_META")
+    }
+
+    fn lancer_nomme(nom: &str, var: &str) -> Result<Self, String> {
+        let chemin = chemin(nom, var).ok_or_else(|| format!("{nom} introuvable"))?;
         let mut cmd = Command::new(&chemin);
         // En développement, les photos téléchargées restent dans .cache du projet.
         if std::env::var_os("JASETTE_MEDIA").is_none() {

@@ -17,7 +17,7 @@ mod pont;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::Child;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -104,7 +104,7 @@ fn texte_emoji(s: impl Into<SharedString>, couleur: Hsla, gras: Option<FontWeigh
     let mut debut = 0;
     let mut emoji_courant: Option<bool> = None;
     let run = |len: usize, emoji: bool| {
-        let mut f = gpui::font(if emoji { POLICE_EMOJI } else { POLICE });
+        let mut f = gpui::font(if emoji { POLICE_EMOJI } else { police() });
         if let Some(g) = gras {
             f.weight = g;
         }
@@ -149,10 +149,84 @@ fn icone(nom: &str, taille: f32, couleur: Hsla) -> Svg {
     svg().path(format!("icons/{nom}.svg")).size(px(taille)).flex_none().text_color(couleur)
 }
 
-// ---- Les deux thèmes : « Sombre » (plat, à la Beeper) et « Verre » ----
+// ---- Les trois thèmes : « Sombre » (plat, à la Beeper), « Verre » et « EGA » ----
 
-/// Le thème choisi (réglage `theme`) : sombre par défaut.
-static THEME_SOMBRE: AtomicBool = AtomicBool::new(true);
+/// Les thèmes, gardés dans le réglage `theme` par leur id.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Theme {
+    Sombre,
+    Verre,
+    /// L'écran 16 couleurs d'un PC des années 80, repris du thème EGA de
+    /// Claude Desktop (claude-ega-theme) : fond noir, palette EGA, police
+    /// IBM VGA 8x16, coins carrés, traits pleins, ombres portées dures.
+    Ega,
+}
+
+impl Theme {
+    fn id(self) -> &'static str {
+        match self {
+            Theme::Sombre => "sombre",
+            Theme::Verre => "verre",
+            Theme::Ega => "ega",
+        }
+    }
+    /// Le thème d'un id des réglages ; sombre par défaut.
+    fn depuis(id: &str) -> Self {
+        match id {
+            "verre" => Theme::Verre,
+            "ega" => Theme::Ega,
+            _ => Theme::Sombre,
+        }
+    }
+}
+
+/// Le thème choisi (`Theme` en u8) : sombre par défaut.
+static THEME: AtomicU8 = AtomicU8::new(Theme::Sombre as u8);
+
+fn theme() -> Theme {
+    match THEME.load(Ordering::Relaxed) {
+        x if x == Theme::Verre as u8 => Theme::Verre,
+        x if x == Theme::Ega as u8 => Theme::Ega,
+        _ => Theme::Sombre,
+    }
+}
+
+// La palette EGA exacte (adaptateur IBM EGA, comme ega-theme.css).
+const EGA_NOIR: u32 = 0x000000;
+const EGA_BLEU: u32 = 0x0000aa;
+const EGA_GRIS_CLAIR: u32 = 0xaaaaaa;
+const EGA_GRIS: u32 = 0x555555;
+const EGA_CYAN_VIF: u32 = 0x55ffff;
+const EGA_VERT_VIF: u32 = 0x55ff55;
+const EGA_ROUGE_VIF: u32 = 0xff5555;
+const EGA_MAGENTA_VIF: u32 = 0xff55ff;
+const EGA_JAUNE: u32 = 0xffff55;
+const EGA_BLANC: u32 = 0xffffff;
+
+/// Les polices du thème EGA, dans l'ordre de préférence (celles du thème de
+/// Claude Desktop), puis des chasses fixes courantes en repli.
+const POLICES_EGA: [&str; 8] = [
+    "Px437 IBM VGA 8x16",
+    "PxPlus IBM VGA 8x16",
+    "Mx437 IBM VGA 8x16",
+    "Px437 IBM EGA 8x14",
+    "PxPlus IBM EGA 8x14",
+    "DejaVu Sans Mono",
+    "Noto Sans Mono",
+    "JetBrains Mono",
+];
+/// La police EGA trouvée sur le système (choisie au premier `appliquer_theme`).
+static POLICE_EGA: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
+/// La police du texte : Adwaita Sans, ou la police IBM du thème EGA.
+fn police() -> &'static str {
+    if th().ega { POLICE_EGA.get().copied().unwrap_or(POLICE) } else { POLICE }
+}
+
+/// Le rayon d'un coin : celui demandé, ou un coin carré en EGA.
+fn rayon(r: f32) -> gpui::Pixels {
+    if th().ega { px(0.) } else { px(r) }
+}
 /// La teinte du thème verre (indice dans `TEINTES`, réglage `teinte`).
 static TEINTE: AtomicUsize = AtomicUsize::new(0);
 
@@ -186,8 +260,11 @@ fn teinte() -> &'static Teinte {
 
 /// Les couleurs et mesures d'un thème. Le thème verre garde les valeurs
 /// d'origine (blanc translucide sur halos) ; le sombre est plat et opaque.
+/// L'EGA suit le sombre partout (`sombre` vrai : plat, opaque), puis
+/// ajoute ses traits, ses coins carrés et sa police (`ega`).
 struct Palette {
     sombre: bool,
+    ega: bool,
     /// Le fond de la fenêtre.
     fond: Hsla,
     /// Le fond des trois panneaux : rail, liste (et menu des réglages), fil.
@@ -246,6 +323,7 @@ impl Palette {
         let givre = hsla(t.angle / 360., 0.4, 0.95, 1.);
         Palette {
             sombre: false,
+            ega: false,
             // La lavande garde son fond d'origine (--ss-well).
             fond: if t.id == "lavande" { c(FOND) } else { hsla(t.angle / 360., 0.4, 0.935, 1.) },
             rail: blanc(0.5),
@@ -287,6 +365,7 @@ impl Palette {
     fn sombre() -> Self {
         Palette {
             sombre: true,
+            ega: false,
             fond: c(0x1c1c1e),
             rail: c(0x1c1c1e),
             liste: c(0x252527),
@@ -324,31 +403,146 @@ impl Palette {
             succes: c(0x30d158),
         }
     }
+    /// L'EGA de Claude Desktop (ega-theme.css) : tout sur fond noir, texte
+    /// gris clair, titres et noms en jaune, sélection blanc sur bleu, traits
+    /// gris (#555555) ou gris clair (#AAAAAA), accent cyan vif.
+    fn ega() -> Self {
+        Palette {
+            sombre: true,
+            ega: true,
+            fond: c(EGA_NOIR),
+            rail: c(EGA_NOIR),
+            liste: c(EGA_NOIR),
+            fil: c(EGA_NOIR),
+            rayon_rail: 0.,
+            rayon_liste: 0.,
+            rayon_fil: 0.,
+            // Trois fenêtres cadrées, séparées par un filet de noir.
+            marge: 4.,
+            ecart: 4.,
+            marge_fil: 0.,
+            givre_liste: c(EGA_NOIR),
+            givre_fil: c(EGA_NOIR),
+            surface: c(EGA_NOIR),
+            surface_bord: c(EGA_GRIS_CLAIR),
+            champ: c(EGA_NOIR),
+            choisi: c(EGA_BLEU),
+            survol: c(EGA_GRIS),
+            trait_fin: c(EGA_GRIS),
+            menu: c(EGA_NOIR),
+            menu_champ: c(EGA_BLEU),
+            carte: c(EGA_NOIR),
+            texte_fort: c(EGA_BLANC),
+            texte: c(EGA_GRIS_CLAIR),
+            texte_pale: c(EGA_GRIS_CLAIR),
+            apercu: c(EGA_GRIS_CLAIR),
+            icone: c(EGA_GRIS_CLAIR),
+            accent: c(EGA_CYAN_VIF),
+            expediteur: c(EGA_JAUNE),
+            jour_fond: c(EGA_NOIR),
+            jour_texte: c(EGA_JAUNE),
+            heure_recue: c(EGA_GRIS),
+            heure_envoyee: c(EGA_GRIS_CLAIR),
+            bord_avatar: hsla(0., 0., 0., 0.),
+            danger: c(EGA_ROUGE_VIF),
+            succes: c(EGA_VERT_VIF),
+        }
+    }
 }
 
 /// La palette du thème en cours.
 fn th() -> &'static Palette {
     static VERRES: LazyLock<Vec<Palette>> = LazyLock::new(|| TEINTES.iter().map(Palette::verre).collect());
     static SOMBRE: LazyLock<Palette> = LazyLock::new(Palette::sombre);
-    if THEME_SOMBRE.load(Ordering::Relaxed) {
-        &SOMBRE
-    } else {
-        &VERRES[TEINTE.load(Ordering::Relaxed).min(TEINTES.len() - 1)]
+    static EGA: LazyLock<Palette> = LazyLock::new(Palette::ega);
+    match theme() {
+        Theme::Sombre => &SOMBRE,
+        Theme::Ega => &EGA,
+        Theme::Verre => &VERRES[TEINTE.load(Ordering::Relaxed).min(TEINTES.len() - 1)],
     }
 }
 
 /// Change de thème (et de teinte du verre, par son id), y compris les
-/// couleurs des champs de gpui-component.
-fn appliquer_theme(sombre: bool, teinte_id: &str, cx: &mut App) {
-    THEME_SOMBRE.store(sombre, Ordering::Relaxed);
+/// couleurs et la police des champs de gpui-component.
+fn appliquer_theme(choix: Theme, teinte_id: &str, cx: &mut App) {
+    THEME.store(choix as u8, Ordering::Relaxed);
     TEINTE.store(TEINTES.iter().position(|t| t.id == teinte_id).unwrap_or(0), Ordering::Relaxed);
+    if choix == Theme::Ega {
+        POLICE_EGA.get_or_init(|| {
+            let dispo = cx.text_system().all_font_names();
+            POLICES_EGA.into_iter().find(|p| dispo.iter().any(|d| d == p)).unwrap_or(POLICE)
+        });
+    }
     let t = th();
     gpui_component::Theme::update(cx, |g| {
+        g.font_family = police().into();
         g.foreground = t.texte_fort;
-        g.caret = t.accent;
-        g.selection = alpha(t.accent, if sombre { 0.4 } else { 0.25 });
         g.muted_foreground = t.texte_pale;
+        if t.ega {
+            // Comme ega-theme.css : curseur jaune, sélection blanc sur bleu,
+            // texte indicatif en gris foncé.
+            g.caret = c(EGA_JAUNE);
+            g.selection = c(EGA_BLEU);
+            g.muted_foreground = c(EGA_GRIS);
+        } else {
+            g.caret = t.accent;
+            g.selection = alpha(t.accent, if t.sombre { 0.4 } else { 0.25 });
+        }
     });
+}
+
+/// Les 16 couleurs de l'adaptateur EGA.
+const EGA_16: [u32; 16] = [
+    0x000000, 0x0000aa, 0x00aa00, 0x00aaaa, 0xaa0000, 0xaa00aa, 0xaa5500, 0xaaaaaa,
+    0x555555, 0x5555ff, 0x55ff55, 0x55ffff, 0xff5555, 0xff55ff, 0xffff55, 0xffffff,
+];
+
+/// La couleur de `parmi` la plus proche de `h` (distance RVB), opacité gardée.
+fn plus_proche(h: Hsla, parmi: &[u32]) -> Hsla {
+    let r: gpui::Rgba = h.into();
+    let d = |x: u32| {
+        let canal = |s: u32| ((x >> s) & 0xff) as f32 / 255.;
+        (canal(16) - r.r).powi(2) + (canal(8) - r.g).powi(2) + (canal(0) - r.b).powi(2)
+    };
+    let x = parmi.iter().copied().min_by(|a, b| d(*a).total_cmp(&d(*b))).unwrap_or(0);
+    ca(x, h.a)
+}
+
+/// En EGA, une couleur ramenée à la palette 16 couleurs (comme le filtre
+/// ega-snap de Claude). Un gris foncé qui n'est pas du noir (un survol, un
+/// bouton du thème sombre) devient le gris EGA plutôt que de disparaître.
+/// Les autres thèmes gardent la couleur telle quelle.
+fn ega_snap(h: Hsla) -> Hsla {
+    if !th().ega {
+        return h;
+    }
+    let s = plus_proche(h, &EGA_16);
+    if s.l == 0. && h.l > 0.12 { plus_proche(h, &EGA_16[1..]) } else { s }
+}
+
+/// En EGA, un fond plein qui porte du texte blanc (avatar, pastille) : la
+/// couleur EGA foncée la plus proche.
+fn ega_fond(h: Hsla) -> Hsla {
+    plus_proche(h, &[0x0000aa, 0x00aa00, 0x00aaaa, 0xaa0000, 0xaa00aa, 0xaa5500, 0x555555])
+}
+
+/// Le dégradé en biais d'un avatar ; en EGA, un aplat EGA foncé (pas de dégradés).
+fn fond_avatar(de: Hsla, a: Hsla) -> gpui::Background {
+    if th().ega {
+        return ega_fond(a).into();
+    }
+    linear_gradient(150., linear_color_stop(de, 0.), linear_color_stop(a, 1.))
+}
+
+/// L'ombre portée EGA : un bloc gris décalé, sans flou.
+fn ombre_dure(decalage: f32) -> Vec<BoxShadow> {
+    vec![BoxShadow {
+        color: c(EGA_GRIS),
+        offset: point(px(decalage), px(decalage)),
+        blur_radius: px(0.),
+        spread_radius: px(0.),
+        inset: false,
+    }]
 }
 
 /// La tache floue d'une bulle envoyée, sous l'en-tête : le milieu de son dégradé.
@@ -361,9 +555,10 @@ fn tache_envoyee() -> Hsla {
     ca(milieu(16) | milieu(8) | milieu(0), 0.6)
 }
 
-/// La couleur du thème verre, ou celle du sombre.
+/// La couleur du thème verre, ou celle du sombre (ramenée à la palette EGA
+/// dans le thème EGA).
 fn ton(verre: Hsla, sombre: Hsla) -> Hsla {
-    if th().sombre { sombre } else { verre }
+    if th().sombre { ega_snap(sombre) } else { verre }
 }
 
 /// Une mesure (ou une opacité) du thème verre, ou celle du sombre.
@@ -377,18 +572,25 @@ fn alpha(mut h: Hsla, a: f32) -> Hsla {
     h
 }
 
-/// Un grand panneau (rail, liste, fil) : verre flottant à ombre, ou aplat sombre.
-fn panneau(fond: Hsla, rayon: f32) -> Div {
-    if th().sombre {
-        div().bg(fond).rounded(px(rayon))
+/// Un grand panneau (rail, liste, fil) : verre flottant à ombre, aplat
+/// sombre, ou fenêtre EGA noire cadrée de gris clair.
+fn panneau(fond: Hsla, r: f32) -> Div {
+    if th().ega {
+        div().bg(fond).border_1().border_color(c(EGA_GRIS_CLAIR))
+    } else if th().sombre {
+        div().bg(fond).rounded(rayon(r))
     } else {
-        div().bg(fond).border_1().border_color(blanc(0.75)).rounded(px(rayon)).shadow(ombre_verre())
+        div().bg(fond).border_1().border_color(blanc(0.75)).rounded(rayon(r)).shadow(ombre_verre())
     }
 }
 
 /// L'ombre des fenêtres de verre : 0 20px 50px -14px rgba(40,40,90,.28).
-/// Le thème sombre est plat : pas d'ombre.
+/// Le thème sombre est plat : pas d'ombre. L'EGA : l'ombre portée dure de
+/// ses dialogues et menus (6 px, gris).
 fn ombre_verre() -> Vec<BoxShadow> {
+    if th().ega {
+        return ombre_dure(6.);
+    }
     if th().sombre {
         return Vec::new();
     }
@@ -400,7 +602,12 @@ fn ombre_verre() -> Vec<BoxShadow> {
         inset: false,
     }]
 }
+/// L'ombre des éléments posés (bulles, boutons, rangée choisie) ; en EGA,
+/// une petite ombre portée dure.
 fn ombre_flottante() -> Vec<BoxShadow> {
+    if th().ega {
+        return ombre_dure(3.);
+    }
     if th().sombre {
         return Vec::new();
     }
@@ -413,15 +620,23 @@ fn ombre_flottante() -> Vec<BoxShadow> {
     }]
 }
 /// Un panneau de verre : blanc translucide, liseré clair, coins larges.
-/// En sombre : un aplat gris (`surface`), sans liseré.
-fn verre(opacite: f32, rayon: f32) -> Div {
-    if th().sombre {
-        return div().bg(th().surface).rounded(px(rayon));
+/// En sombre : un aplat gris (`surface`), sans liseré. En EGA : un aplat
+/// noir à trait plein gris, coins carrés.
+fn verre(opacite: f32, r: f32) -> Div {
+    if th().ega {
+        return div().bg(th().surface).border_1().border_color(th().trait_fin);
     }
-    div().bg(blanc(opacite)).border_1().border_color(blanc(0.75)).rounded(px(rayon))
+    if th().sombre {
+        return div().bg(th().surface).rounded(rayon(r));
+    }
+    div().bg(blanc(opacite)).border_1().border_color(blanc(0.75)).rounded(rayon(r))
 }
-/// Le dégradé bleu-violet du verre ; en sombre, le bleu plat.
+/// Le dégradé bleu-violet du verre ; en sombre, le bleu plat ; en EGA, le
+/// bleu EGA (#0000AA) des remplissages de Claude.
 fn degrade_accent() -> gpui::Background {
+    if th().ega {
+        return c(EGA_BLEU).into();
+    }
     if th().sombre {
         return th().accent.into();
     }
@@ -626,6 +841,7 @@ enum Section {
     Comptes,
     Notifications,
     Apparence,
+    Langue,
     APropos,
 }
 
@@ -645,6 +861,9 @@ struct Reglages {
     avatar_source: String,
     #[serde(default)]
     avatar_fichier: Option<PathBuf>,
+    /// "fr" (ou vide) ou "en".
+    #[serde(default)]
+    langue: String,
     /// Le thème : "sombre" (ou vide, le défaut) ou "verre".
     #[serde(default)]
     theme: String,
@@ -668,6 +887,7 @@ impl Default for Reglages {
             avatar_fichier: None,
             theme: String::new(),
             teinte: String::new(),
+            langue: String::new(),
         }
     }
 }
@@ -771,6 +991,15 @@ struct Jasette {
     emoji: Option<String>,
     connexion: Boite<Result<Value, String>>,
     connexion_ouverte: bool,
+    /// Messenger : son pont, son état, sa fenêtre de connexion, son NIP d'historique.
+    pont_meta: Option<Pont>,
+    etat_meta: Etat,
+    nom_meta: Option<String>,
+    avatar_messenger: Option<PathBuf>,
+    connexion_meta: Arc<Mutex<Option<Result<Value, String>>>>,
+    connexion_meta_ouverte: bool,
+    besoin_nip: bool,
+    nip: Entity<InputState>,
     convs: Vec<Conv>,
     archives: Vec<Conv>,
     archives_chargees: bool,
@@ -796,6 +1025,8 @@ struct Jasette {
     emojis_ouverts: bool,
     /// Le choix de l'avatar « Moi » est ouvert ; la photo que Google Messages connaît.
     menu_avatar: bool,
+    /// Le (i) de l'en-tête : l'heure exacte sous chaque message.
+    details_heures: bool,
     avatar_google: Option<PathBuf>,
     emoji_groupe: &'static str,
     emoji_recherche: Entity<InputState>,
@@ -826,6 +1057,70 @@ struct Jasette {
     active: bool,
     /// La conversation d'une notification cliquée.
     a_ouvrir: Boite<String>,
+}
+
+/// Les ids venant de Messenger portent le préfixe « m: » dans l'interface :
+/// ils ne peuvent pas se confondre avec ceux de Google, et ils disent à
+/// quel pont envoyer une commande.
+const PREFIXE_META: &str = "m:";
+
+fn service_de(id: &str) -> Service {
+    if id.starts_with(PREFIXE_META) { Service::Messenger } else { Service::GoogleMessages }
+}
+
+/// Ajoute le préfixe Messenger aux ids d'une nouvelle du pont Messenger.
+fn prefixer_meta(v: &mut Value) {
+    fn ids(v: &mut Value, dans_item: bool) {
+        match v {
+            Value::Object(o) => {
+                for (k, x) in o.iter_mut() {
+                    let cle = matches!(k.as_str(), "conv" | "media_id") || (dans_item && k == "id");
+                    match x {
+                        Value::String(s) if cle && !s.is_empty() && !s.starts_with(PREFIXE_META) => {
+                            *s = format!("{PREFIXE_META}{s}");
+                        }
+                        _ => ids(x, matches!(k.as_str(), "item" | "items")),
+                    }
+                }
+            }
+            Value::Array(a) => {
+                for x in a {
+                    ids(x, dans_item);
+                }
+            }
+            _ => {}
+        }
+    }
+    ids(v, false);
+    v["_meta"] = Value::Bool(true);
+}
+
+/// Une commande pour le pont Messenger ? (et on retire alors les préfixes).
+fn deprefixer_meta(v: &mut Value) -> bool {
+    let mut meta = false;
+    if let Value::Object(o) = v {
+        for (k, x) in o.iter_mut() {
+            if matches!(k.as_str(), "conv" | "media_id" | "msg" | "id")
+                && let Value::String(s) = x
+                && let Some(reste) = s.strip_prefix(PREFIXE_META)
+            {
+                *s = reste.to_string();
+                meta = true;
+            }
+        }
+    }
+    meta
+}
+
+fn script_connexion_meta() -> Option<PathBuf> {
+    let mut essais = Vec::new();
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        essais.push(dir.join("jasette-connexion-meta.py"));
+    }
+    essais.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("connexion/jasette-connexion-meta.py"));
+    essais.into_iter().find(|p| p.is_file())
 }
 
 fn script_connexion() -> Option<PathBuf> {
@@ -882,7 +1177,7 @@ impl Jasette {
         })
 
         .detach();
-        let recherche = cx.new(|cx| InputState::new(window, cx).placeholder("Rechercher"));
+        let recherche = cx.new(|cx| InputState::new(window, cx).placeholder(t("Rechercher")));
         cx.subscribe_in(&recherche, window, |this, state, ev: &InputEvent, _window, cx| {
             if let InputEvent::Change = ev {
                 this.filtre = plier(state.read(cx).value().trim());
@@ -890,7 +1185,7 @@ impl Jasette {
             }
         })
         .detach();
-        let emoji_recherche = cx.new(|cx| InputState::new(window, cx).placeholder("Chercher un emoji (en anglais)"));
+        let emoji_recherche = cx.new(|cx| InputState::new(window, cx).placeholder(t("Chercher un emoji (en anglais)")));
         cx.subscribe_in(&emoji_recherche, window, |this, state, ev: &InputEvent, _window, cx| {
             if let InputEvent::Change = ev {
                 this.emoji_filtre = state.read(cx).value().trim().to_lowercase();
@@ -898,7 +1193,17 @@ impl Jasette {
             }
         })
         .detach();
-        let numero = cx.new(|cx| InputState::new(window, cx).placeholder("Numéro de téléphone, puis Entrée"));
+        let nip = cx.new(|cx| InputState::new(window, cx).placeholder(t("NIP Messenger (6 chiffres), puis Entrée")).masked(true));
+        cx.subscribe_in(&nip, window, |this, state, ev: &InputEvent, window, cx| {
+            if let InputEvent::PressEnter { .. } = ev {
+                let pin = state.read(cx).value().trim().to_string();
+                this.commande_meta(json!({"cmd": "history_pin", "pin": pin}));
+                this.nip.update(cx, |s, cx| s.set_value("", window, cx));
+                cx.notify();
+            }
+        })
+        .detach();
+        let numero = cx.new(|cx| InputState::new(window, cx).placeholder(t("Numéro de téléphone, puis Entrée")));
         cx.subscribe_in(&numero, window, |this, state, ev: &InputEvent, window, cx| {
             if let InputEvent::PressEnter { .. } = ev {
                 let n = state.read(cx).value().trim().to_string();
@@ -951,6 +1256,26 @@ impl Jasette {
                             this.nouvelle(l);
                             change = true;
                         }
+                        let lignes: Vec<Value> = this.pont_meta.as_ref().map(|p| p.recevoir()).unwrap_or_default();
+                        for mut l in lignes {
+                            prefixer_meta(&mut l);
+                            this.nouvelle_meta(l);
+                            change = true;
+                        }
+                        let retour = this.connexion_meta.lock().ok().and_then(|mut r| r.take());
+                        if let Some(r) = retour {
+                            this.connexion_meta_ouverte = false;
+                            match r {
+                                Ok(v) => {
+                                    this.etat_meta = Etat::Association;
+                                    this.commande_meta(json!({
+                                        "cmd": "login", "cookies": v["cookies"], "platform": v["platform"]
+                                    }));
+                                }
+                                Err(e) => this.erreur = Some(e),
+                            }
+                            change = true;
+                        }
                         let retour = this.connexion.lock().ok().and_then(|mut r| r.take());
                         if let Some(r) = retour {
                             this.connexion_ouverte = false;
@@ -992,6 +1317,14 @@ impl Jasette {
             emoji: None,
             connexion: Arc::new(Mutex::new(None)),
             connexion_ouverte: false,
+            pont_meta: Pont::lancer_meta().map_err(|e| eprintln!("jasette : {e}")).ok(),
+            etat_meta: Etat::Demarrage,
+            nom_meta: None,
+            avatar_messenger: None,
+            connexion_meta: Arc::new(Mutex::new(None)),
+            connexion_meta_ouverte: false,
+            besoin_nip: false,
+            nip,
             convs: Vec::new(),
             archives: Vec::new(),
             archives_chargees: false,
@@ -1014,6 +1347,7 @@ impl Jasette {
             envoi_seq: 0,
             emojis_ouverts: false,
             menu_avatar: false,
+            details_heures: false,
             avatar_google: None,
             emoji_groupe: "Smileys",
             emoji_recherche,
@@ -1039,10 +1373,98 @@ impl Jasette {
         }
     }
 
-    fn commande(&self, v: Value) {
-        if let Some(p) = &self.pont {
+    /// Une commande pour le pont du service de la conversation (ou de la pièce) visée.
+    fn commande(&self, mut v: Value) {
+        if deprefixer_meta(&mut v) {
+            self.commande_meta(v);
+        } else if let Some(p) = &self.pont {
             p.envoyer(&v);
         }
+    }
+
+    fn commande_meta(&self, v: Value) {
+        if let Some(p) = &self.pont_meta {
+            p.envoyer(&v);
+        }
+    }
+
+    /// Les nouvelles du pont Messenger (ids déjà préfixés).
+    fn nouvelle_meta(&mut self, v: Value) {
+        match v.get("ev").and_then(Value::as_str).unwrap_or_default() {
+            "state" => {
+                self.etat_meta = match v.get("state").and_then(Value::as_str).unwrap_or_default() {
+                    "unpaired" => Etat::NonAssocie,
+                    "pairing" => Etat::Association,
+                    "connecting" => Etat::Connexion,
+                    "ready" => {
+                        if self.etat_meta != Etat::Pret {
+                            self.commande_meta(json!({"cmd": "conversations", "count": 50}));
+                        }
+                        self.ajout_compte = false;
+                        Etat::Pret
+                    }
+                    "reconnecting" => Etat::Reconnexion,
+                    _ => self.etat_meta,
+                };
+                if self.etat_meta == Etat::NonAssocie {
+                    self.convs.retain(|c| service_de(&c.id) != Service::Messenger);
+                    self.archives.retain(|c| service_de(&c.id) != Service::Messenger);
+                }
+            }
+            "paired" => self.etat_meta = Etat::Connexion,
+            "account" => self.nom_meta = v.get("name").and_then(Value::as_str).map(str::to_string),
+            "avatar_moi" => self.avatar_messenger = v.get("path").and_then(Value::as_str).map(PathBuf::from),
+            "history_pin" => {
+                if v.get("needed").and_then(Value::as_bool) == Some(true) {
+                    self.besoin_nip = true;
+                } else if v.get("ok").and_then(Value::as_bool) == Some(true) {
+                    self.besoin_nip = false;
+                } else if let Some(texte) = v.get("text").and_then(Value::as_str) {
+                    self.erreur = Some(format!("Messenger : {texte}"));
+                }
+            }
+            "hello" | "e2ee" | "typing" | "search" => {}
+            "error" => {
+                if let Some(texte) = v.get("text").and_then(Value::as_str) {
+                    self.erreur = Some(format!("Messenger : {texte}"));
+                }
+            }
+            _ => self.nouvelle(v),
+        }
+    }
+
+    /// Ouvre la fenêtre de connexion Messenger ; ses cookies reviennent par `self.connexion_meta`.
+    fn connecter_messenger(&mut self) {
+        if self.connexion_meta_ouverte {
+            return;
+        }
+        let Some(script) = script_connexion_meta() else {
+            self.erreur = Some("jasette-connexion-meta.py introuvable".into());
+            return;
+        };
+        self.erreur = None;
+        self.connexion_meta_ouverte = true;
+        let retour = self.connexion_meta.clone();
+        std::thread::spawn(move || {
+            let res = std::process::Command::new("python3")
+                .arg(&script)
+                .stdin(std::process::Stdio::null())
+                .stderr(std::process::Stdio::inherit())
+                .output();
+            let r = match res {
+                Ok(out) => {
+                    let texte = String::from_utf8_lossy(&out.stdout);
+                    match texte.lines().rev().find_map(|l| serde_json::from_str::<Value>(l).ok()) {
+                        Some(v) if v.get("cookies").is_some() => Ok(v),
+                        _ => Err(t("Connexion annulée").to_string()),
+                    }
+                }
+                Err(e) => Err(format!("Fenêtre de connexion : {e}")),
+            };
+            if let Ok(mut slot) = retour.lock() {
+                *slot = Some(r);
+            }
+        });
     }
 
     fn conv(&self, id: &str) -> Option<&Conv> {
@@ -1129,13 +1551,13 @@ impl Jasette {
             _ => nom,
         };
         let corps = if !self.reglages.apercu {
-            "Nouveau message".into()
+            t("Nouveau message").into()
         } else if !m.text.is_empty() {
             m.text.clone()
         } else if m.attachments.iter().any(Piece::est_image) {
             "📷 Photo".into()
         } else {
-            "📎 Pièce jointe".into()
+            t("📎 Pièce jointe").into()
         };
         let icone = self
             .avatars
@@ -1212,10 +1634,18 @@ impl Jasette {
                     // Google renvoie parfois une conversation deux fois : une seule par id.
                     let mut vues = HashSet::new();
                     let items: Vec<Conv> = items.into_iter().filter(|c| vues.insert(c.id.clone())).collect();
-                    if v.get("folder").and_then(Value::as_str) == Some("archive") {
-                        self.archives = items;
+                    // Chaque pont ne remplace que ses propres conversations.
+                    let meta = v.get("_meta").is_some();
+                    let garder = |c: &Conv| (service_de(&c.id) == Service::Messenger) != meta;
+                    let fusion = |anciennes: &mut Vec<Conv>, items: Vec<Conv>| {
+                        anciennes.retain(garder);
+                        anciennes.extend(items);
+                        anciennes.sort_by(|a, b| b.time.cmp(&a.time));
+                    };
+                    if v.get("folder").and_then(Value::as_str) == Some("archive") || v.get("archive").and_then(Value::as_bool) == Some(true) {
+                        fusion(&mut self.archives, items);
                     } else {
-                        self.convs = items;
+                        fusion(&mut self.convs, items);
                         if self.choisie.is_none()
                             && let Some(first) = self.convs.first()
                         {
@@ -1352,9 +1782,9 @@ impl Jasette {
                             } else if m.attachments.iter().any(Piece::est_image) {
                                 "📷 Photo".into()
                             } else if m.attachments.iter().any(Piece::est_audio) {
-                                "🎤 Message vocal".into()
+                                t("🎤 Message vocal").into()
                             } else {
-                                "📎 Pièce jointe".into()
+                                t("📎 Pièce jointe").into()
                             };
                             conv.from_me = m.from_me;
                         }
@@ -1565,6 +1995,7 @@ impl Jasette {
     fn photo_moi(&self) -> Option<PathBuf> {
         match self.reglages.avatar_source.as_str() {
             "google" => self.avatar_google.clone(),
+            "messenger" => self.avatar_messenger.clone(),
             "fichier" => self.reglages.avatar_fichier.clone().filter(|p| p.is_file()),
             _ => None,
         }
@@ -1578,8 +2009,8 @@ impl Jasette {
         div()
             .flex_none()
             .size(px(taille))
-            .rounded(px(taille))
-            .bg(linear_gradient(150., linear_color_stop(c(0x34d399), 0.), linear_color_stop(c(0x059669), 1.)))
+            .rounded(rayon(taille))
+            .bg(fond_avatar(c(0x34d399), c(0x059669)))
             .border_1()
             .border_color(ton(blanc(0.85), th().bord_avatar))
             .flex()
@@ -1604,7 +2035,7 @@ impl Jasette {
                 .gap(px(10.))
                 .px(px(10.))
                 .py(px(7.))
-                .rounded(px(12.))
+                .rounded(rayon(12.))
                 .when(choisi, |d| d.bg(ton(blanc(0.9), th().menu_champ)))
                 .when(dispo, |d| d.cursor_pointer().hover(|s| s.bg(ton(blanc(0.75), th().menu_champ))))
                 .when(!dispo, |d| d.opacity(0.5))
@@ -1643,8 +2074,8 @@ impl Jasette {
                 ligne(
                     "av-google",
                     "google",
-                    "Avatar de Google Messages",
-                    if google_dispo { "Votre fiche sur le téléphone".into() } else { "Aucune photo trouvée".into() },
+                    t("Avatar de Google Messages"),
+                    if google_dispo { t("Votre fiche sur le téléphone").into() } else { t("Aucune photo trouvée").into() },
                     avec_badge(avatar("G", "", false, self.avatar_google.as_ref(), 34.), Service::GoogleMessages),
                     google_dispo,
                 )
@@ -1657,30 +2088,44 @@ impl Jasette {
                     }))
                 }),
             )
-            .child(ligne(
-                "av-fb",
-                "messenger",
-                "Avatar de Facebook",
-                "Quand Messenger sera connecté".into(),
-                avec_badge(avatar("F", "#0084ff", false, None, 34.), Service::Messenger),
-                false,
-            ))
+            .child(
+                ligne(
+                    "av-fb",
+                    "messenger",
+                    t("Avatar de Facebook"),
+                    if self.avatar_messenger.is_some() {
+                        self.nom_meta.clone().unwrap_or_else(|| "Messenger".into())
+                    } else {
+                        t("Quand Messenger sera connecté").into()
+                    },
+                    avec_badge(avatar("F", "#0084ff", false, self.avatar_messenger.as_ref(), 34.), Service::Messenger),
+                    self.avatar_messenger.is_some(),
+                )
+                .when(self.avatar_messenger.is_some(), |d| {
+                    d.on_click(cx.listener(|this, _, _, cx| {
+                        this.reglages.avatar_source = "messenger".into();
+                        this.reglages.garder();
+                        this.menu_avatar = false;
+                        cx.notify();
+                    }))
+                }),
+            )
             .child(
                 ligne(
                     "av-fichier",
                     "fichier",
-                    "Choisir une image…",
+                    t("Choisir une image…"),
                     fichier
                         .as_ref()
                         .and_then(|p| p.file_name())
                         .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "Une photo de votre ordinateur".into()),
+                        .unwrap_or_else(|| t("Une photo de votre ordinateur").into()),
                     match &fichier {
                         Some(p) => avatar("", "", false, Some(p), 34.),
                         None => div()
                             .size(px(34.))
                             .flex_none()
-                            .rounded(px(34.))
+                            .rounded(rayon(34.))
                             .bg(ton(blanc(0.8), th().menu_champ))
                             .flex()
                             .items_center()
@@ -1693,7 +2138,7 @@ impl Jasette {
                 .on_click(cx.listener(|this, _, _, cx| this.choisir_photo(cx))),
             )
             .child(
-                ligne("av-initiale", "initiale", "Initiale", "Sans photo".into(), self.initiale_seule(34.), true)
+                ligne("av-initiale", "initiale", t("Initiale"), t("Sans photo").into(), self.initiale_seule(34.), true)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.reglages.avatar_source = "initiale".into();
                         this.reglages.garder();
@@ -1707,8 +2152,8 @@ impl Jasette {
         div()
             .flex_none()
             .size(px(taille))
-            .rounded(px(taille))
-            .bg(linear_gradient(150., linear_color_stop(c(0x34d399), 0.), linear_color_stop(c(0x059669), 1.)))
+            .rounded(rayon(taille))
+            .bg(fond_avatar(c(0x34d399), c(0x059669)))
             .flex()
             .items_center()
             .justify_center()
@@ -1723,7 +2168,7 @@ impl Jasette {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Choisir".into()),
+            prompt: Some(t("Choisir").into()),
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(chemins))) = choix.await
@@ -1747,7 +2192,7 @@ impl Jasette {
             files: true,
             directories: false,
             multiple: true,
-            prompt: Some("Envoyer".into()),
+            prompt: Some(t("Envoyer").into()),
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(chemins))) = choix.await {
@@ -1816,12 +2261,13 @@ impl Jasette {
             .id(id)
             .relative()
             .size(px(44.))
-            .rounded(px(14.))
+            .rounded(rayon(14.))
             .flex()
             .items_center()
             .justify_center()
             .cursor_pointer()
-            .when(actif, |d| d.bg(ton(blanc(0.85), c(0x3a3a3c))).shadow(ombre_flottante()))
+            // th().choisi vaut le 0x3a3a3c du sombre ; en EGA, le bleu de sélection.
+            .when(actif, |d| d.bg(ton(blanc(0.85), th().choisi)).shadow(ombre_flottante()))
             .when(!actif, |d| d.hover(|s| s.bg(ton(blanc(0.5), c(0x2c2c2e)))))
     }
 
@@ -1893,6 +2339,16 @@ impl Jasette {
                     .when(gm_probleme, |d| d.child(pastille_alerte()))
                     .when(!gm_probleme && non_lus > 0, |d| d.child(pastille_nombre(non_lus, ton(c(DANGER), th().accent)))),
             ))
+            .when(!matches!(self.etat_meta, Etat::NonAssocie | Etat::Demarrage), |d| d.child(
+                Self::bouton_rail("r-messenger", !en_reglages && self.vue == Vue::Service(Service::Messenger))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.section = None;
+                        this.vue = Vue::Service(Service::Messenger);
+                        cx.notify();
+                    }))
+                    .child(logo(Service::Messenger, 32.))
+                    .when(!matches!(self.etat_meta, Etat::Pret), |d| d.child(pastille_alerte())),
+            ))
             // Les services non connectés n'ont pas d'icône : « ••• » mène à l'ajout de compte.
             .child(
                 Self::bouton_rail("r-plus-services", false)
@@ -1920,6 +2376,11 @@ impl Jasette {
         if self.non_lus_seulement && !conv.unread {
             return false;
         }
+        if let Vue::Service(s) = self.vue
+            && service_de(&conv.id) != s
+        {
+            return false;
+        }
         if self.filtre.is_empty() {
             return true;
         }
@@ -1933,7 +2394,7 @@ impl Jasette {
         div()
             .id(id)
             .size(px(32.))
-            .rounded(px(10.))
+            .rounded(rayon(10.))
             .flex()
             .items_center()
             .justify_center()
@@ -2034,7 +2495,7 @@ impl Jasette {
             col = col.child(
                 div().px(px(12.)).pb(px(10.)).child(
                     verre(0.75, 16.)
-                        .when(th().sombre, |d| d.bg(th().champ).rounded(px(12.)))
+                        .when(th().sombre, |d| d.bg(th().champ).rounded(rayon(12.)))
                         .id("banniere")
                         .flex()
                         .flex_row()
@@ -2089,13 +2550,16 @@ impl Jasette {
                     .top(px(1.))
                     .left(px(1.))
                     .right(px(1.))
-                    .h(px(haut_voile))
-                    .rounded_t(px(r))
-                    .bg(linear_gradient(
-                        180.,
-                        linear_color_stop(givre(mesure(0.97, 1.)), haut / haut_voile),
-                        linear_color_stop(givre(0.), 1.),
-                    ))
+                    .rounded_t(rayon(r))
+                    .when(!th().ega, |d| {
+                        d.h(px(haut_voile)).bg(linear_gradient(
+                            180.,
+                            linear_color_stop(givre(mesure(0.97, 1.)), haut / haut_voile),
+                            linear_color_stop(givre(0.), 1.),
+                        ))
+                    })
+                    // En EGA, un en-tête noir plein, coupé net par un filet.
+                    .when(th().ega, |d| d.h(px(haut)).bg(givre(1.)).border_b_1().border_color(th().trait_fin))
                     .child(col),
             )
             .child(
@@ -2104,9 +2568,16 @@ impl Jasette {
                     .bottom(px(1.))
                     .left(px(1.))
                     .right(px(1.))
-                    .h(px(MARGE_FIL + 18.))
-                    .rounded_b(px(r))
-                    .bg(linear_gradient(180., linear_color_stop(givre(0.), 0.), linear_color_stop(givre(mesure(0.9, 1.)), 0.6))),
+                    .h(px(if th().ega { MARGE_FIL } else { MARGE_FIL + 18. }))
+                    .rounded_b(rayon(r))
+                    .when(!th().ega, |d| {
+                        d.bg(linear_gradient(
+                            180.,
+                            linear_color_stop(givre(0.), 0.),
+                            linear_color_stop(givre(mesure(0.9, 1.)), 0.6),
+                        ))
+                    })
+                    .when(th().ega, |d| d.bg(givre(1.))),
             )
     }
 
@@ -2118,21 +2589,21 @@ impl Jasette {
         let visibles: Vec<&Conv> = source.iter().filter(|c| self.correspond(c)).collect();
         if source.is_empty() {
             let t = if self.vue == Vue::Archives && !self.archives_chargees {
-                "Chargement des archives…"
+                t("Chargement des archives…")
             } else if self.vue == Vue::Archives {
-                "Aucune conversation archivée"
+                t("Aucune conversation archivée")
             } else {
-                "Chargement des conversations…"
+                t("Chargement des conversations…")
             };
             col = col.child(div().p(px(16.)).text_color(th().texte_pale).child(t));
         } else if visibles.is_empty() {
-            col = col.child(div().p(px(16.)).text_color(th().texte_pale).child("Aucun résultat"));
+            col = col.child(div().p(px(16.)).text_color(th().texte_pale).child(t("Aucun résultat")));
         }
         let n = visibles.len();
         for (i, conv) in visibles.into_iter().enumerate() {
             let choisie = self.choisie.as_deref() == Some(conv.id.as_str());
             let id = conv.id.clone();
-            let nom = if conv.name.is_empty() { "Sans nom".to_string() } else { conv.name.clone() };
+            let nom = if conv.name.is_empty() { t("Sans nom").to_string() } else { conv.name.clone() };
             let lu_par_eux = conv.from_me
                 && self
                     .messages
@@ -2147,7 +2618,7 @@ impl Jasette {
                     .items_center()
                     .gap(px(12.))
                     .pl(px(10.))
-                    .rounded(px(mesure(16., 10.)))
+                    .rounded(rayon(mesure(16., 10.)))
                     .cursor_pointer()
                     .when(choisie, |d| d.bg(th().choisi).shadow(ombre_flottante()))
                     .when(!choisie, |d| d.hover(|s| s.bg(th().survol)))
@@ -2162,7 +2633,7 @@ impl Jasette {
                             .py(px(10.))
                             .child(self.avatar_conv(conv, &nom, 50.))
                             .when(badge, |d| {
-                                d.child(div().absolute().right(px(-3.)).bottom(px(7.)).child(logo(Service::GoogleMessages, 20.)))
+                                d.child(div().absolute().right(px(-3.)).bottom(px(7.)).child(logo(service_de(&conv.id), 20.)))
                             }),
                     )
                     .child(
@@ -2217,7 +2688,7 @@ impl Jasette {
                                             .text_size(px(13.))
                                             .child(texte_emoji(
                                                 if conv.preview.trim().is_empty() {
-                                                    "📎 Pièce jointe".to_string()
+                                                    t("📎 Pièce jointe").to_string()
                                                 } else {
                                                     une_ligne(&conv.preview)
                                                 },
@@ -2227,7 +2698,7 @@ impl Jasette {
                                             )),
                                     )
                                     .when(conv.unread, |d| {
-                                        d.child(div().flex_none().size(px(9.)).rounded(px(999.)).bg(degrade_accent()))
+                                        d.child(div().flex_none().size(px(9.)).rounded(rayon(999.)).bg(degrade_accent()))
                                     }),
                             ),
                     ),
@@ -2251,7 +2722,7 @@ impl Jasette {
                 .id(id)
                 .w(px(w))
                 .h(px(h))
-                .rounded(px(18.))
+                .rounded(rayon(18.))
                 .overflow_hidden()
                 .bg(ton(blanc(0.55), th().surface))
                 .border_1()
@@ -2266,7 +2737,7 @@ impl Jasette {
                     cadre
                         .cursor_pointer()
                         .on_click(move |_, _, _| ouvrir_fichier(&ouvrir))
-                        .child(img(chemin).size_full().rounded(px(18.)).object_fit(ObjectFit::Cover))
+                        .child(img(chemin).size_full().rounded(rayon(18.)).object_fit(ObjectFit::Cover))
                         .into_any_element()
                 }
                 None => {
@@ -2281,7 +2752,7 @@ impl Jasette {
                                 cx.notify();
                             }))
                         })
-                        .child(if echec { "Image indisponible · réessayer" } else { "Chargement de l'image…" })
+                        .child(if echec { t("Image indisponible · réessayer") } else { t("Chargement de l'image…") })
                         .into_any_element()
                 }
             };
@@ -2305,7 +2776,7 @@ impl Jasette {
             .max_w(px(320.))
             .px(px(14.))
             .py(px(10.))
-            .rounded(px(18.))
+            .rounded(rayon(18.))
             .bg(th().surface)
             .border_1()
             .border_color(th().surface_bord)
@@ -2325,7 +2796,7 @@ impl Jasette {
                 div()
                     .size(px(36.))
                     .flex_none()
-                    .rounded(px(12.))
+                    .rounded(rayon(12.))
                     .bg(alpha(th().accent, 0.12))
                     .flex()
                     .items_center()
@@ -2339,7 +2810,7 @@ impl Jasette {
                     .min_w(px(0.))
                     .child(div().truncate().text_size(px(13.)).text_color(th().texte_fort).child(nom))
                     .child(div().text_size(px(11.)).text_color(th().texte_pale).child(if attente {
-                        "Téléchargement…".to_string()
+                        t("Téléchargement…").to_string()
                     } else {
                         taille(p.size)
                     })),
@@ -2357,7 +2828,7 @@ impl Jasette {
                 .items_center()
                 .justify_center()
                 .text_color(th().texte_pale)
-                .child("Choisissez une conversation")
+                .child(t("Choisissez une conversation"))
                 .into_any_element();
         };
         if self.descendre {
@@ -2407,7 +2878,7 @@ impl Jasette {
                     .self_center()
                     .text_size(px(13.))
                     .text_color(if flou { invisible } else { th().texte_pale })
-                    .child("Chargement…"),
+                    .child(t("Chargement…")),
             );
         } else if self.plus_anciens.get(&id).copied().unwrap_or(false) {
             let bouton = div()
@@ -2415,10 +2886,10 @@ impl Jasette {
                 .mb(px(8.))
                 .px(px(14.))
                 .py(px(5.))
-                .rounded(px(999.))
+                .rounded(rayon(999.))
                 .border_1()
                 .text_size(px(13.))
-                .child("Messages plus anciens");
+                .child(t("Messages plus anciens"));
             col = col.child(if flou {
                 bouton.border_color(invisible).text_color(invisible).shadow(tache(ton(blanc(0.8), th().surface), 10.)).into_any_element()
             } else {
@@ -2447,7 +2918,7 @@ impl Jasette {
                         .my(px(10.))
                         .px(px(12.))
                         .py(px(3.))
-                        .rounded(px(999.))
+                        .rounded(rayon(999.))
                         .text_size(px(12.))
                         .when(flou, |d| d.shadow(tache(ton(blanc(0.7), th().jour_fond), 10.)))
                         .when(!flou, |d| d.bg(th().jour_fond).text_color(th().jour_texte))
@@ -2486,7 +2957,7 @@ impl Jasette {
                         .gap(px(6.))
                         .px(px(12.))
                         .py(px(8.))
-                        .rounded(px(16.))
+                        .rounded(rayon(16.))
                         .text_size(px(13.))
                         .when(flou, |d| d.shadow(tache(ton(blanc(0.85), th().surface), 16.)))
                         .when(!flou, |d| d.bg(ton(blanc(0.7), th().surface)).text_color(th().texte))
@@ -2495,13 +2966,13 @@ impl Jasette {
                 );
             }
             // En sombre, l'heure se loge dans la bulle, en bas à droite.
-            let heure_dedans = th().sombre && !m.text.is_empty();
+            let heure_dedans = th().sombre && !m.text.is_empty() && !self.details_heures;
             if !m.text.is_empty() {
                 let bulle = div()
                     .max_w(px(520.))
                     .px(px(mesure(14., 12.)))
                     .py(px(mesure(8., 7.)))
-                    .rounded(px(mesure(20., 18.)))
+                    .rounded(rayon(mesure(20., 18.)))
                     .border_1()
                     .when(heure_dedans, |d| d.flex().flex_row().flex_wrap().items_end().justify_end().gap_x(px(8.)));
                 let couleur_heure = if flou {
@@ -2515,7 +2986,7 @@ impl Jasette {
                 };
                 let mut dans_bulle = heure(m.time, false);
                 if m.from_me && statut(&m.status) == "Échec" {
-                    dans_bulle = format!("{dans_bulle} · Échec");
+                    dans_bulle = format!("{dans_bulle} · {}", t("Échec"));
                 }
                 ligne = ligne.child(
                     match (flou, m.from_me) {
@@ -2544,12 +3015,13 @@ impl Jasette {
                     }),
                 );
             }
-            if !heure_dedans && (dernier || statut(&m.status) == "Échec") {
-                let mut pied = heure(m.time, false);
+            if self.details_heures || (!heure_dedans && (dernier || statut(&m.status) == "Échec")) {
+                let mut pied =
+                    if self.details_heures { format!("{} · {}", jour(m.time), heure(m.time, false)) } else { heure(m.time, false) };
                 if m.from_me {
                     let s = statut(&m.status);
                     if !s.is_empty() {
-                        pied = format!("{pied} · {s}");
+                        pied = format!("{pied} · {}", t(s));
                     }
                 }
                 if !m.kind.is_empty() {
@@ -2591,7 +3063,7 @@ impl Jasette {
         for i in 0..BARRES {
             let h = onde.map(|o| o.0[i]).unwrap_or(0.15);
             let jouee = (i as f32 + 0.5) / BARRES as f32 <= fraction;
-            barres = barres.child(div().w(px(3.)).h(px(4. + 26. * h)).rounded(px(2.)).bg(if jouee { fort } else { pale }));
+            barres = barres.child(div().w(px(3.)).h(px(4. + 26. * h)).rounded(rayon(2.)).bg(if jouee { fort } else { pale }));
         }
         let temps = if en_cours.is_some() || pos > 0. { pos } else { duree };
         let piece = p.clone();
@@ -2604,7 +3076,7 @@ impl Jasette {
             .pl(px(6.))
             .pr(px(14.))
             .py(px(6.))
-            .rounded(px(999.))
+            .rounded(rayon(999.))
             .when(m.from_me, |d| d.bg(degrade_accent()).shadow(ombre_flottante()))
             .when(!m.from_me, |d| d.bg(th().surface).border_1().border_color(th().surface_bord))
             .child(
@@ -2612,7 +3084,7 @@ impl Jasette {
                     .id(SharedString::from(format!("vb-{}-{}", m.id, p.media_id)))
                     .size(px(36.))
                     .flex_none()
-                    .rounded(px(999.))
+                    .rounded(rayon(999.))
                     .bg(fond_bouton)
                     .flex()
                     .items_center()
@@ -2657,7 +3129,7 @@ impl Jasette {
         };
         if p.est_image() {
             let (w, h) = p.cadre();
-            return div().w(px(w)).h(px(h)).rounded(px(18.)).shadow(ombre(ton(ca(0x8a90b8, 0.7), c(0x3a3a3c)))).into_any_element();
+            return div().w(px(w)).h(px(h)).rounded(rayon(18.)).shadow(ombre(ton(ca(0x8a90b8, 0.7), c(0x3a3a3c)))).into_any_element();
         }
         if p.est_audio() {
             // 6 + 36 + 10 + barres + 10 + 34 + 14 de large, 48 de haut.
@@ -2665,7 +3137,7 @@ impl Jasette {
             return div()
                 .w(px(w))
                 .h(px(48.))
-                .rounded(px(999.))
+                .rounded(rayon(999.))
                 .shadow(ombre(tache_envoyee()))
                 .into_any_element();
         }
@@ -2679,7 +3151,7 @@ impl Jasette {
             .max_w(px(320.))
             .px(px(14.))
             .py(px(10.))
-            .rounded(px(18.))
+            .rounded(rayon(18.))
             .border_1()
             .border_color(invisible)
             .shadow(ombre(ton(blanc(0.9), th().surface)))
@@ -2701,7 +3173,7 @@ impl Jasette {
             .id(id)
             .size(px(42.))
             .flex_none()
-            .rounded(px(999.))
+            .rounded(rayon(999.))
             .flex()
             .items_center()
             .justify_center()
@@ -2720,7 +3192,7 @@ impl Jasette {
                 .text_center()
                 .text_size(px(13.))
                 .text_color(th().texte_pale)
-                .child("Conversation en lecture seule")
+                .child(t("Conversation en lecture seule"))
                 .into_any_element();
         }
         let centre: AnyElement = match &self.vocal {
@@ -2732,7 +3204,7 @@ impl Jasette {
                     .flex_row()
                     .items_center()
                     .gap(px(8.))
-                    .child(div().size(px(10.)).rounded(px(10.)).bg(th().danger))
+                    .child(div().size(px(10.)).rounded(rayon(10.)).bg(th().danger))
                     .child(
                         div()
                             .text_color(th().texte_fort)
@@ -2749,7 +3221,7 @@ impl Jasette {
                                 this.arreter_vocal(false);
                                 cx.notify();
                             }))
-                            .child("Annuler"),
+                            .child(t("Annuler")),
                     )
                     .into_any_element()
             }
@@ -2776,13 +3248,13 @@ impl Jasette {
                     .gap(px(8.))
                     .pl(px(12.))
                     .pr(px(10.))
-                    .child(logo(Service::GoogleMessages, 20.))
+                    .child(logo(self.choisie.as_deref().map(service_de).unwrap_or(Service::GoogleMessages), 20.))
                     .child(centre)
                     .child(
                         div()
                             .id("emojis")
                             .cursor_pointer()
-                            .rounded(px(8.))
+                            .rounded(rayon(8.))
                             .p(px(3.))
                             .hover(|s| s.bg(ton(blanc(0.8), c(0x3a3a3c))))
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -2795,7 +3267,7 @@ impl Jasette {
                         div()
                             .id("micro")
                             .cursor_pointer()
-                            .rounded(px(8.))
+                            .rounded(rayon(8.))
                             .p(px(3.))
                             .hover(|s| s.bg(ton(blanc(0.8), c(0x3a3a3c))))
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -2838,7 +3310,7 @@ impl Jasette {
                 div()
                     .id(("onglet-emoji", i))
                     .size(px(34.))
-                    .rounded(px(10.))
+                    .rounded(rayon(10.))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -2860,9 +3332,9 @@ impl Jasette {
         if choix.is_empty() {
             grille = grille.child(div().p(px(14.)).text_size(px(13.)).text_color(th().texte_pale).child(
                 if self.emoji_groupe == "Récents" && self.emoji_filtre.is_empty() {
-                    "Les emojis que vous utilisez apparaîtront ici."
+                    t("Les emojis que vous utilisez apparaîtront ici.")
                 } else {
-                    "Aucun emoji"
+                    t("Aucun emoji")
                 },
             ));
         }
@@ -2871,7 +3343,7 @@ impl Jasette {
                 div()
                     .id(("emoji", i))
                     .size(px(40.))
-                    .rounded(px(10.))
+                    .rounded(rayon(10.))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -2896,7 +3368,7 @@ impl Jasette {
             );
         }
         verre(0.94, 22.)
-            .when(th().sombre, |d| d.bg(th().menu).border_1().border_color(th().trait_fin).rounded(px(14.)))
+            .when(th().sombre, |d| d.bg(th().menu).border_1().border_color(th().trait_fin).rounded(rayon(14.)))
             .shadow(ombre_verre())
             .w(px(392.))
             .h(px(380.))
@@ -2925,7 +3397,25 @@ impl Jasette {
 
     fn panneau_fil(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let choisie = self.choisie.as_ref().and_then(|id| self.conv(id)).cloned();
-        let badge_service = |d: Div| d.child(div().absolute().right(px(-3.)).bottom(px(-2.)).child(logo(Service::GoogleMessages, 16.)));
+        // (i) : l'heure exacte de chaque message, ou non.
+        let details = self.details_heures;
+        let bouton_info = div()
+            .id("details-heures")
+            .size(px(28.))
+            .rounded(rayon(999.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .when(details, |d| d.bg(alpha(th().accent, 0.15)))
+            .hover(|s| s.bg(th().survol))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.details_heures = !this.details_heures;
+                cx.notify();
+            }))
+            .child(icone("info", 17., if details { th().accent } else { th().texte_pale }));
+        let service = self.choisie.as_deref().map(service_de).unwrap_or(Service::GoogleMessages);
+        let badge_service = |d: Div| d.child(div().absolute().right(px(-3.)).bottom(px(-2.)).child(logo(service, 16.)));
 
         // L'en-tête flotte sur le fil : un voile dégradé fait disparaître les messages qui passent dessous.
         // En retrait d'un pixel et arrondi comme le panneau : GPUI ne découpe pas
@@ -2940,7 +3430,9 @@ impl Jasette {
         // 3. un lavis givré qui adoucit les taches et les fond dans le bas.
         const BORD: f32 = 16.;
         let decalage = self.defile.offset().y + px(MARGE_FIL - 1. - 6.);
-        let copie_floue = self.fil_contenu(true, cx).map(|contenu| {
+        // L'EGA n'a ni flou ni verre : un en-tête noir plein, filet en dessous.
+        let ega = th().ega;
+        let copie_floue = (!ega).then(|| self.fil_contenu(true, cx)).flatten().map(|contenu| {
             div()
                 .absolute()
                 .top(px(6.))
@@ -2972,13 +3464,15 @@ impl Jasette {
             .top(px(1.))
             .left(px(1.))
             .right(px(1.))
-            .rounded_t(px(r))
-            .h(px(haut_voile))
-            .bg(linear_gradient(
-                180.,
-                linear_color_stop(givre(1.), HAUT_ENTETE / haut_voile),
-                linear_color_stop(givre(0.), 1.),
-            ))
+            .rounded_t(rayon(r))
+            .when(!ega, |d| {
+                d.h(px(haut_voile)).bg(linear_gradient(
+                    180.,
+                    linear_color_stop(givre(1.), HAUT_ENTETE / haut_voile),
+                    linear_color_stop(givre(0.), 1.),
+                ))
+            })
+            .when(ega, |d| d.h(px(HAUT_ENTETE)).bg(givre(1.)).border_b_1().border_color(th().trait_fin))
             .children(copie_floue)
             .child(
                 div()
@@ -2987,7 +3481,7 @@ impl Jasette {
                     .left_0()
                     .right_0()
                     .bottom_0()
-                    .rounded_t(px(r))
+                    .rounded_t(rayon(r))
                     .bg(linear_gradient(
                         180.,
                         linear_color_stop(givre(0.55), 0.),
@@ -3008,14 +3502,14 @@ impl Jasette {
                 div().h(px(HAUT_ENTETE)).flex().flex_row().items_center().gap(px(12.)).px(px(20.)).when_some(
                     choisie.clone(),
                     |d, conv| {
-                        let nom = if conv.name.is_empty() { "Sans nom".to_string() } else { conv.name.clone() };
+                        let nom = if conv.name.is_empty() { t("Sans nom").to_string() } else { conv.name.clone() };
                         let detail = if conv.group {
-                            format!("{} participants · Google Messages", conv.members.len() + 1)
+                            format!("{} participants · {}", conv.members.len() + 1, service.nom())
                         } else {
                             let qui = conv.members.first().filter(|m| **m != nom).cloned();
                             match qui {
-                                Some(q) => format!("{q} · Google Messages"),
-                                None => "Google Messages".into(),
+                                Some(q) => format!("{q} · {}", service.nom()),
+                                None => service.nom().into(),
                             }
                         };
                         d.child(badge_service(
@@ -3030,11 +3524,12 @@ impl Jasette {
                                 .child(div().truncate().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(nom))
                                 .child(div().truncate().text_size(px(12.)).text_color(th().texte_pale).child(detail)),
                         )
+                        .child(bouton_info)
                         .child(
                             div()
                                 .px(px(10.))
                                 .py(px(2.))
-                                .rounded(px(999.))
+                                .rounded(rayon(999.))
                                 .text_size(px(11.))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .when(conv.rcs, |d| d.bg(alpha(th().accent, 0.12)).text_color(th().accent).child("RCS"))
@@ -3050,15 +3545,17 @@ impl Jasette {
             .bottom(px(1.))
             .left(px(1.))
             .right(px(1.))
-            .rounded_b(px(r))
+            .rounded_b(rayon(r))
             .px(px(16.))
             .pb(px(14.))
-            .pt(px(26.))
-            .bg(linear_gradient(
-                0.,
-                linear_color_stop(alpha(th().givre_fil, mesure(0.9, 1.)), 0.35),
-                linear_color_stop(alpha(th().givre_fil, 0.), 1.),
-            ))
+            .when(!ega, |d| {
+                d.pt(px(26.)).bg(linear_gradient(
+                    0.,
+                    linear_color_stop(alpha(th().givre_fil, mesure(0.9, 1.)), 0.35),
+                    linear_color_stop(alpha(th().givre_fil, 0.), 1.),
+                ))
+            })
+            .when(ega, |d| d.pt(px(14.)).bg(th().givre_fil).border_t_1().border_color(th().trait_fin))
             .child(self.composeur(choisie.as_ref(), cx));
 
         let fil = self.fil(cx);
@@ -3093,15 +3590,15 @@ impl Jasette {
                 .gap(px(12.))
                 .px(px(10.))
                 .py(px(9.))
-                .rounded(px(14.))
+                .rounded(rayon(14.))
                 .cursor_pointer()
                 .when(section == s, |d| d.bg(ton(blanc(0.85), th().choisi)).shadow(ombre_flottante()))
                 .when(section != s, |d| d.hover(|st| st.bg(ton(blanc(0.5), th().survol))))
                 .child(
                     div()
                         .size(px(30.))
-                        .rounded(px(9.))
-                        .bg(c(couleur))
+                        .rounded(rayon(9.))
+                        .bg(if th().ega { ega_fond(c(couleur)) } else { c(couleur) })
                         .flex()
                         .items_center()
                         .justify_center()
@@ -3112,7 +3609,7 @@ impl Jasette {
                     d.child(
                         div()
                             .px(px(8.))
-                            .rounded(px(999.))
+                            .rounded(rayon(999.))
                             .bg(ton(blanc(0.7), c(0x48484a)))
                             .text_size(px(12.))
                             .text_color(th().texte)
@@ -3136,7 +3633,7 @@ impl Jasette {
                     .text_size(px(mesure(22., 18.)))
                     .font_weight(FontWeight::BOLD)
                     .text_color(th().texte_fort)
-                    .child("Réglages"),
+                    .child(t("Réglages")),
             )
             .child(
                 div()
@@ -3166,7 +3663,7 @@ impl Jasette {
                                     .right(px(-3.))
                                     .bottom(px(-3.))
                                     .size(px(18.))
-                                    .rounded(px(18.))
+                                    .rounded(rayon(18.))
                                     .bg(ton(blanc(1.), c(0x3a3a3c)))
                                     .border_1()
                                     .border_color(ton(rgba(0x0000001a).into(), th().liste))
@@ -3181,38 +3678,44 @@ impl Jasette {
                             .flex()
                             .flex_col()
                             .min_w(px(0.))
-                            .child(div().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child("Moi"))
+                            .child(div().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(t("Moi")))
                             .child(
                                 div()
                                     .truncate()
                                     .text_size(px(12.))
                                     .text_color(th().texte_pale)
-                                    .child(self.reglages.email.clone().unwrap_or_else(|| "Compte local".into())),
+                                    .child(self.reglages.email.clone().unwrap_or_else(|| t("Compte local").into())),
                             ),
                     ),
             )
             .when(self.menu_avatar, |d| d.child(self.menu_avatar_vue(cx)))
             .child(
-                item("s-comptes", Section::Comptes, "Comptes", "at-sign", ACCENT_2, Some(comptes_actifs)).on_click(
+                item("s-comptes", Section::Comptes, t("Comptes"), "at-sign", ACCENT_2, Some(comptes_actifs)).on_click(
                     cx.listener(|this, _, _, cx| {
                         this.section = Some(Section::Comptes);
                         cx.notify();
                     }),
                 ),
             )
-            .child(item("s-notifs", Section::Notifications, "Notifications", "bell", SUCCES, None).on_click(
+            .child(item("s-notifs", Section::Notifications, t("Notifications"), "bell", SUCCES, None).on_click(
                 cx.listener(|this, _, _, cx| {
                     this.section = Some(Section::Notifications);
                     cx.notify();
                 }),
             ))
-            .child(item("s-apparence", Section::Apparence, "Apparence", "palette", ROSE, None).on_click(
+            .child(item("s-apparence", Section::Apparence, t("Apparence"), "palette", ROSE, None).on_click(
                 cx.listener(|this, _, _, cx| {
                     this.section = Some(Section::Apparence);
                     cx.notify();
                 }),
             ))
-            .child(item("s-apropos", Section::APropos, "À propos", "info", 0x64748b, None).on_click(cx.listener(
+            .child(item("s-langue", Section::Langue, t("Langue"), "languages", 0x0ea5e9, None).on_click(cx.listener(
+                |this, _, _, cx| {
+                    this.section = Some(Section::Langue);
+                    cx.notify();
+                },
+            )))
+            .child(item("s-apropos", Section::APropos, t("À propos"), "info", 0x64748b, None).on_click(cx.listener(
                 |this, _, _, cx| {
                     this.section = Some(Section::APropos);
                     cx.notify();
@@ -3229,8 +3732,8 @@ impl Jasette {
                     groupe()
                         .child(ligne_interrupteur(
                             "n-bureau",
-                            "Notifications de bureau",
-                            "Une bulle quand un message arrive et que Jasette n'est pas au premier plan.",
+                            t("Notifications de bureau"),
+                            t("Une bulle quand un message arrive et que Jasette n'est pas au premier plan."),
                             self.reglages.notifications,
                             cx.listener(|this, _, _, cx| {
                                 this.reglages.notifications = !this.reglages.notifications;
@@ -3241,8 +3744,8 @@ impl Jasette {
                         .child(separateur())
                         .child(ligne_interrupteur(
                             "n-apercu",
-                            "Aperçu du message",
-                            "Montrer le texte du message dans la notification.",
+                            t("Aperçu du message"),
+                            t("Montrer le texte du message dans la notification."),
                             self.reglages.apercu,
                             cx.listener(|this, _, _, cx| {
                                 this.reglages.apercu = !this.reglages.apercu;
@@ -3256,8 +3759,8 @@ impl Jasette {
                 // Les rangées d'un groupe arrondi : GPUI ne découpe pas les enfants
                 // selon les coins, le fond de survol prend donc lui-même les coins
                 // du groupe (moins son liseré) en haut pour la première, en bas pour la dernière.
-                let rayon = mesure(17., 12.);
-                let choix = |id: &'static str, sombre: bool, titre: &'static str, detail: &'static str, apercu: Div| {
+                let r = mesure(17., 12.);
+                let choix = |id: &'static str, choix: Theme, titre: &'static str, detail: &'static str, apercu: Div| {
                     let teinte_id = teinte().id;
                     div()
                         .id(id)
@@ -3267,10 +3770,10 @@ impl Jasette {
                         .gap(px(14.))
                         .p(px(14.))
                         .cursor_pointer()
-                        .when(sombre, |d| d.rounded_t(px(rayon)))
-                        .when(!sombre, |d| d.rounded_b(px(rayon)))
-                        .hover(|s| s.bg(ton(blanc(0.5), c(0x2a2a2c))))
-                        .child(apercu.flex_none().size(px(54.)).rounded(px(14.)).border_1())
+                        .when(choix == Theme::Sombre, |d| d.rounded_t(rayon(r)))
+                        .when(choix == Theme::Ega, |d| d.rounded_b(rayon(r)))
+                        .hover(|s| s.bg(if th().ega { th().survol } else { ton(blanc(0.5), c(0x2a2a2c)) }))
+                        .child(apercu.flex_none().size(px(54.)).rounded(rayon(14.)).border_1())
                         .child(
                             div()
                                 .flex_1()
@@ -3279,17 +3782,31 @@ impl Jasette {
                                 .child(div().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(titre))
                                 .child(div().text_size(px(12.)).text_color(th().texte_pale).child(detail)),
                         )
-                        .when(th().sombre == sombre, |d| d.child(icone("check", 20., th().accent)))
+                        .when(theme() == choix, |d| d.child(icone("check", 20., th().accent)))
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.reglages.theme = if sombre { "sombre" } else { "verre" }.into();
+                            this.reglages.theme = choix.id().into();
                             this.reglages.garder();
-                            appliquer_theme(sombre, teinte_id, cx);
+                            appliquer_theme(choix, teinte_id, cx);
                             cx.refresh_windows();
                             cx.notify();
                         }))
                 };
+                // L'aperçu EGA : une petite fenêtre DOS, barre bleue, lignes de texte.
+                let ligne_ega = |w: f32, couleur: u32| div().h(px(3.)).w(px(w)).bg(c(couleur));
+                let apercu_ega = div()
+                    .bg(c(EGA_NOIR))
+                    .border_color(c(EGA_GRIS_CLAIR))
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .child(div().h(px(8.)).bg(c(EGA_BLEU)))
+                    .child(div().flex().flex_col().gap(px(4.)).px(px(5.)).pt(px(1.))
+                        .child(ligne_ega(28., EGA_JAUNE))
+                        .child(ligne_ega(38., EGA_GRIS_CLAIR))
+                        .child(ligne_ega(22., EGA_CYAN_VIF))
+                        .child(ligne_ega(32., EGA_MAGENTA_VIF)));
                 // Les teintes du verre : une pastille ronde par teinte, la choisie cerclée.
-                let verre_actif = !th().sombre;
+                let verre_actif = theme() == Theme::Verre;
                 let mut pastilles = div().flex().flex_row().flex_wrap().gap(px(10.));
                 for (i, t) in TEINTES.iter().enumerate() {
                     let choisie = verre_actif && teinte().id == t.id;
@@ -3298,7 +3815,7 @@ impl Jasette {
                         div()
                             .id(("teinte", i))
                             .size(px(38.))
-                            .rounded(px(999.))
+                            .rounded(rayon(999.))
                             .border_2()
                             .border_color(if choisie { c(t.accent) } else { hsla(0., 0., 0., 0.) })
                             .flex()
@@ -3308,7 +3825,7 @@ impl Jasette {
                                 d.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
                                     this.reglages.teinte = id.into();
                                     this.reglages.garder();
-                                    appliquer_theme(false, id, cx);
+                                    appliquer_theme(Theme::Verre, id, cx);
                                     cx.refresh_windows();
                                     cx.notify();
                                 }))
@@ -3316,7 +3833,7 @@ impl Jasette {
                             .child(
                                 div()
                                     .size(px(28.))
-                                    .rounded(px(999.))
+                                    .rounded(rayon(999.))
                                     .border_1()
                                     .border_color(ton(blanc(0.9), c(0x48484a)))
                                     .bg(linear_gradient(
@@ -3327,14 +3844,14 @@ impl Jasette {
                             ),
                     );
                 }
-                carte_section("Apparence")
+                carte_section(t("Apparence"))
                     .child(
                         groupe()
                             .child(choix(
                                 "t-sombre",
-                                true,
-                                "Sombre",
-                                "Aplats gris et fil noir, bulles plates.",
+                                Theme::Sombre,
+                                t("Sombre"),
+                                t("Aplats gris et fil noir, bulles plates."),
                                 div()
                                     .bg(linear_gradient(
                                         90.,
@@ -3346,9 +3863,9 @@ impl Jasette {
                             .child(separateur())
                             .child(choix(
                                 "t-verre",
-                                false,
-                                "Verre",
-                                "Verre clair sur halos pastel.",
+                                Theme::Verre,
+                                t("Verre"),
+                                t("Verre clair sur halos pastel."),
                                 div()
                                     .bg(linear_gradient(
                                         135.,
@@ -3356,6 +3873,14 @@ impl Jasette {
                                         linear_color_stop(ca(teinte().halo, 0.6), 1.),
                                     ))
                                     .border_color(ton(blanc(0.9), c(0x48484a))),
+                            ))
+                            .child(separateur())
+                            .child(choix(
+                                "t-ega",
+                                Theme::Ega,
+                                t("EGA"),
+                                t("Seize couleurs et police IBM, comme un PC de 1984."),
+                                apercu_ega,
                             )),
                     )
                     .child(
@@ -3368,7 +3893,7 @@ impl Jasette {
                             .child(if verre_actif {
                                 format!("Teinte du verre · {}", teinte().nom)
                             } else {
-                                "Teinte du verre".to_string()
+                                t("Teinte du verre").to_string()
                             }),
                     )
                     .child(
@@ -3384,23 +3909,60 @@ impl Jasette {
                                         div()
                                             .text_size(px(12.))
                                             .text_color(th().texte_pale)
-                                            .child("Choisissez le thème Verre pour changer de teinte."),
+                                            .child(t("Choisissez le thème Verre pour changer de teinte.")),
                                     )
                                 }),
                         ),
                     )
                     .into_any_element()
             }
+            Section::Langue => {
+                let mut g = groupe();
+                for (i, (code, nom)) in [("fr", "Français"), ("en", "English")].into_iter().enumerate() {
+                    let actif = if code == "en" { anglais() } else { !anglais() };
+                    if i > 0 {
+                        g = g.child(separateur());
+                    }
+                    g = g.child(
+                        div()
+                            .id(code)
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .px(px(16.))
+                            .py(px(12.))
+                            .cursor_pointer()
+                            .when(i == 0, |d| d.rounded_t(rayon(15.)))
+                            .when(i == 1, |d| d.rounded_b(rayon(15.)))
+                            .hover(|s| s.bg(th().survol))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.reglages.langue = code.to_string();
+                                this.reglages.garder();
+                                ANGLAIS.store(code == "en", std::sync::atomic::Ordering::Relaxed);
+                                cx.refresh_windows();
+                            }))
+                            .child(div().flex_1().text_color(th().texte_fort).child(nom))
+                            .when(actif, |d| d.child(icone("check", 16., th().accent))),
+                    );
+                }
+                carte_section("Langue").child(g).into_any_element()
+            }
             Section::APropos => carte_section("À propos")
                 .child(
                     groupe()
+                        .child(ligne_info("Créé par", "Jonathan Guernon".into()))
+                        .child(separateur())
                         .child(ligne_info("Version", env!("CARGO_PKG_VERSION").to_string()))
                         .child(separateur())
                         .child(ligne_info("Google Messages", "libgm (mautrix-gmessages)".into()))
                         .child(separateur())
-                        .child(ligne_info("Données", dossier_donnees().display().to_string()))
+                        .child(ligne_info("Messenger", "messagix (mautrix-meta)".into()))
                         .child(separateur())
-                        .child(ligne_info("Médias", dossier_medias().display().to_string())),
+                        .child(ligne_info("Interface", "GPUI · gpui-component".into()))
+                        .child(separateur())
+                        .child(ligne_info(t("Données"), dossier_donnees().display().to_string()))
+                        .child(separateur())
+                        .child(ligne_info(t("Médias"), dossier_medias().display().to_string())),
                 )
                 .into_any_element(),
         };
@@ -3445,12 +4007,12 @@ impl Jasette {
                             .flex_row()
                             .items_center()
                             .gap(px(8.))
-                            .child(div().size(px(8.)).rounded(px(8.)).bg(c(self.etat.couleur())))
+                            .child(div().size(px(8.)).rounded(rayon(8.)).bg(c(self.etat.couleur())))
                             .child(div().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child("Google Messages")),
                     )
                     .child(div().text_size(px(12.)).text_color(th().texte_pale).child(format!(
                         "{} · {}",
-                        self.reglages.email.clone().unwrap_or_else(|| "SMS et RCS".into()),
+                        self.reglages.email.clone().unwrap_or_else(|| t("SMS et RCS").into()),
                         self.etat.texte()
                     ))),
             )
@@ -3458,7 +4020,7 @@ impl Jasette {
                 d.child(
                     div()
                         .size(px(20.))
-                        .rounded(px(20.))
+                        .rounded(rayon(20.))
                         .bg(th().danger)
                         .flex()
                         .items_center()
@@ -3470,7 +4032,7 @@ impl Jasette {
                 )
             })
             .child(if associe {
-                bouton_texte("gm-deco", "Déconnecter", DANGER)
+                bouton_texte("gm-deco", t("Déconnecter"), DANGER)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.commande(json!({"cmd": "unpair"}));
                         this.convs.clear();
@@ -3483,33 +4045,95 @@ impl Jasette {
                     }))
                     .into_any_element()
             } else {
-                bouton_texte("gm-co", "Connecter", ACCENT)
+                bouton_texte("gm-co", t("Connecter"), ACCENT)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.ajout_compte = true;
                         cx.notify();
                     }))
                     .into_any_element()
             });
+        let meta_associe = !matches!(self.etat_meta, Etat::NonAssocie | Etat::Demarrage);
+        let detail_meta = if self.pont_meta.is_none() {
+            t("Pont Messenger introuvable").to_string()
+        } else if self.connexion_meta_ouverte {
+            t("Connectez-vous dans la fenêtre Facebook…").to_string()
+        } else if meta_associe {
+            format!("{} · {}", self.nom_meta.clone().unwrap_or_else(|| "Messenger".into()), self.etat_meta.texte())
+        } else {
+            t("Non connecté").to_string()
+        };
         let messenger = div()
             .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(14.))
-            .px(px(16.))
-            .py(px(13.))
-            .child(div().opacity(0.6).child(logo(Service::Messenger, 40.)))
+            .flex_col()
             .child(
                 div()
-                    .flex_1()
                     .flex()
-                    .flex_col()
-                    .gap(px(2.))
-                    .child(div().font_weight(FontWeight::SEMIBOLD).text_color(ton(th().texte, th().texte_fort)).child("Facebook Messenger"))
-                    .child(div().text_size(px(12.)).text_color(th().texte_pale).child("Bientôt disponible")),
+                    .flex_row()
+                    .items_center()
+                    .gap(px(14.))
+                    .px(px(16.))
+                    .py(px(13.))
+                    .child(logo(Service::Messenger, 40.))
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .items_center()
+                                    .gap(px(8.))
+                                    .when(meta_associe, |d| {
+                                        d.child(div().size(px(8.)).rounded(px(8.)).bg(c(self.etat_meta.couleur())))
+                                    })
+                                    .child(div().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child("Facebook Messenger")),
+                            )
+                            .child(div().text_size(px(12.)).text_color(th().texte_pale).child(detail_meta)),
+                    )
+                    .when(self.pont_meta.is_some(), |d| {
+                        d.child(if meta_associe {
+                            bouton_texte("fb-deco", t("Déconnecter"), DANGER)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.commande_meta(json!({"cmd": "unpair"}));
+                                    this.convs.retain(|c| service_de(&c.id) != Service::Messenger);
+                                    this.archives.retain(|c| service_de(&c.id) != Service::Messenger);
+                                    if this.choisie.as_deref().is_some_and(|c| service_de(c) == Service::Messenger) {
+                                        this.choisie = None;
+                                    }
+                                    cx.notify();
+                                }))
+                                .into_any_element()
+                        } else {
+                            bouton_texte("fb-co", t("Connecter"), ACCENT)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.connecter_messenger();
+                                    cx.notify();
+                                }))
+                                .into_any_element()
+                        })
+                    }),
             )
-            .child(icone("cloud", 18., th().texte_pale));
+            // L'historique chiffré de Messenger demande le NIP choisi dans l'app Messenger.
+            .when(self.besoin_nip, |d| {
+                d.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(6.))
+                        .px(px(16.))
+                        .pb(px(13.))
+                        .child(div().text_size(px(12.)).text_color(th().texte).child(t(
+                            "Pour voir l'historique chiffré, entrez le NIP de Messenger (celui choisi dans l'app).",
+                        )))
+                        .child(verre(0.8, 999.).pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.nip).appearance(false))),
+                )
+            });
 
-        carte_section("Comptes")
+
+        carte_section(t("Comptes"))
             .child(groupe().child(gm).child(separateur()).child(messenger))
             .child(
                 div()
@@ -3527,12 +4151,12 @@ impl Jasette {
                         if !this.etat.associe() {
                             this.ajout_compte = true;
                         } else {
-                            this.erreur = Some("Messenger arrive bientôt ; Google Messages est déjà connecté.".into());
+                            this.erreur = Some(t("Messenger arrive bientôt ; Google Messages est déjà connecté.").into());
                         }
                         cx.notify();
                     }))
                     .child(icone("circle-plus", 17., th().accent))
-                    .child("Ajouter un compte"),
+                    .child(t("Ajouter un compte")),
             )
     }
 
@@ -3544,7 +4168,7 @@ impl Jasette {
             .justify_center()
             .px(px(26.))
             .py(px(11.))
-            .rounded(px(999.))
+            .rounded(rayon(999.))
             .bg(degrade_accent())
             .text_color(blanc(1.))
             .font_weight(FontWeight::SEMIBOLD)
@@ -3556,7 +4180,7 @@ impl Jasette {
 
     fn ecran_connexion(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let mut carte = verre(0.62, 28.)
-            .when(th().sombre, |d| d.bg(th().liste).rounded(px(16.)))
+            .when(th().sombre, |d| d.bg(th().liste).rounded(rayon(16.)))
             .shadow(ombre_verre())
             .w(px(460.))
             .flex()
@@ -3577,7 +4201,7 @@ impl Jasette {
                 div()
                     .text_center()
                     .text_color(th().texte)
-                    .child("Vos SMS et RCS de Google Messages, avec tout l'historique, sur votre bureau."),
+                    .child(t("Vos SMS et RCS de Google Messages, avec tout l'historique, sur votre bureau.")),
             );
 
         if let Some(emoji) = &self.emoji {
@@ -3586,7 +4210,7 @@ impl Jasette {
                     div()
                         .mt(px(10.))
                         .size(px(150.))
-                        .rounded(px(36.))
+                        .rounded(rayon(36.))
                         .bg(ton(blanc(0.85), th().surface))
                         .border_1()
                         .border_color(ton(blanc(1.), th().surface_bord))
@@ -3598,23 +4222,23 @@ impl Jasette {
                         .font_family(POLICE_EMOJI)
                         .child(emoji.clone()),
                 )
-                .child(div().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child("Touchez cet emoji sur votre téléphone"))
+                .child(div().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(t("Touchez cet emoji sur votre téléphone")))
                 .child(
                     div()
                         .text_center()
                         .text_size(px(13.))
                         .text_color(th().texte)
-                        .child("Google Messages vous montre quelques emojis : choisissez le même."),
+                        .child(t("Google Messages vous montre quelques emojis : choisissez le même.")),
                 );
         } else if matches!(self.etat, Etat::Association) || self.connexion_ouverte {
             carte = carte.child(div().mt(px(10.)).text_color(th().texte).child(if self.connexion_ouverte {
-                "Connectez-vous dans la fenêtre Google…"
+                t("Connectez-vous dans la fenêtre Google…")
             } else {
-                "Demande envoyée au téléphone…"
+                t("Demande envoyée au téléphone…")
             }));
         } else if let Some(qr) = &self.qr {
             carte = carte
-                .child(div().mt(px(6.)).p(px(14.)).rounded(px(20.)).bg(blanc(1.)).child(dessiner_qr(qr)))
+                .child(div().mt(px(6.)).p(px(14.)).rounded(rayon(20.)).bg(blanc(1.)).child(dessiner_qr(qr)))
                 .child(
                     div()
                         .text_center()
@@ -3625,7 +4249,7 @@ impl Jasette {
         } else {
             carte = carte
                 .child(
-                    Self::bouton_principal("google", "Se connecter avec Google")
+                    Self::bouton_principal("google", t("Se connecter avec Google"))
                         .mt(px(10.))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.connecter_google();
@@ -3644,7 +4268,7 @@ impl Jasette {
                             this.commande(json!({"cmd": "pair"}));
                             cx.notify();
                         }))
-                        .child("Utiliser plutôt un code QR"),
+                        .child(t("Utiliser plutôt un code QR")),
                 );
         }
         if let Some(e) = &self.erreur {
@@ -3652,7 +4276,7 @@ impl Jasette {
                 div()
                     .px(px(14.))
                     .py(px(8.))
-                    .rounded(px(14.))
+                    .rounded(rayon(14.))
                     .bg(alpha(th().danger, 0.08))
                     .text_size(px(13.))
                     .text_color(th().danger)
@@ -3667,7 +4291,12 @@ impl Render for Jasette {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // L'indication du champ nomme la conversation ouverte.
         let nom = self.choisie.as_ref().and_then(|id| self.conv(id)).map(|c| c.name.clone()).filter(|n| !n.is_empty());
-        let indication = format!("Message à {} sur Google Messages", nom.unwrap_or_else(|| "ce contact".into()));
+        let service = self.choisie.as_deref().map(service_de).unwrap_or(Service::GoogleMessages);
+        let indication = if anglais() {
+            format!("Message {} on {}", nom.unwrap_or_else(|| "this contact".into()), service.nom())
+        } else {
+            format!("Message à {} sur {}", nom.unwrap_or_else(|| "ce contact".into()), service.nom())
+        };
         if self.indication != indication {
             self.indication = indication.clone();
             self.saisie.update(cx, |s, cx| s.set_placeholder(indication, window, cx));
@@ -3679,8 +4308,9 @@ impl Render for Jasette {
             .size_full()
             .overflow_hidden()
             .bg(th().fond)
-            .font_family(POLICE)
-            .text_size(px(15.))
+            .font_family(police())
+            // La police IBM 8x16 n'est nette qu'à 16 px.
+            .text_size(px(if th().ega { 16. } else { 15. }))
             .text_color(th().texte_fort)
             // Les halos du thème glass : bleu en haut à gauche, violet à droite, pêche en bas.
             .when(!th().sombre, |d| {
@@ -3737,7 +4367,7 @@ impl Render for Jasette {
                     .gap(px(8.))
                     .px(px(16.))
                     .py(px(8.))
-                    .rounded(px(999.))
+                    .rounded(rayon(999.))
                     .bg(ton(blanc(0.95), c(0x3a3a3c)))
                     .shadow(ombre_flottante())
                     .text_size(px(13.))
@@ -3765,7 +4395,7 @@ fn pastille_nombre(n: usize, couleur: Hsla) -> impl IntoElement {
         .min_w(px(18.))
         .h(px(18.))
         .px(px(5.))
-        .rounded(px(999.))
+        .rounded(rayon(999.))
         .bg(couleur)
         .border_1()
         .border_color(ton(blanc(0.9), th().rail))
@@ -3784,7 +4414,7 @@ fn pastille_alerte() -> impl IntoElement {
         .top(px(-3.))
         .right(px(-3.))
         .size(px(18.))
-        .rounded(px(999.))
+        .rounded(rayon(999.))
         .bg(th().danger)
         .border_1()
         .border_color(ton(blanc(0.9), th().rail))
@@ -3798,6 +4428,7 @@ fn pastille_alerte() -> impl IntoElement {
 }
 
 fn carte_section(titre: &'static str) -> Div {
+    let titre = t(titre);
     div()
         .flex()
         .flex_col()
@@ -3815,7 +4446,7 @@ fn separateur() -> Div {
 
 fn groupe() -> Div {
     verre(0.72, 18.)
-        .when(th().sombre, |d| d.bg(th().carte).rounded(px(12.)))
+        .when(th().sombre, |d| d.bg(th().carte).rounded(rayon(12.)))
         .shadow(ombre_flottante())
         .flex()
         .flex_col()
@@ -3827,7 +4458,7 @@ fn bouton_texte(id: &'static str, texte: &'static str, couleur: u32) -> gpui::St
         .id(id)
         .px(px(14.))
         .py(px(6.))
-        .rounded(px(999.))
+        .rounded(rayon(999.))
         .bg(ca(couleur, 0.1))
         .text_size(px(13.))
         .font_weight(FontWeight::SEMIBOLD)
@@ -3838,6 +4469,7 @@ fn bouton_texte(id: &'static str, texte: &'static str, couleur: u32) -> gpui::St
 }
 
 fn ligne_info(nom: &'static str, valeur: String) -> impl IntoElement {
+    let nom = t(nom);
     div()
         .flex()
         .flex_row()
@@ -3878,13 +4510,13 @@ fn ligne_interrupteur(
             div()
                 .w(px(44.))
                 .h(px(26.))
-                .rounded(px(999.))
+                .rounded(rayon(999.))
                 .p(px(3.))
                 .flex()
                 .flex_row()
                 .when(actif, |d| d.bg(degrade_accent()).justify_end())
                 .when(!actif, |d| d.bg(ton(ca(TEXTE_PALE, 0.35), c(0x48484a))).justify_start())
-                .child(div().size(px(20.)).rounded(px(999.)).bg(blanc(1.)).shadow(ombre_flottante())),
+                .child(div().size(px(20.)).rounded(rayon(999.)).bg(blanc(1.)).shadow(ombre_flottante())),
         )
 }
 
@@ -3895,7 +4527,7 @@ fn halo(couleur: u32, opacite: f32, x: f32, y: f32, taille: f32) -> impl IntoEle
         .left(px(x))
         .top(px(y))
         .size(px(taille))
-        .rounded(px(taille))
+        .rounded(rayon(taille))
         // Pas de fond : seule l'ombre, très floue, dessine un halo sans bord.
         .shadow(vec![BoxShadow {
             color: ca(couleur, (opacite * 1.9).min(1.)),
@@ -3945,11 +4577,11 @@ fn avatar(nom: &str, couleur: &str, groupe: bool, photo: Option<&PathBuf>, taill
         return div()
             .flex_none()
             .size(px(taille))
-            .rounded(px(taille))
+            .rounded(rayon(taille))
             .overflow_hidden()
             .border_1()
             .border_color(th().bord_avatar)
-            .child(img(photo.clone()).size_full().rounded(px(taille)).object_fit(ObjectFit::Cover))
+            .child(img(photo.clone()).size_full().rounded(rayon(taille)).object_fit(ObjectFit::Cover))
             .into_any_element();
     }
     let base = hex(couleur).unwrap_or(ACCENT);
@@ -3967,8 +4599,8 @@ fn avatar(nom: &str, couleur: &str, groupe: bool, photo: Option<&PathBuf>, taill
     div()
         .flex_none()
         .size(px(taille))
-        .rounded(px(taille))
-        .bg(linear_gradient(150., linear_color_stop(ca(base, 0.75), 0.), linear_color_stop(c(base), 1.)))
+        .rounded(rayon(taille))
+        .bg(fond_avatar(ca(base, 0.75), c(base)))
         .border_1()
         .border_color(ton(blanc(0.7), th().bord_avatar))
         .flex()
@@ -4020,13 +4652,140 @@ const JOURS: [&str; 7] = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "sa
 const MOIS: [&str; 12] =
     ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
 
+/// L'interface en anglais (Réglages › Langue).
+static ANGLAIS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn anglais() -> bool {
+    ANGLAIS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// La traduction d'un texte de l'interface (écrit en français dans le code).
+fn t(fr: &'static str) -> &'static str {
+    if !anglais() {
+        return fr;
+    }
+    match fr {
+        "🎤 Message vocal" => "🎤 Voice message",
+        "📎 Pièce jointe" => "📎 Attachment",
+        "Activités" => "Activities",
+        "Ajouter un compte" => "Add an account",
+        "Annuler" => "Cancel",
+        "Aperçu du message" => "Message preview",
+        "Aplats gris et fil noir, bulles plates." => "Flat grays, black thread, flat bubbles.",
+        "Apparence" => "Appearance",
+        "À propos" => "About",
+        "Archives" => "Archive",
+        "Association" => "Pairing",
+        "Aucune conversation archivée" => "No archived conversations",
+        "Aucun emoji" => "No emoji",
+        "Aucune photo trouvée" => "No photo found",
+        "Aucun résultat" => "No results",
+        "Aujourd'hui" => "Today",
+        "Avatar de Facebook" => "Facebook avatar",
+        "Avatar de Google Messages" => "Google Messages avatar",
+        "Bientôt disponible" => "Coming soon",
+        "Boîte de réception" => "Inbox",
+        "Chargement…" => "Loading…",
+        "Chargement de l'image…" => "Loading image…",
+        "Chargement des archives…" => "Loading archive…",
+        "Chargement des conversations…" => "Loading conversations…",
+        "Chercher un emoji (en anglais)" => "Search emoji",
+        "Choisir" => "Choose",
+        "Choisir une image…" => "Choose an image…",
+        "Choisissez le thème Verre pour changer de teinte." => "Pick the Glass theme to change the tint.",
+        "Choisissez une conversation" => "Pick a conversation",
+        "Ciel" => "Sky",
+        "Citron" => "Lemon",
+        "Compte local" => "Local account",
+        "Comptes" => "Accounts",
+        "Connecté" => "Connected",
+        "Connecter" => "Connect",
+        "Connectez-vous dans la fenêtre Google…" => "Sign in in the Google window…",
+        "Connexion…" => "Connecting…",
+        "Connexion annulée" => "Sign-in cancelled",
+        "Conversation en lecture seule" => "Read-only conversation",
+        "Corail" => "Coral",
+        "Déconnecter" => "Disconnect",
+        "Demande envoyée au téléphone…" => "Request sent to the phone…",
+        "Démarrage" => "Starting",
+        "Distribué" => "Delivered",
+        "Données" => "Data",
+        "Drapeaux" => "Flags",
+        "Échec" => "Failed",
+        "Envoi…" => "Sending…",
+        "Envoyé" => "Sent",
+        "Envoyer" => "Send",
+        "Google Messages déconnecté" => "Google Messages disconnected",
+        "Google Messages vous montre quelques emojis : choisissez le même." => "Google Messages shows you a few emojis: pick the same one.",
+        "Hier" => "Yesterday",
+        "Image indisponible · réessayer" => "Image unavailable · retry",
+        "Initiale" => "Initial",
+        "Lavande" => "Lavender",
+        "Lilas" => "Lilac",
+        "Les emojis que vous utilisez apparaîtront ici." => "Emojis you use will show up here.",
+        "Lu" => "Read",
+        "Médias" => "Media",
+        "Menthe" => "Mint",
+        "Messages plus anciens" => "Older messages",
+        "Messenger arrive bientôt ; Google Messages est déjà connecté." => "Messenger is coming soon; Google Messages is already connected.",
+        "Moi" => "Me",
+        "Montrer le texte du message dans la notification." => "Show the message text in the notification.",
+        "Non connecté" => "Not connected",
+        "Notifications de bureau" => "Desktop notifications",
+        "Nourriture" => "Food",
+        "Nouveau message" => "New message",
+        "Numéro de téléphone, puis Entrée" => "Phone number, then Enter",
+        "Objets" => "Objects",
+        "Ouvrir" => "Open",
+        "Pêche" => "Peach",
+        "Personnes" => "People",
+        "Quand Messenger sera connecté" => "Once Messenger is connected",
+        "Récents" => "Recent",
+        "Rechercher" => "Search",
+        "Reconnexion…" => "Reconnecting…",
+        "Réglages" => "Settings",
+        "Rose" => "Pink",
+        "Sans nom" => "Unnamed",
+        "Sans photo" => "No photo",
+        "Se connecter avec Google" => "Sign in with Google",
+        "SMS et RCS" => "SMS and RCS",
+        "Sombre" => "Dark",
+        "Symboles" => "Symbols",
+        "Teinte du verre" => "Glass tint",
+        "Téléchargement…" => "Downloading…",
+        "Téléphone hors ligne" => "Phone offline",
+        "Touchez cet emoji sur votre téléphone" => "Tap this emoji on your phone",
+        "Une bulle quand un message arrive et que Jasette n'est pas au premier plan." => "A popup when a message arrives and Jasette isn't in front.",
+        "Une photo de votre ordinateur" => "A photo from your computer",
+        "Utiliser plutôt un code QR" => "Use a QR code instead",
+        "Verre" => "Glass",
+        "Verre clair sur halos pastel." => "Light glass over pastel halos.",
+        "Vos SMS et RCS de Google Messages, avec tout l'historique, sur votre bureau." => "Your Google Messages SMS and RCS, with full history, on your desktop.",
+        "Votre fiche sur le téléphone" => "Your contact card on the phone",
+        "Voyages" => "Travel",
+        "Le pont s'est arrêté (voir le terminal)." => "The bridge stopped (see the terminal).",
+        "Langue" => "Language",
+        "Message à {} sur Google Messages" => "Message {} on Google Messages",
+        "Teinte du verre · {}" => "Glass tint · {}",
+        "Enregistrement {}:{:02} · ↑ pour envoyer" => "Recording {}:{:02} · ↑ to send",
+        "NIP Messenger (6 chiffres), puis Entrée" => "Messenger PIN (6 digits), then Enter",
+        "Pont Messenger introuvable" => "Messenger bridge not found",
+        "Connectez-vous dans la fenêtre Facebook…" => "Sign in in the Facebook window…",
+        "Pour voir l'historique chiffré, entrez le NIP de Messenger (celui choisi dans l'app)." => "To see your encrypted history, enter your Messenger PIN (the one set in the app).",
+        "Créé par" => "Created by",
+        "Interface" => "Interface",
+        _ => fr,
+    }
+}
+
+
 fn heure(ms: i64, court: bool) -> String {
     use chrono::Datelike;
     let Some(t) = local(ms) else { return String::new() };
     let aujourdhui = chrono::Local::now().date_naive();
     if court && t.date_naive() != aujourdhui {
         if aujourdhui.pred_opt() == Some(t.date_naive()) {
-            return "Hier".into();
+            return crate::t("Hier").into();
         }
         if (aujourdhui - t.date_naive()).num_days() < 7 {
             return JOURS[t.weekday().num_days_from_monday() as usize][..3].to_string();
@@ -4042,10 +4801,10 @@ fn jour(ms: i64) -> String {
     let aujourdhui = chrono::Local::now().date_naive();
     let d = t.date_naive();
     if d == aujourdhui {
-        return "Aujourd'hui".into();
+        return crate::t("Aujourd'hui").into();
     }
     if aujourdhui.pred_opt() == Some(d) {
-        return "Hier".into();
+        return crate::t("Hier").into();
     }
     format!("{} {} {} {}", JOURS[t.weekday().num_days_from_monday() as usize], d.day(), MOIS[d.month0() as usize], d.year())
 }
@@ -4081,7 +4840,8 @@ fn main() {
             t.input = blanc(0.);
         });
         let reglages = Reglages::charger();
-        appliquer_theme(reglages.theme != "verre", &reglages.teinte, cx);
+        ANGLAIS.store(reglages.langue == "en", std::sync::atomic::Ordering::Relaxed);
+        appliquer_theme(Theme::depuis(&reglages.theme), &reglages.teinte, cx);
 
         let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
         cx.open_window(
