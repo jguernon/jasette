@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -379,8 +380,8 @@ private fun SectionComptes(connecter: (Service, String) -> Unit) {
 
 /**
  * Réglages → Comptes → « Dans la boîte de réception » : les services cachés
- * ([ServicesCaches] ; le seul endroit sur Android depuis l'onglet Groupes,
- * et la même section du bureau). Propre à l'appareil.
+ * et leur ordre ([ServicesCaches] ; le seul endroit sur Android depuis
+ * l'onglet Groupes, et la même section du bureau). Propre à l'appareil.
  */
 @Composable
 private fun ServicesDansLaBoite() {
@@ -390,7 +391,7 @@ private fun ServicesDansLaBoite() {
     Spacer(Modifier.height(4.dp))
     Titre(t("Dans la boîte de réception"))
     Groupe {
-        for (s in liste) {
+        for ((i, s) in liste.withIndex()) {
             val montre = !ServicesCaches.cache(s)
             Row(
                 Modifier.fillMaxWidth().clickable { ServicesCaches.montrer(ctx, s, !montre) }
@@ -403,6 +404,16 @@ private fun ServicesDansLaBoite() {
                     s.titre, color = if (montre) P.texteFort else P.textePale, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
+                // Monter ou descendre d'un cran (comme les favoris en mode
+                // Réorganiser) : l'ordre vaut partout où les services sont en liste.
+                val haut = i > 0
+                val bas = i < liste.size - 1
+                IconButton(onClick = { ServicesCaches.echanger(ctx, s, liste[i - 1]) }, enabled = haut) {
+                    Icon(Icons.Filled.KeyboardArrowUp, t("Monter"), tint = if (haut) P.texteFort else P.choisi)
+                }
+                IconButton(onClick = { ServicesCaches.echanger(ctx, s, liste[i + 1]) }, enabled = bas) {
+                    Icon(Icons.Filled.KeyboardArrowDown, t("Descendre"), tint = if (bas) P.texteFort else P.choisi)
+                }
                 androidx.compose.material3.Checkbox(
                     checked = montre,
                     onCheckedChange = { ServicesCaches.montrer(ctx, s, it) },

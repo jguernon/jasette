@@ -1129,6 +1129,28 @@ const SERVICES_META: [Service; 10] = [
     Service::LinkedIn,
 ];
 
+/// Tous les services dans l'ordre choisi par l'utilisateur (`ordre`, leurs
+/// clés) : ceux de la liste d'abord, puis ceux qui n'y sont pas (un service
+/// ajouté plus tard) dans l'ordre par défaut (Google, puis `SERVICES_META`).
+/// Une clé inconnue ou répétée est ignorée.
+fn ordonner_services(ordre: &[String]) -> Vec<Service> {
+    let defaut = || std::iter::once(Service::GoogleMessages).chain(SERVICES_META);
+    let mut l: Vec<Service> = Vec::with_capacity(SERVICES_META.len() + 1);
+    for cle in ordre {
+        if let Some(s) = defaut().find(|s| s.cle() == cle)
+            && !l.contains(&s)
+        {
+            l.push(s);
+        }
+    }
+    for s in defaut() {
+        if !l.contains(&s) {
+            l.push(s);
+        }
+    }
+    l
+}
+
 /// Un compte Meta : son pont, son état, sa fenêtre de connexion.
 struct CompteMeta {
     pont: Option<Pont>,
@@ -1754,6 +1776,12 @@ struct Reglages {
     /// les notifications continuent. Propre à cet appareil, jamais synchronisé.
     #[serde(default)]
     services_caches: Vec<String>,
+    /// L'ordre des services choisi dans « Dans la boîte de réception » (leurs
+    /// clés), appliqué partout où les services sont en liste (voir
+    /// `ordonner_services`). Vide : l'ordre par défaut. Propre à cet appareil,
+    /// comme `services_caches`.
+    #[serde(default)]
+    ordre_services: Vec<String>,
     /// « Utiliser les photos de mes contacts » (les contacts du téléphone, par Google Messages).
     #[serde(default = "vrai")]
     photos_contacts: bool,
@@ -1888,6 +1916,7 @@ impl Default for Reglages {
             liste_grosse: false,
             apercus_liens: true,
             services_caches: Vec::new(),
+            ordre_services: Vec::new(),
             photos_contacts: true,
             photos_contacts_meta: false,
             marques_version: 0,
@@ -2064,6 +2093,20 @@ impl Reglages {
         self.services_caches.retain(|c| c != s.cle());
         if !montre {
             self.services_caches.push(s.cle().to_string());
+        }
+    }
+
+    /// Tous les services (Google compris), dans l'ordre de l'utilisateur.
+    fn services_ordonnes(&self) -> Vec<Service> {
+        ordonner_services(&self.ordre_services)
+    }
+
+    /// Échange la place de deux services dans l'ordre de l'utilisateur.
+    fn echanger_services(&mut self, a: Service, b: Service) {
+        let mut l = self.services_ordonnes();
+        if let (Some(i), Some(j)) = (l.iter().position(|s| *s == a), l.iter().position(|s| *s == b)) {
+            l.swap(i, j);
+            self.ordre_services = l.into_iter().map(|s| s.cle().to_string()).collect();
         }
     }
 
@@ -3528,7 +3571,7 @@ impl Jasette {
 
     /// Les services autres que Google qui existent ici (pont présent, ou offert par le serveur).
     fn services_presents(&self) -> Vec<Service> {
-        SERVICES_META.into_iter().filter(|s| !self.meta(*s).absent).collect()
+        self.reglages.services_ordonnes().into_iter().filter(|s| *s != Service::GoogleMessages && !self.meta(*s).absent).collect()
     }
 
     /// L'état d'un service, Google compris.
@@ -6244,12 +6287,12 @@ impl Jasette {
     /// Les services de la colonne de gauche, dans son ordre : Google, puis
     /// les autres comptes connus.
     fn services_rail(&self) -> Vec<Service> {
-        let mut l = Vec::new();
-        if self.etat != Etat::NonAssocie {
-            l.push(Service::GoogleMessages);
-        }
-        l.extend(SERVICES_META.into_iter().filter(|s| self.meta(*s).deja_connu(*s)));
-        l
+        let google = self.etat != Etat::NonAssocie;
+        self.reglages
+            .services_ordonnes()
+            .into_iter()
+            .filter(|s| if *s == Service::GoogleMessages { google } else { self.meta(*s).deja_connu(*s) })
+            .collect()
     }
 
     /// La tuile d'un service dans la colonne de gauche.
@@ -10740,12 +10783,19 @@ impl Jasette {
     /// « Dans la boîte de réception » (Réglages → Comptes) : une case par
     /// service ; décochée, le service est caché (comme son clic droit dans le rail).
     fn boite_services(&self, cx: &mut Context<Self>) -> Div {
-        let services: Vec<Service> = std::iter::once(Service::GoogleMessages)
-            .filter(|_| self.etat != Etat::NonAssocie || self.reglages.mode_serveur == "client")
-            .chain(SERVICES_META.into_iter().filter(|s| self.meta(*s).deja_connu(*s)))
+        let google = self.etat != Etat::NonAssocie || self.reglages.mode_serveur == "client";
+        let services: Vec<Service> = self
+            .reglages
+            .services_ordonnes()
+            .into_iter()
+            .filter(|s| if *s == Service::GoogleMessages { google } else { self.meta(*s).deja_connu(*s) })
             .collect();
         let mut lignes = groupe();
-        for (i, svc) in services.into_iter().enumerate() {
+        for (i, svc) in services.iter().copied().enumerate() {
+            // Les voisins affichés : monter ou descendre d'un cran échange avec eux
+            // (comme les favoris en mode Réorganiser).
+            let avant = i.checked_sub(1).map(|j| services[j]);
+            let apres = services.get(i + 1).copied();
             if i > 0 {
                 lignes = lignes.child(separateur());
             }
@@ -10771,6 +10821,30 @@ impl Jasette {
                             .flex_1()
                             .text_color(if montre { th().texte_fort } else { th().texte_pale })
                             .child(svc.court()),
+                    )
+                    .child(
+                        Self::bouton_icone(SharedString::from(format!("boite-monte-{}", svc.cle())), "chevron-up", false).on_click(cx.listener(
+                            move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                if let Some(v) = avant {
+                                    this.reglages.echanger_services(svc, v);
+                                    this.reglages.garder();
+                                }
+                                cx.notify();
+                            },
+                        )),
+                    )
+                    .child(
+                        Self::bouton_icone(SharedString::from(format!("boite-descend-{}", svc.cle())), "chevron-down", false).on_click(cx.listener(
+                            move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                if let Some(v) = apres {
+                                    this.reglages.echanger_services(svc, v);
+                                    this.reglages.garder();
+                                }
+                                cx.notify();
+                            },
+                        )),
                     )
                     .child(
                         div()
@@ -14052,6 +14126,29 @@ mod essais_medias {
 #[cfg(test)]
 mod essais_reglages {
     use super::*;
+
+    /// L'ordre des services : par défaut, celui d'avant ; un service absent de
+    /// la liste (ajouté plus tard) va à la fin ; une clé inconnue est ignorée.
+    #[test]
+    fn ordre_des_services() {
+        let cles = |l: &[Service]| l.iter().map(|s| s.cle()).collect::<Vec<_>>();
+        let defaut: Vec<Service> = std::iter::once(Service::GoogleMessages).chain(SERVICES_META).collect();
+        assert_eq!(cles(&ordonner_services(&[])), cles(&defaut));
+        let ordre: Vec<String> = ["signal", "inconnu", "google", "signal", "x"].iter().map(|s| s.to_string()).collect();
+        let l = ordonner_services(&ordre);
+        assert_eq!(l.len(), 11);
+        assert_eq!(cles(&l[..4]), ["signal", "google", "x", "messenger"]);
+        assert!(*l.last().unwrap() == Service::LinkedIn);
+        // Un ordre complet enregistré avant LinkedIn : LinkedIn va à la fin.
+        let sans: Vec<String> = defaut.iter().rev().filter(|s| **s != Service::LinkedIn).map(|s| s.cle().to_string()).collect();
+        let l = ordonner_services(&sans);
+        assert!(l[0] == Service::Reddit);
+        assert!(*l.last().unwrap() == Service::LinkedIn);
+        // Échanger deux services garde les autres à leur place.
+        let mut r = Reglages::default();
+        r.echanger_services(Service::GoogleMessages, Service::Messenger);
+        assert_eq!(cles(&r.services_ordonnes()[..3]), ["messenger", "google", "instagram"]);
+    }
 
     /// Le filtre « Cacher les conversations plus anciennes » : l'âge du dernier
     /// message, les épinglées, les non lues, la valeur 0 (tout afficher).

@@ -92,6 +92,23 @@ enum class Service(val titre: String, val court: String, val prefixe: String, va
 
         /** Le service préfixé d'un id, ou null (Google ou id sans préfixe connu). */
         fun prefixeDe(id: String): Service? = PREFIXES.firstOrNull { id.startsWith(it.prefixe) }
+
+        /**
+         * Les services de [parmi] dans l'ordre choisi par l'utilisateur ([ordre],
+         * leurs clés ; Réglages → Comptes → « Dans la boîte de réception ») :
+         * ceux de la liste d'abord, puis ceux qui n'y sont pas (un service
+         * ajouté plus tard) dans l'ordre de [parmi]. Une clé inconnue ou répétée
+         * est ignorée. Comme `ordonner_services` du bureau.
+         */
+        fun ordonnes(ordre: List<String>, parmi: List<Service> = entries): List<Service> {
+            val l = ArrayList<Service>(parmi.size)
+            for (cle in ordre) {
+                val s = deCle(cle) ?: continue
+                if (s in parmi && s !in l) l.add(s)
+            }
+            for (s in parmi) if (s !in l) l.add(s)
+            return l
+        }
     }
 }
 

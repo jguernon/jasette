@@ -20,11 +20,6 @@ impl Service {
     }
 }
 
-/// Tous les services, dans l'ordre des puces.
-pub(super) fn tous_services() -> impl Iterator<Item = Service> {
-    std::iter::once(Service::GoogleMessages).chain(SERVICES_META)
-}
-
 /// Un résultat de `search` (id préfixé) qui désigne un groupe, pas une
 /// personne : il ne peut pas être membre d'un nouveau groupe.
 pub(super) fn id_groupe(id: &str) -> bool {
@@ -226,7 +221,7 @@ impl Jasette {
         if !self.nouveau_ouvert || texte.chars().count() < 2 || est_numero(&texte) {
             return;
         }
-        for svc in tous_services() {
+        for svc in self.reglages.services_ordonnes() {
             if self.choix_nouveau.montre(svc) && self.service_cherche(svc) {
                 self.commande_svc(svc, json!({"cmd": "search", "text": texte}));
             }
@@ -253,7 +248,7 @@ impl Jasette {
         // Les puces de service : Tout, puis chaque service connecté, en
         // icônes rondes ; la puce choisie montre aussi son nom. Elles passent
         // à la ligne plutôt que de défiler (panneau étroit, beaucoup de services).
-        let services: Vec<Service> = tous_services().filter(|s| self.service_connecte(*s)).collect();
+        let services: Vec<Service> = self.reglages.services_ordonnes().into_iter().filter(|s| self.service_connecte(*s)).collect();
         let lignes = lignes_puces(choix.filtre, &services, LARGEUR_PUCES);
         let mut rangee = div()
             .id("nv-services")
@@ -636,7 +631,7 @@ mod essais {
     fn puces_compactes() {
         // Neuf services en icônes, « Tout » choisi : une seule ligne ; les onze
         // (Reddit et LinkedIn compris) passent à la ligne, sans défiler.
-        let tous: Vec<Service> = tous_services().collect();
+        let tous: Vec<Service> = ordonner_services(&[]);
         assert_eq!(tous.len(), 11);
         assert_eq!(lignes_puces(None, &tous[..9], LARGEUR_PUCES), 1);
         assert_eq!(lignes_puces(None, &tous, LARGEUR_PUCES), 2);
@@ -696,7 +691,7 @@ mod essais {
 
     #[test]
     fn services_de_groupe() {
-        let avec: Vec<Service> = tous_services().filter(|s| s.cree_groupes()).collect();
+        let avec: Vec<Service> = ordonner_services(&[]).into_iter().filter(|s| s.cree_groupes()).collect();
         assert_eq!(avec.len(), 7);
         assert!(!Service::X.cree_groupes() && !Service::Bluesky.cree_groupes());
         assert!(Service::Discord.cree_groupes() && Service::Discord.nomme_groupes());

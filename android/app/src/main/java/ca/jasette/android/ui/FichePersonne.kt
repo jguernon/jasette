@@ -599,7 +599,7 @@ private fun ChoixLier(groupe: List<String>, retour: () -> Unit, choisir: (String
     }
     ChampFiltre(texte, focaliser = false, surSurface = true) { texte = it }
     val cands = (Depot.convs + Depot.archives).filter { !it.group && !it.large && it.id !in groupe && !Marques.estPrivee(it.id) }.distinctBy { it.id }
-    val services = Service.entries.filter { s -> cands.any { it.service == s } }
+    val services = ServicesCaches.ordonnes().filter { s -> cands.any { it.service == s } }
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,

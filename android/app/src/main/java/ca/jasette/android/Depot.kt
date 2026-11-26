@@ -144,10 +144,14 @@ object Depot {
      * Les services à montrer, dans l'ordre : sur cet appareil, Google, Messenger
      * et Instagram ; en mode client, ceux que le serveur annonce dans `auth ok`
      * (les trois premiers tant qu'il n'a pas répondu). Un service absent d'ici
-     * n'apparaît nulle part (réglages, filtres, nouveau message).
+     * n'apparaît nulle part (réglages, filtres, nouveau message). Rendus dans
+     * l'ordre de l'utilisateur ([ServicesCaches.ordre]) : la barre, la
+     * recherche, Nouveau, les réglages et les canaux les montrent ainsi.
      */
-    var services by mutableStateOf(Service.LOCAUX)
-        private set
+    var services: List<Service>
+        get() = Service.ordonnes(ca.jasette.android.ui.ServicesCaches.ordre, servicesBruts)
+        private set(v) { servicesBruts = v }
+    private var servicesBruts by mutableStateOf(Service.LOCAUX)
 
     /**
      * « Utiliser les SMS du téléphone » : en mode autonome, Google Messages est

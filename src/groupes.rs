@@ -15,7 +15,9 @@ fn tr(fr: &'static str, en: &'static str) -> &'static str {
     if anglais() { en } else { fr }
 }
 
-/// L'ordre des sections : les services qui ont le plus de grands espaces d'abord.
+/// L'ordre des sections par défaut : les services qui ont le plus de grands
+/// espaces d'abord. Un ordre choisi dans « Dans la boîte de réception »
+/// (`ordre_services`) le remplace.
 const ORDRE_GROUPES: [Service; 11] = [
     Service::Discord,
     Service::Reddit,
@@ -160,7 +162,9 @@ impl Jasette {
             };
             return col.child(div().p(px(16.)).text_color(th().texte_pale).child(texte));
         }
-        for svc in ORDRE_GROUPES {
+        let ordre: Vec<Service> =
+            if self.reglages.ordre_services.is_empty() { ORDRE_GROUPES.to_vec() } else { self.reglages.services_ordonnes() };
+        for svc in ordre {
             let miens: Vec<&Conv> = espaces.iter().copied().filter(|c| service_de(&c.id) == svc).collect();
             if miens.is_empty() {
                 continue;

@@ -1356,7 +1356,7 @@ impl Jasette {
             }
             cands.push(c);
         }
-        let services: Vec<Service> = nouveau::tous_services().filter(|s| cands.iter().any(|c| service_de(&c.id) == *s)).collect();
+        let services: Vec<Service> = self.reglages.services_ordonnes().into_iter().filter(|s| cands.iter().any(|c| service_de(&c.id) == *s)).collect();
         let chiffres: String = q.chars().filter(char::is_ascii_digit).collect();
         let mut liste: Vec<&Conv> = cands
             .into_iter()
