@@ -370,7 +370,7 @@ private fun SectionComptes(connecter: (Service, String) -> Unit) {
 
 /**
  * Réglages → Comptes → « Dans la boîte de réception » : les services cachés
- * ([ServicesCaches], comme la case du choix des services de la barre du bas,
+ * ([ServicesCaches] ; le seul endroit sur Android depuis l'onglet Groupes,
  * et la même section du bureau). Propre à l'appareil.
  */
 @Composable

@@ -85,11 +85,11 @@ object Raccourcis {
         time = c.time,
     )
 
-    /** Sur le fil principal : les [MAX] conversations les plus récentes de la boîte (sans privées ni archives). */
+    /** Sur le fil principal : les [MAX] conversations les plus récentes de la boîte (sans privées, archives ni grands espaces cachés). */
     private fun publier() {
         val a = appli ?: return
         val privees = Marques.privees.toSet()
-        val fiches = Depot.boite.filter { !it.readOnly }.take(MAX).map { fiche(it) }
+        val fiches = Depot.inbox.filter { !it.readOnly }.take(MAX).map { fiche(it) }
         fil.execute { appliquer(a, fiches, privees) }
     }
 

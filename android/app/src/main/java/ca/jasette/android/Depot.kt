@@ -77,6 +77,12 @@ object Depot {
 
     /** Les conversations (boîte de réception) des deux comptes, les plus récentes d'abord. */
     val convs = mutableStateListOf<Conv>()
+    /**
+     * Les grands espaces (`large`, PROTOCOLE.md §5.13) qui demandent mon
+     * attention : une mention ou une réponse à moi reçue depuis la dernière
+     * lecture. En mémoire seulement ; oublié quand la conversation est lue.
+     */
+    val attention = mutableStateMapOf<String, Boolean>()
     /** Les conversations archivées, à part (comme `archives` du bureau), les plus récentes d'abord. */
     val archives = mutableStateListOf<Conv>()
     /** Les services à qui on a demandé leurs archives, et ceux qui ont répondu. */
@@ -396,6 +402,7 @@ object Depot {
         codeAssociation.clear()
         presences.clear()
         ecrits.clear()
+        attention.clear()
         Notes.vider()
         emoji = null
         besoinNip = false
@@ -1078,6 +1085,9 @@ object Depot {
         }
 
         val conv = conv(m.conv)
+        // Un grand espace (§5.13) : une mention ou une réponse à moi demande mon
+        // attention (il passe alors aussi dans la boîte de réception).
+        if (nouveau && !ouverteIci && conv?.large == true && demandeAttention(m)) attention[m.conv] = true
         if (conv != null) {
             var c = conv
             if (nouveau || c.time <= m.time) c = c.copy(preview = m.apercu(), fromMe = m.fromMe)
@@ -1094,8 +1104,9 @@ object Depot {
         if (nouveau && !m.fromMe) {
             if (ouverteIci) {
                 commande(JSONObject().put("cmd", "read").put("conv", m.conv).put("msg", m.id))
-            } else if (!Marques.estPrivee(m.conv)) {
+            } else if (!Marques.estPrivee(m.conv) && notifierMessage(conv, m, conv != null && dansBoite(conv))) {
                 // Liste privée : aucune notification, même neutre (rien ne trahit la conversation).
+                // Un grand espace hors de la boîte de réception : seulement sur mention ou réponse (§5.13).
                 notifier?.invoke(m, conv)
             }
         }
@@ -1131,6 +1142,20 @@ object Depot {
 
     /** La boîte de réception (et les vues Favoris et par service) : sans les archives de Jasette. */
     val boite: List<Conv> get() = convs.filter { !archiveeJasette(it.id) && !Marques.estPrivee(it.id) }
+
+    /**
+     * La conversation va-t-elle dans la boîte de réception (vue Tout et vues
+     * par service) ? Toujours sans `large` ; un grand espace, seulement s'il
+     * est montré exprès, épinglé ou demande mon attention (§5.13).
+     */
+    fun dansBoite(c: Conv): Boolean =
+        dansBoiteDeReception(c, Marques.estMontreeDansBoite(c.id), Marques.estEpinglee(c.id), attention[c.id] == true)
+
+    /** Ce que montre la boîte de réception (vue Tout et vues par service) : [boite] selon [dansBoite]. */
+    val inbox: List<Conv> get() = boite.filter { dansBoite(it) }
+
+    /** L'onglet Groupes : les grands espaces (`large`), sans les archives de Jasette ni les privées. */
+    val groupes: List<Conv> get() = boite.filter { it.large }
 
     /** La vue Archives : celles des services et celles de Jasette, ensemble, les plus récentes d'abord. */
     val toutesArchives: List<Conv>
@@ -1239,8 +1264,10 @@ object Depot {
     fun marquerLu(id: String) {
         val dernier = messages[id]?.lastOrNull { !it.local }
         if (dernier != null) commande(JSONObject().put("cmd", "read").put("conv", id).put("msg", dernier.id))
-        if (convs.any { it.id == id && it.unread }) {
-            remplacerConvs(convs.map { if (it.id == id) it.copy(unread = false) else it })
+        // Lue : un grand espace ne demande plus mon attention (§5.13).
+        attention.remove(id)
+        if (convs.any { it.id == id && (it.unread || it.mentions > 0) }) {
+            remplacerConvs(convs.map { if (it.id == id) it.copy(unread = false, mentions = 0) else it })
         }
     }
 

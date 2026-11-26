@@ -85,6 +85,8 @@ sealed interface Vue {
     data object Tout : Vue
     data object Favoris : Vue
     data object Archives : Vue
+    /** L'onglet Groupes : serveurs, canaux et communautés (PROTOCOLE.md §5.13 ; Groupes.kt). */
+    data object Groupes : Vue
     data class DuService(val service: Service) : Vue
     /** La Liste privée : seulement dans [ca.jasette.android.PriveActivity], déverrouillée. */
     data object Privees : Vue
@@ -136,8 +138,13 @@ fun App(activite: Activity, prive: Boolean = false) {
     var anciennesMontrees by remember { mutableStateOf(false) }
     LaunchedEffect(vue) { if (vue != Vue.Tout) anciennesMontrees = false }
 
+    // Groupes : le serveur Discord ouvert (l'id de son parent, ex. « g123 »), ou null :
+    // la liste des services. Gardé ici : il survit à l'ouverture d'un salon sur téléphone.
+    var espaceGroupes by remember { mutableStateOf<String?>(null) }
+
     fun choisirVue(v: Vue) {
         vue = v
+        espaceGroupes = null
         pile = listOf(Ecran.Liste)
         if (!volets) ouverte = null
     }
@@ -157,7 +164,16 @@ fun App(activite: Activity, prive: Boolean = false) {
     }
 
     val liste: @Composable () -> Unit = {
-        Liste(
+        if (vue == Vue.Groupes) Groupes(
+            choisie = if (volets) ouverte else null,
+            large = large,
+            espace = espaceGroupes,
+            ouvrirEspace = { espaceGroupes = it },
+            ouvrir = { ouverte = it },
+            retiree = { if (ouverte == it) ouverte = null },
+            choisirVue = ::choisirVue,
+            reglages = ::ouvrirReglages,
+        ) else Liste(
             vue = vue,
             choisie = if (volets) ouverte else null,
             large = large,
@@ -316,6 +332,9 @@ private fun Liste(
         focaliser = false
         filtre = ""
     }
+    // La vue d'un service : le retour arrière revient à « Tout » (déclaré avant celui de la
+    // recherche : la recherche ouverte se referme d'abord).
+    BackHandler(enabled = vue is Vue.DuService) { choisirVue(Vue.Tout) }
     // Retour à la boîte de réception (retour arrière) : la recherche se referme, vidée.
     BackHandler(enabled = rechercheOuverte || filtre.isNotEmpty()) { fermerRecherche() }
     // Deux volets : la conversation de droite refermée referme aussi la recherche. (Sur
@@ -348,6 +367,7 @@ private fun Liste(
         Vue.Tout -> t("Boîte de réception")
         Vue.Favoris -> t("Favoris")
         Vue.Archives -> t("Archives")
+        Vue.Groupes -> t("Groupes")
         is Vue.DuService -> vue.service.titre
         Vue.Privees -> t("Privées")
     }
@@ -408,22 +428,24 @@ private fun Liste(
         // Les archives des services et celles de Jasette, ensemble ; ailleurs, sans elles.
         // Les favoris et les épinglées sont tous montrés, chargés ou non : ceux dont la
         // conversation est absente (service coupé, pas encore prêt) viennent du cache des marques.
+        // La barre de recherche filtre par nom, membres et aperçu (comme `correspond`).
+        val f = ca.jasette.android.plier(filtre.trim())
         val source = when (vue) {
             Vue.Archives -> Depot.toutesArchives
             Vue.Privees -> Depot.privees
             Vue.Favoris -> Marques.favoris.map { convMarquee(it) }
-            else -> Depot.boite + epinglesAbsentes()
+            // La boîte de réception : sans les grands espaces gardés dans Groupes (§5.13) ;
+            // la recherche, elle, les trouve aussi.
+            else -> (if (f.isEmpty()) Depot.inbox else Depot.boite) + epinglesAbsentes()
         }
         val rang = { c: Conv -> Marques.epingles.indexOf(c.id).let { if (it < 0) Int.MAX_VALUE else it } }
-        // La barre de recherche filtre par nom, membres et aperçu (comme `correspond`).
-        val f = ca.jasette.android.plier(filtre.trim())
         val filtrees = source.filter { c ->
             val dansVue = when (vue) {
                 Vue.Favoris -> Marques.estFavori(c.id)
                 is Vue.DuService -> c.service == vue.service
                 else -> true
             }
-            // Un service caché (écran Services) : absent de la boîte, des favoris et des
+            // Un service caché (Réglages > Comptes) : absent de la boîte, des favoris et des
             // archives, sauf dans sa propre vue et dans la recherche. Ses marques restent.
             val cache = f.isEmpty() && vue !is Vue.DuService && vue != Vue.Privees && ServicesCaches.cache(c.service)
             // Liste privée : nulle part ailleurs que dans sa vue.
@@ -500,6 +522,11 @@ private fun Liste(
             // est recalée sur l'élément 0.
             if (bannieresVisibles()) item(key = "bannieres") { Bannieres { reglages(SectionReglages.COMPTES) } }
             if (vue == Vue.Tout && accueilVisible()) item { Accueil(serveur, connecter) }
+            // Les puces des services (Tout, puis chacun) : la vue par service sur écran étroit
+            // (sur grand écran, le rail a une tuile par service).
+            if (!large && f.isEmpty() && (vue == Vue.Tout || vue is Vue.DuService) && servicesConnectes().size > 1) {
+                item(key = "puces") { PucesInbox(vue, choisirVue) }
+            }
             val vide = when {
                 visibles.isNotEmpty() || cachees > 0 -> null
                 f.isNotEmpty() -> t("Aucun résultat")
@@ -1101,7 +1128,7 @@ private fun Accueil(serveur: () -> Unit, connecter: (Service, String) -> Unit) {
 }
 
 /** La position de défilement de chaque vue de la liste, gardée pendant qu'une conversation est ouverte. */
-private object PositionsListes {
+internal object PositionsListes {
     private val parVue = mutableMapOf<Any, androidx.compose.foundation.lazy.LazyListState>()
     fun de(vue: Any) = parVue.getOrPut(vue) { androidx.compose.foundation.lazy.LazyListState() }
 }

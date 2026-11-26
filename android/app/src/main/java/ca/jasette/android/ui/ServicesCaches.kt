@@ -7,7 +7,7 @@ import androidx.compose.runtime.setValue
 import ca.jasette.android.Service
 
 /**
- * Les services cachés (écran Services, la case à droite de chacun ; au bureau,
+ * Les services cachés (Réglages > Comptes, « Dans la boîte de réception » ; au bureau,
  * `services_caches` de reglages.json) : leurs conversations quittent la boîte
  * de réception, les Head, les favoris et les archives. Rien n'est retiré des
  * marques : c'est un filtre d'affichage, et tout revient à sa place quand on

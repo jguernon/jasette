@@ -104,13 +104,16 @@ fun MenuDeListe(c: Conv, ouvert: Boolean, fermer: () -> Unit, retiree: (String) 
 
 /** Le nombre de conversations non lues d'une vue (la pastille du rail). */
 fun nonLus(v: Vue): Int = when (v) {
-    // Les services cachés (écran Services) ne comptent pas, sauf sur leur propre icône.
-    Vue.Tout -> Depot.boite.count { it.unread && !ServicesCaches.cache(it.service) }
+    // Les services cachés (Réglages > Comptes) ne comptent pas, sauf sur leur propre icône.
+    // L'Inbox ne compte que ce qu'elle montre (pas les grands espaces gardés dans Groupes).
+    Vue.Tout -> Depot.inbox.count { it.unread && !ServicesCaches.cache(it.service) }
     Vue.Favoris -> Marques.favoris.count { id ->
         !Marques.estPrivee(id) && !ServicesCaches.cache(Service.de(id)) && Depot.conv(id)?.unread == true
     }
     Vue.Archives -> Depot.toutesArchives.count { it.unread && !ServicesCaches.cache(it.service) }
-    is Vue.DuService -> Depot.boite.count { it.service == v.service && it.unread }
+    is Vue.DuService -> Depot.inbox.count { it.service == v.service && it.unread }
+    // Groupes : les grands espaces non lus (PROTOCOLE.md §5.13).
+    Vue.Groupes -> Depot.groupes.count { it.unread }
     Vue.Privees -> Depot.privees.count { it.unread }
 }
 
@@ -188,6 +191,7 @@ fun Rail(vue: Vue, enReglages: Boolean, choisir: (Vue) -> Unit, reglages: () -> 
         val fixes = listOf(
             Triple(Vue.Tout, Icones.inbox, t("Boîte de réception")),
             Triple(Vue.Favoris, Icons.Filled.Star, t("Favoris")),
+            Triple(Vue.Groupes, Icones.groupes, t("Groupes")),
             Triple(Vue.Archives, Icones.archive, t("Archives")),
         )
         for ((v, ic, nom) in fixes) {
@@ -226,13 +230,13 @@ fun Rail(vue: Vue, enReglages: Boolean, choisir: (Vue) -> Unit, reglages: () -> 
 }
 
 /**
- * La barre du bas sur écran étroit (Fold plié) : Inbox, Favoris, Archives et
- * Services, qui ouvre le choix du service.
+ * La barre du bas sur écran étroit (Fold plié) : Inbox, Favoris, Groupes,
+ * Archives et Moi. Les vues par service se choisissent par les puces en haut
+ * de la boîte de réception ([PucesInbox]) ; cacher un service de la boîte se
+ * fait dans Réglages > Comptes (« Dans la boîte de réception »).
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
-    var choixService by remember { mutableStateOf(false) }
     val couleurs = NavigationBarItemDefaults.colors(
         selectedIconColor = P.surSelection, unselectedIconColor = P.icone,
         selectedTextColor = P.texteFort, unselectedTextColor = P.textePale, indicatorColor = indicateur(),
@@ -248,33 +252,20 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
         val fixes = listOf(
             Triple(Vue.Tout, Icones.inbox, t("Inbox")),
             Triple(Vue.Favoris, Icons.Filled.Star, t("Favoris")),
+            Triple(Vue.Groupes, Icones.groupes, t("Groupes")),
             Triple(Vue.Archives, Icones.archive, t("Archives")),
         )
         for ((v, ic, nom) in fixes) {
+            // La vue d'un service fait partie de l'Inbox (ses puces).
+            val choisi = vue == v || (v == Vue.Tout && vue is Vue.DuService)
             NavigationBarItem(
-                selected = vue == v,
+                selected = choisi,
                 onClick = { choisir(v) },
-                icon = { IconeNav(vue == v) { AvecPastille(nonLus(v)) { Icon(ic, null) } } },
-                label = { Text(nom, maxLines = 1) },
+                icon = { IconeNav(choisi) { AvecPastille(nonLus(v)) { Icon(ic, null) } } },
+                label = { Text(nom, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 colors = couleurs,
             )
         }
-        val duService = vue as? Vue.DuService
-        NavigationBarItem(
-            selected = duService != null,
-            onClick = { choixService = true },
-            icon = {
-                IconeNav(duService != null) {
-                    if (duService != null) {
-                        AvecPastille(nonLus(duService)) { LogoService(duService.service, 24.dp) }
-                    } else {
-                        Icon(Icones.services, null)
-                    }
-                }
-            },
-            label = { Text(duService?.service?.court ?: t("Services"), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            colors = couleurs,
-        )
         // Mon avatar, en bas à droite.
         var menuAvatar by remember { mutableStateOf(false) }
         NavigationBarItem(
@@ -286,60 +277,34 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
         )
         if (menuAvatar) MenuAvatar { menuAvatar = false }
     }
-    if (choixService) {
-        ModalBottomSheet(onDismissRequest = { choixService = false }, containerColor = P.menu) {
-            Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
-                Text(
-                    t("Services"), color = P.texteFort, fontWeight = FontWeight.Bold, fontSize = 18.sp,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                )
-                val liste = servicesConnectes()
-                if (liste.isEmpty()) {
-                    Text(t("Aucun service connecté."), color = P.textePale, modifier = Modifier.padding(20.dp))
-                }
-                val ctx = androidx.compose.ui.platform.LocalContext.current
-                for (s in liste) {
-                    val v = Vue.DuService(s)
-                    val montre = !ServicesCaches.cache(s)
-                    // L'appui sur la ligne ouvre le service ; la case, à droite, est une zone à part.
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Row(
-                            Modifier.weight(1f).clickable {
-                                choixService = false
-                                choisir(v)
-                            }.padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            LogoService(s, 34.dp, gris = !montre)
-                            Spacer(Modifier.width(14.dp))
-                            Text(
-                                s.titre, color = if (montre) P.texteFort else P.textePale, fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.weight(1f),
-                            )
-                            val n = nonLus(v)
-                            if (n > 0) Pastille("$n")
-                            if (vue == v) {
-                                Spacer(Modifier.width(10.dp))
-                                Icon(Icons.Filled.Check, null, tint = P.accent)
-                            }
-                        }
-                        androidx.compose.material3.Checkbox(
-                            checked = montre,
-                            onCheckedChange = { ServicesCaches.montrer(ctx, s, it) },
-                            colors = androidx.compose.material3.CheckboxDefaults.colors(
-                                checkedColor = P.accent, uncheckedColor = P.textePale, checkmarkColor = P.surAccent,
-                            ),
-                            modifier = Modifier.padding(end = 8.dp),
-                        )
-                    }
-                }
-                if (liste.isNotEmpty()) {
-                    Text(
-                        t("Les services décochés sont cachés de la boîte de réception, des Head et des favoris. Rien n'est oublié : recochez-les pour les retrouver."),
-                        color = P.textePale, fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                    )
-                }
+}
+
+/**
+ * Les puces en haut de la boîte de réception (écran étroit, plus d'un service
+ * connecté) : Tout, puis chaque service connecté avec ses non-lus. Elles
+ * remplacent l'ancienne feuille Services de la barre du bas ; elles défilent
+ * avec la liste. Un service caché de la boîte (Réglages > Comptes) a son logo grisé.
+ */
+@Composable
+fun PucesInbox(vue: Vue, choisir: (Vue) -> Unit) {
+    val liste = servicesConnectes()
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Puce(vue == Vue.Tout, true, { choisir(Vue.Tout) }) { c ->
+            Text(t("Tout"), color = c, fontSize = 14.sp, fontWeight = if (vue == Vue.Tout) FontWeight.SemiBold else null)
+        }
+        for (s in liste) {
+            val v = Vue.DuService(s)
+            val actif = vue == v
+            Puce(actif, true, { choisir(if (actif) Vue.Tout else v) }) { c ->
+                LogoService(s, 18.dp, gris = ServicesCaches.cache(s))
+                Text(s.court, color = c, fontSize = 14.sp, fontWeight = if (actif) FontWeight.SemiBold else null, maxLines = 1)
+                val n = nonLus(v)
+                if (n > 0) Pastille(if (n > 99) "99+" else "$n")
             }
         }
     }
@@ -589,6 +554,14 @@ fun MenuConversation(
         Item(if (dansHead) t("Retirer du Head") else t("Ajouter au Head"), Icones.grille) { Marques.basculerHead(c.id) }
         Item(if (favori) t("Retirer des favoris") else t("Ajouter aux favoris"), Icons.Filled.Star) { Marques.basculerFavori(c.id) }
         Item(if (epinglee) t("Désépingler") else t("Épingler en haut"), Icones.epingle) { Marques.basculerEpingle(c.id) }
+        // Un grand espace (§5.13) : le montrer aussi dans la boîte de réception, ou l'y retirer.
+        if (c.large) {
+            if (Marques.estMontreeDansBoite(c.id)) {
+                Item(t("Garder dans Groupes seulement"), Icones.groupes) { Marques.montrerDansBoite(c.id, false) }
+            } else {
+                Item(t("Montrer dans la boîte de réception"), Icones.inbox) { Marques.montrerDansBoite(c.id, true) }
+            }
+        }
         // Liste privée : seulement si elle est activée sur cet appareil.
         if (ca.jasette.android.Prive.actif) {
             val privee = Marques.estPrivee(c.id)

@@ -49,7 +49,7 @@ import ca.jasette.android.t
 
 /** Une puce : choisie (accent), permise, ou désactivée (pâle ; pas de transparence en EGA). */
 @Composable
-private fun Puce(actif: Boolean, permise: Boolean, onClick: () -> Unit, contenu: @Composable RowScope.(Color) -> Unit) {
+fun Puce(actif: Boolean, permise: Boolean, onClick: () -> Unit, contenu: @Composable RowScope.(Color) -> Unit) {
     val couleur = when {
         actif -> P.accent
         permise -> P.texteFort

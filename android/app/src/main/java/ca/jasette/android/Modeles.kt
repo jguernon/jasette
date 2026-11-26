@@ -105,14 +105,48 @@ data class Conv(
     val e2ee: Boolean,
     /** Le numéro de l'autre (Google, conversation à deux) : pour appeler. */
     val number: String,
+    /**
+     * Un grand espace (PROTOCOLE.md §5.13) : salon d'un serveur Discord, canal
+     * ou supergroupe Telegram, communauté ou chaîne WhatsApp, canal de
+     * diffusion… Il va dans l'onglet Groupes ; dans la boîte de réception,
+     * seulement selon [dansBoiteDeReception]. Seul ce champ décide du classement.
+     */
+    val large: Boolean = false,
+    /** La sorte de grand espace (`kind` : server, channel, supergroup, community…), ou "". */
+    val kind: String = "",
+    /** Seuls les administrateurs y écrivent (groupe d'annonces, salon d'annonces). */
+    val announce: Boolean = false,
+    /** L'id, sans préfixe, de l'espace qui le contient (serveur Discord `g<guild>`, communauté WhatsApp), ou "". */
+    val parent: String = "",
+    /** Le nom de cet espace parent. */
+    val parentName: String = "",
+    /** La catégorie du salon (Discord), sa position, et la position du salon dans sa catégorie. */
+    val section: String = "",
+    val sectionOrder: Int = 0,
+    val order: Int = 0,
+    /** Les non-lus qui me mentionnent, quand le service les compte lui-même. */
+    val mentions: Int = 0,
 ) {
     val service get() = Service.de(id)
 
     /** Les mêmes champs que ceux du pont (pour le cache sur disque, relu par [de]). */
-    fun json(): JSONObject = JSONObject().put("id", id).put("name", name).put("preview", preview)
-        .put("from_me", fromMe).put("time", time).put("unread", unread).put("group", group).put("rcs", rcs)
-        .put("color", color).put("members", JSONArray(members)).put("read_only", readOnly)
-        .put("archived", archived).put("e2ee", e2ee).put("number", number)
+    fun json(): JSONObject {
+        val o = JSONObject().put("id", id).put("name", name).put("preview", preview)
+            .put("from_me", fromMe).put("time", time).put("unread", unread).put("group", group).put("rcs", rcs)
+            .put("color", color).put("members", JSONArray(members)).put("read_only", readOnly)
+            .put("archived", archived).put("e2ee", e2ee).put("number", number)
+        // Les champs des grands espaces (§5.13), seulement s'ils sont là.
+        if (large) o.put("large", true)
+        if (kind.isNotEmpty()) o.put("kind", kind)
+        if (announce) o.put("announce", true)
+        if (parent.isNotEmpty()) o.put("parent", parent)
+        if (parentName.isNotEmpty()) o.put("parent_name", parentName)
+        if (section.isNotEmpty()) o.put("section", section)
+        if (sectionOrder != 0) o.put("section_order", sectionOrder)
+        if (order != 0) o.put("order", order)
+        if (mentions != 0) o.put("mentions", mentions)
+        return o
+    }
 
     companion object {
         fun de(o: JSONObject) = Conv(
@@ -130,6 +164,15 @@ data class Conv(
             archived = o.optBoolean("archived"),
             e2ee = o.optBoolean("e2ee"),
             number = o.chaine("number"),
+            large = o.optBoolean("large"),
+            kind = o.chaine("kind"),
+            announce = o.optBoolean("announce"),
+            parent = o.chaine("parent"),
+            parentName = o.chaine("parent_name"),
+            section = o.chaine("section"),
+            sectionOrder = o.optInt("section_order"),
+            order = o.optInt("order"),
+            mentions = o.optInt("mentions").coerceAtLeast(0),
         )
     }
 }
@@ -180,6 +223,10 @@ data class Msg(
     val reactions: List<Reaction>,
     /** L'aperçu du lien fourni par le service (`link_preview`, PROTOCOLE.md §5.9). */
     val apercu: LienApercu? = null,
+    /** Le message me mentionne (`mentions_me`, §5.13). */
+    val mentionsMe: Boolean = false,
+    /** Il répond à un de mes messages (`reply_to_me`, §5.13). */
+    val replyToMe: Boolean = false,
 ) {
     /** Un envoi local pas encore confirmé par le pont. */
     val local get() = id == tmpId
@@ -209,6 +256,8 @@ data class Msg(
             )
         }
         apercu?.let { o.put("link_preview", it.json()) }
+        if (mentionsMe) o.put("mentions_me", true)
+        if (replyToMe) o.put("reply_to_me", true)
         return o
     }
 
@@ -242,6 +291,8 @@ data class Msg(
                     Reaction(r.chaine("emoji"), r.chaine("sender"), r.optBoolean("from_me"))
                 }.filter { it.emoji.isNotEmpty() },
                 apercu = LienApercu.de(o.optJSONObject("link_preview")),
+                mentionsMe = o.optBoolean("mentions_me"),
+                replyToMe = o.optBoolean("reply_to_me"),
             )
         }
     }
