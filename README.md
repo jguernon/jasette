@@ -1,7 +1,8 @@
 # Jasette
 
 Toutes tes messageries dans une seule app : Google Messages (SMS/RCS), Messenger,
-Instagram, WhatsApp, Signal, X, Telegram et Bluesky. Pour Linux et Android.
+Instagram, WhatsApp, Signal, X, Telegram, Bluesky et Discord. Pour Linux et
+Android.
 
 Page de présentation et téléchargements : https://jonathanguernon.net/jasette/
 
@@ -13,7 +14,10 @@ Page de présentation et téléchargements : https://jonathanguernon.net/jasette
   de [mautrix](https://github.com/mautrix) (gmessages, meta, whatsmeow,
   signalmeow), sur [libsignal](https://github.com/signalapp/libsignal) et, pour
   Telegram, sur [gotd/td](https://github.com/gotd/td). Le pont Bluesky
-  (messages privés) parle directement l'API XRPC d'AT Protocol.
+  (messages privés) parle directement l'API XRPC d'AT Protocol. Le pont
+  Discord reprend la façon de faire de
+  [mautrix-discord](https://github.com/mautrix/discord) et son discordgo
+  modifié ([beeper/discordgo](https://github.com/beeper/discordgo)).
 - **Serveur Jasette** (`serveur/`) : facultatif. Il garde les sessions sur une
   machine toujours allumée, et tes autres appareils (bureau, Android) s'y
   branchent, par un lien TLS épinglé et un jumelage à code. Protocole :
@@ -101,6 +105,20 @@ l'accès aux messages : dans Bluesky, Réglages > Confidentialité et sécurité
 Mots de passe d'app > Ajouter, en cochant « Autoriser l'accès à vos messages
 privés ». Jasette ne garde que les jetons de session
 (`<données>/bluesky/session.json`, 0600), jamais le mot de passe.
+
+Discord : **messages privés et groupes privés seulement** (pas les salons des
+serveurs : trop de volume, et c'est là que Discord surveille le plus les
+clients non officiels). Connexion par **code QR**, à scanner dans l'app Discord
+du téléphone (Paramètres > Scanner le code QR), ou en collant le **jeton** du
+compte. Le pont garde le jeton dans `<données>/discord/session.json` (0600).
+Les ids de conversation portent le préfixe `d:`.
+
+**Risque** : Discord interdit officiellement les clients tiers sur un compte
+d'utilisateur (« self-bot »). Le pont imite le client web (empreinte TLS de
+Chrome, mêmes en-têtes, statut invisible), espace ses requêtes, ne charge
+l'historique que par petites pages, ne marque lu et n'écrit qu'à ta demande,
+et le serveur Jasette n'en précharge presque rien. Le risque d'un
+avertissement ou d'une suspension du compte n'est pas nul : à tes risques.
 
 ## Vie privée
 
