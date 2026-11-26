@@ -1,4 +1,4 @@
 {
-  "fr": "Android : les publications et reels partagés (Instagram, liens seuls) s'affichent de nouveau en carte d'aperçu au lieu d'un message vide.",
-  "en": "Android: shared posts and reels (Instagram, link-only messages) show up again as preview cards instead of an empty message."
+  "fr": "Nouveau réglage : « Garder les conversations archivées hors de la boîte de réception » — un nouveau message ne les ramène plus (désactivé par défaut, synchronisé par le serveur Jasette).",
+  "en": "New setting: “Keep archived conversations out of the inbox” — a new message no longer brings them back (off by default, synced by the Jasette server)."
 }
