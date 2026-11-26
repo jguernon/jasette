@@ -10599,7 +10599,10 @@ impl Render for Jasette {
                         .border_color(ton(blanc(0.6), c(0x2c2c2e)))
                         // Live : bleu brillant coupé net au milieu ; Sirène : vert. Titre en blanc.
                         .when(retro::retro(), |d| {
+                            // Sans marge à gauche : le reflet (absolu) part du bord, sinon les
+                            // 12 px de la marge restaient de la couleur du bas. La marge passe au titre.
                             d.relative()
+                                .pl(px(0.))
                                 .bg(retro::fond_titre())
                                 .border_color(if th().live { c(0x2a63b4) } else { c(0x0b4a15) })
                                 .children(retro::reflet_titre())
@@ -10614,7 +10617,7 @@ impl Render for Jasette {
                                 .text_size(px(13.))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(th().texte)
-                                .when(retro::retro(), |d| d.relative().text_color(c(0xffffff)).font_weight(FontWeight::BOLD))
+                                .when(retro::retro(), |d| d.relative().pl(px(12.)).text_color(c(0xffffff)).font_weight(FontWeight::BOLD))
                                 .child(img(icone_app()).size(px(18.)))
                                 .child("Jasette"),
                         ),

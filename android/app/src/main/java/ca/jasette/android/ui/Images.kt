@@ -102,5 +102,5 @@ fun ImageFichier(
     }
 }
 
-/** Live et Sirène : les avatars en 24 × 24 gros pixels, comme les photos d'époque. */
-const val PIXELS_RETRO = 24
+/** Live et Sirène : les avatars en 32 × 32 gros pixels, comme les photos d'époque. */
+const val PIXELS_RETRO = 32

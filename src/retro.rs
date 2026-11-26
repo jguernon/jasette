@@ -1071,11 +1071,11 @@ pub(crate) fn texte_ligne(moi: bool) -> Hsla {
 /// Le côté de la photo réduite (en pixels d'époque), et l'agrandissement au plus
 /// proche voisin : chaque pixel devient un bloc de 16 × 16, assez grand pour que
 /// GPUI, qui lisse en réduisant, garde des blocs nets à toutes les tailles.
-const COTE_PIXEL: u32 = 24;
+const COTE_PIXEL: u32 = 32;
 const BLOC_PIXEL: u32 = 16;
 
 /// Une photo de profil pixelisée (Live et Sirène) : recadrée au carré, réduite
-/// à 24 × 24, puis agrandie sans lissage. Gardée en mémoire par fichier et par
+/// à 32 × 32, puis agrandie sans lissage. Gardée en mémoire par fichier et par
 /// date de modification : calculée une fois, pas à chaque image.
 pub(crate) fn photo_pixel(chemin: &std::path::Path) -> Option<Arc<gpui::Image>> {
     static CACHE: std::sync::OnceLock<Mutex<HashMap<(PathBuf, Option<std::time::SystemTime>), Option<Arc<gpui::Image>>>>> =
