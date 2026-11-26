@@ -99,6 +99,19 @@ private object Pages {
         "https://www.twitter.com/", "https://mobile.x.com/", "https://mobile.twitter.com/",
     ).any { url.startsWith(it) }
 
+    // Reddit : la même page et les mêmes cookies que connexion/jasette-connexion-reddit.py.
+    // Une fois connecté, la page du chat, pour que Reddit y pose ses cookies de chat.
+    const val REDDIT_DEBUT = "https://www.reddit.com/login/"
+    const val REDDIT_CHAT = "https://www.reddit.com/chat/"
+    val REDDIT_DOMAINES = listOf("https://www.reddit.com/", "https://reddit.com/", "https://chat.reddit.com/")
+    val REDDIT_REQUIS = setOf("reddit_session")
+    val REDDIT_VOULUS = REDDIT_REQUIS + setOf("csrf_token", "token_v2", "loid", "session_tracker", "edgebucket", "rdt", "csv")
+
+    fun estReddit(url: String) = listOf(
+        "https://www.reddit.com/", "https://reddit.com/", "https://old.reddit.com/",
+        "https://new.reddit.com/", "https://chat.reddit.com/", "https://sh.reddit.com/",
+    ).any { url.startsWith(it) }
+
     fun plateformeDe(url: String): String? = when {
         url.startsWith("https://www.instagram.com/") || url.startsWith("https://instagram.com/") -> "instagram"
         url.startsWith("https://www.facebook.com/") || url.startsWith("https://facebook.com/") -> "facebook"
@@ -135,7 +148,7 @@ fun Connexion(service: Service, plateforme: String, fini: () -> Unit) {
         return
     }
     val principal = remember { Handler(Looper.getMainLooper()) }
-    val etat = remember { object { var fini = false; var vue: WebView? = null } }
+    val etat = remember { object { var fini = false; var vue: WebView? = null; var chatOuvert = false; var chatCharge = false } }
 
     // Vérifie les cookies : sur Google, une fois arrivé sur messages.google.com ;
     // sur Meta, dès que les cookies requis existent (la page de connexion a la
@@ -143,7 +156,24 @@ fun Connexion(service: Service, plateforme: String, fini: () -> Unit) {
     fun verifier() {
         if (etat.fini) return
         val url = etat.vue?.url ?: return
-        if (service == Service.X) {
+        if (service == Service.REDDIT) {
+            if (!Pages.estReddit(url)) return
+            val c = lireCookies(Pages.REDDIT_DOMAINES, Pages.REDDIT_VOULUS)
+            if (!c.keys.containsAll(Pages.REDDIT_REQUIS)) return
+            // Connecté : d'abord la page du chat (cookies csrf_token et token_v2 à jour).
+            if (!etat.chatOuvert) {
+                etat.chatOuvert = true
+                if (!url.startsWith(Pages.REDDIT_CHAT)) {
+                    principal.post { etat.vue?.loadUrl(Pages.REDDIT_CHAT) }
+                    return
+                }
+                etat.chatCharge = true
+            }
+            if (!etat.chatCharge || (!c.containsKey("csrf_token") && !c.containsKey("token_v2"))) return
+            etat.fini = true
+            Depot.connecterMeta(Service.REDDIT, c, "reddit")
+            fini()
+        } else if (service == Service.X) {
             if (!Pages.estX(url)) return
             val c = lireCookies(Pages.X_DOMAINES, Pages.X_VOULUS)
             // Connecté (pas seulement visiteur) : auth_token et ct0, et plus sur la page de connexion.
@@ -192,6 +222,7 @@ fun Connexion(service: Service, plateforme: String, fini: () -> Unit) {
         Service.MESSENGER -> if (plateforme == "facebook") t("Connexion à Facebook") else t("Connexion à Messenger")
         Service.INSTAGRAM -> t("Connexion à Instagram")
         Service.X -> t("Connexion à X")
+        Service.REDDIT -> t("Connexion à Reddit")
         // WhatsApp et Signal s'associent par code (Association.kt) : jamais ici.
         else -> service.court
     }
@@ -223,13 +254,17 @@ fun Connexion(service: Service, plateforme: String, fini: () -> Unit) {
                     cm.setAcceptCookie(true)
                     cm.setAcceptThirdPartyCookies(this, true)
                     webViewClient = object : WebViewClient() {
-                        override fun onPageFinished(view: WebView?, url: String?) = verifier()
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            if (etat.chatOuvert && url?.startsWith(Pages.REDDIT_CHAT) == true) etat.chatCharge = true
+                            verifier()
+                        }
                         override fun doUpdateVisitedHistory(view: WebView?, url: String?, reload: Boolean) = verifier()
                     }
                     loadUrl(
                         when (service) {
                             Service.GOOGLE -> Pages.GOOGLE
                             Service.X -> Pages.X_DEBUT
+                            Service.REDDIT -> Pages.REDDIT_DEBUT
                             else -> Pages.META_DEBUT.getValue(plateforme)
                         },
                     )

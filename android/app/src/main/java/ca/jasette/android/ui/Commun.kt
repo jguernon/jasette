@@ -53,6 +53,7 @@ fun iconeService(s: Service) = when (s) {
     Service.TELEGRAM -> R.drawable.service_telegram
     Service.BLUESKY -> R.drawable.service_bluesky
     Service.DISCORD -> R.drawable.service_discord
+    Service.REDDIT -> R.drawable.service_reddit
 }
 
 /** La forme des logos de services : un carré aux coins arrondis (30 % de la taille, comme `logo()` du bureau). */

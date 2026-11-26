@@ -73,7 +73,7 @@ data class ChoixNouveau(
     companion object {
         /** Les ponts qui savent créer un groupe (commande `create_group`, §5.6 bis du protocole). */
         fun creeGroupes(s: Service, sms: Boolean): Boolean =
-            s != Service.X && s != Service.BLUESKY && !(s == Service.GOOGLE && sms)
+            s != Service.X && s != Service.BLUESKY && s != Service.REDDIT && !(s == Service.GOOGLE && sms)
 
         /** Le service prend-il un nom de groupe à la création ? Instagram, non. */
         fun nommeGroupes(s: Service): Boolean = s != Service.INSTAGRAM

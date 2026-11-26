@@ -335,7 +335,12 @@ fun Fil(
                     ),
                 ),
             ) {
-                Saisie(id, actif = Depot.pret(Service.de(id)) && conv?.readOnly != true)
+                Column {
+                    // Une demande de message (Reddit) : l'accepter (l'expéditeur le voit)
+                    // ou l'ignorer. Répondre l'accepte aussi.
+                    if (conv?.request == true) DemandeMessage(id)
+                    Saisie(id, actif = Depot.pret(Service.de(id)) && conv?.readOnly != true)
+                }
             }
         },
     ) { marges ->
@@ -992,6 +997,20 @@ private fun PieceAutre(nom: String, piece: Piece?, appuiLong: () -> Unit = {}) {
  * bouton d'envoi. Les pièces choisies s'affichent en vignettes au-dessus, avec
  * un ✕ pour retirer chacune, jusqu'à l'envoi.
  */
+/** « Demande de message · Accepter · Ignorer » au-dessus du champ (commandes `accept` et `ignore`). */
+@Composable
+private fun DemandeMessage(conv: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(t("Demande de message"), color = P.textePale, fontSize = 13.sp)
+        TextButton(onClick = { Depot.commande(org.json.JSONObject().put("cmd", "accept").put("conv", conv)) }) { Text(t("Accepter")) }
+        TextButton(onClick = { Depot.commande(org.json.JSONObject().put("cmd", "ignore").put("conv", conv)) }) { Text(t("Ignorer")) }
+    }
+}
+
 @Composable
 private fun Saisie(conv: String, actif: Boolean) {
     val ctx = LocalContext.current

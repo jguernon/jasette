@@ -365,6 +365,12 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Nouvelle conversation Telegram" to "New Telegram chat",
     "Nouvelle conversation Bluesky" to "New Bluesky chat",
     "Nouvelle conversation Discord" to "New Discord chat",
+    "Nouvelle conversation Reddit" to "New Reddit chat",
+    // Reddit (Connexion.kt, Fil.kt).
+    "Connexion à Reddit" to "Sign in to Reddit",
+    "Demande de message" to "Message request",
+    "Accepter" to "Accept",
+    "Ignorer" to "Ignore",
     // Discord (Discord.kt).
     "Connecter Discord" to "Connect Discord",
     "Scanne-le avec un autre appareil qui a Discord : Paramètres → Scanner le code QR." to

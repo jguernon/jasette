@@ -354,6 +354,8 @@ private fun SectionComptes(connecter: (Service, String) -> Unit) {
                         Service.BLUESKY -> BoutonAccent(t("Se connecter")) { connecter(s, "") }
                         // Discord : code QR ou jeton (Discord.kt).
                         Service.DISCORD -> BoutonAccent(t("Connecter Discord")) { connecter(s, "") }
+                        // Reddit : la fenêtre web de reddit.com (Connexion.kt).
+                        Service.REDDIT -> BoutonAccent(t("Se connecter")) { connecter(s, "reddit") }
                     }
                 }
             }
