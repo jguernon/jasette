@@ -6089,19 +6089,24 @@ impl Jasette {
                     .when(self.vue == Vue::Favoris && self.reglages.etoiles.len() > 1, |d| {
                         d.child(
                             Self::bouton_icone("f-ordre", if self.reorganiser { "check" } else { "arrow-up-down" }, self.reorganiser)
+                                .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(t("Réorganiser")).build(w, cx))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.reorganiser = !this.reorganiser;
                                     cx.notify();
                                 })),
                         )
                     })
-                    .child(Self::bouton_icone("f-nonlus", "list-filter", self.non_lus_seulement).on_click(
+                    .child(Self::bouton_icone("f-nonlus", "list-filter", self.non_lus_seulement)
+                        .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(t("Non lus seulement")).build(w, cx))
+                        .on_click(
                         cx.listener(|this, _, _, cx| {
                             this.non_lus_seulement = !this.non_lus_seulement;
                             cx.notify();
                         }),
                     ))
-                    .child(Self::bouton_icone("f-cherche", "search", self.recherche_ouverte).on_click(cx.listener(
+                    .child(Self::bouton_icone("f-cherche", "search", self.recherche_ouverte)
+                        .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(t("Rechercher")).build(w, cx))
+                        .on_click(cx.listener(
                         |this, _, window, cx| {
                             this.recherche_ouverte = !this.recherche_ouverte;
                             if this.recherche_ouverte {
@@ -6113,7 +6118,9 @@ impl Jasette {
                             cx.notify();
                         },
                     )))
-                    .child(Self::bouton_icone("f-nouveau", "square-pen", self.nouveau_ouvert).on_click(cx.listener(
+                    .child(Self::bouton_icone("f-nouveau", "square-pen", self.nouveau_ouvert)
+                        .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(t("Nouveau message")).build(w, cx))
+                        .on_click(cx.listener(
                         |this, _, window, cx| {
                             this.basculer_nouveau(window, cx);
                             cx.notify();
@@ -12679,6 +12686,8 @@ fn t(fr: &'static str) -> &'static str {
         "Notifications de bureau" => "Desktop notifications",
         "Nourriture" => "Food",
         "Nouveau message" => "New message",
+        "Non lus seulement" => "Unread only",
+        "Réorganiser" => "Reorder",
         "Numéro de téléphone, puis Entrée" => "Phone number, then Enter",
         "Objets" => "Objects",
         "Ouvrir" => "Open",
