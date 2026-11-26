@@ -102,6 +102,12 @@ object Depot {
     val avatarsAuteurs = mutableStateMapOf<String, String>()
 
     /**
+     * La mosaïque d'un groupe sans image propre (`avatars_groupe`, §5.13) :
+     * conv → ses premiers membres (2 à 4), dessinés par [ui.Avatar] comme au bureau.
+     */
+    val mosaiques = mutableStateMapOf<String, List<MembreMosaique>>()
+
+    /**
      * La photo d'une conversation : la sienne, sinon l'icône de son espace
      * parent (`avatars[préfixe + parent]`, §5.13) ; null : les initiales.
      */
@@ -262,6 +268,7 @@ object Depot {
             if (convs.any { it.service == s } || archives.any { it.service == s }) continue
             val l = CacheConvs.lireListes(s) ?: continue
             for ((k, v) in l.avatars) if (!avatars.containsKey(k)) avatars[k] = v
+            for ((k, v) in l.mosaiques) if (!mosaiques.containsKey(k)) mosaiques[k] = v
             if (l.convs.isNotEmpty()) remplacerConvs(convs + l.convs.filter { c -> archives.none { it.id == c.id } })
             if (l.archives.isNotEmpty()) remplacerArchives(archives + l.archives.filter { c -> convs.none { it.id == c.id } })
         }
@@ -400,6 +407,7 @@ object Depot {
         plusAnciens.clear()
         avatars.clear()
         avatarsAuteurs.clear()
+        mosaiques.clear()
         medias.clear()
         echecs.clear()
         vignettes.clear()
@@ -977,19 +985,15 @@ object Depot {
                 if (id.isNotEmpty() && path.isNotEmpty()) avatarsAuteurs[s.prefixe + id] = path
             }
             "avatars_groupe" -> {
-                // Pas de mosaïque (encore) : la photo du premier membre qui en a une.
+                // La mosaïque des membres d'un groupe sans image (dessinée par ui.Avatar).
                 val conv = v.chaine("conv")
-                val membres = v.optJSONArray("members") ?: return
-                if (avatars.containsKey(conv)) return
-                for (i in 0 until membres.length()) {
-                    val path = membres.getJSONObject(i).chaine("path")
-                    if (path.isNotEmpty()) {
-                        avatars[conv] = path
-                        CacheMarques.noterAvatar(conv)
-                        CacheConvs.noterListes()
-                        break
-                    }
-                }
+                val membres = MembreMosaique.liste(v.optJSONArray("members"))
+                if (conv.isEmpty() || membres.isEmpty()) return
+                mosaiques[conv] = membres
+                // Une version d'avant gardait la photo du premier membre comme image du
+                // groupe : on l'oublie pour laisser voir la mosaïque.
+                if (avatars[conv]?.let { p -> membres.any { it.photo == p } } == true) avatars.remove(conv)
+                CacheConvs.noterListes()
             }
             "avatar_moi" -> monAvatar(Service.GOOGLE, v.chaine("path"))
             "media" -> {
@@ -1591,4 +1595,22 @@ object Depot {
 
     private const val PREFS_REGLAGES = "reglages"
     private const val CLE_SMS = "google_sms"
+}
+
+/**
+ * Un membre de la mosaïque d'un groupe (`avatars_groupe`) : son nom, sa couleur
+ * « #rrggbb » (vide : celle par défaut) et sa photo (null : ses initiales).
+ */
+data class MembreMosaique(val nom: String, val couleur: String, val photo: String?) {
+    fun json(): org.json.JSONObject = org.json.JSONObject().put("name", nom).put("color", couleur).put("path", photo.orEmpty())
+
+    companion object {
+        /** Les membres d'un tableau `members` (quatre au plus). */
+        fun liste(a: org.json.JSONArray?): List<MembreMosaique> {
+            if (a == null) return emptyList()
+            return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { m ->
+                MembreMosaique(m.optString("name"), m.optString("color"), m.optString("path").ifEmpty { null })
+            }.take(4)
+        }
+    }
 }

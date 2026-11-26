@@ -4,6 +4,7 @@ import ca.jasette.android.t
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -87,13 +88,20 @@ private fun initiales(nom: String): String? {
 @Composable
 fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false, presence: Boolean = false, fondPoint: Color = P.fond, propre: Boolean = false) {
     // La photo de la principale de sa personne (fiche), sinon la sienne ; [propre] : la sienne seulement.
+    // Un groupe sans image propre : la mosaïque de ses membres (`avatars_groupe`), avant
+    // la photo gardée pour une conversation marquée (une version d'avant y mettait un membre).
+    fun mosaiqueDe(c: Conv) = if (c.group) Depot.mosaiques[c.id]?.takeIf { it.isNotEmpty() } else null
     fun photoDe(c: Conv) = ca.jasette.android.Contacts.photoPour(c, grande = taille >= 48.dp) ?: Depot.avatarDe(c)
-        ?: ca.jasette.android.CacheMarques.avatar(c.id)
-    val photo = (if (propre) null else ca.jasette.android.principaleDe(conv))?.let { photoDe(it) } ?: photoDe(conv)
+        ?: (if (mosaiqueDe(c) == null) ca.jasette.android.CacheMarques.avatar(c.id) else null)
+    val principale = if (propre) null else ca.jasette.android.principaleDe(conv)
+    val photo = principale?.let { photoDe(it) } ?: photoDe(conv)
+    val mosaique = if (photo == null) mosaiqueDe(conv) else null
     Box(Modifier.size(taille)) {
         // Rond, carré (EGA), cadre vert brillant (Live) ou carré en creux (Sirène).
         val rond = Modifier.cadreAvatar(taille)
-        if (photo != null) {
+        if (mosaique != null) {
+            Mosaique(mosaique, taille, grise)
+        } else if (photo != null) {
             ImageFichier(
                 photo, rond.background(P.surface).then(if (grise) Modifier.alpha(0.7f) else Modifier), cote = 256,
                 filtre = if (grise) filtreGris else null,
@@ -121,6 +129,50 @@ fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false
                 Modifier.align(Alignment.BottomEnd).size(b).border(2.dp, P.fond, formeLogo(b))
                     .padding(1.dp).clip(formeLogo(b)),
             )
+        }
+    }
+}
+
+/**
+ * La mosaïque d'un groupe sans image (`avatars_groupe`, §5.13), comme au bureau :
+ * deux photos en diagonale, trois en triangle, quatre en grille ([placesMosaique]).
+ * Chaque membre a son petit avatar dans le cadre du thème (rond, carré EGA,
+ * cadre de Live ou de Sirène) ; sans photo, ses initiales sur sa couleur.
+ */
+@Composable
+fun Mosaique(membres: List<ca.jasette.android.MembreMosaique>, taille: Dp, grise: Boolean = false) {
+    val p = placesMosaique(membres.size)
+    val d = taille * p.cote
+    Box(Modifier.size(taille)) {
+        for ((m, place) in membres.zip(p.places)) {
+            Box(Modifier.offset(x = taille * place.first, y = taille * place.second)) {
+                MembreAvatar(m, d, grise)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MembreAvatar(m: ca.jasette.android.MembreMosaique, taille: Dp, grise: Boolean) {
+    // Un liseré de la couleur du fond sépare les membres qui se chevauchent (thèmes ronds).
+    val cadre = Modifier.cadreAvatar(taille).let {
+        if (P.ega || P.retro) it else it.border(maxOf(1.dp, taille * 0.04f), P.fond, formeRonde)
+    }
+    if (m.photo != null) {
+        ImageFichier(
+            m.photo, cadre.background(P.surface).then(if (grise) Modifier.alpha(0.7f) else Modifier), cote = 128,
+            filtre = if (grise) filtreGris else null,
+            pixels = if (P.retro) PIXELS_RETRO else 0,
+        )
+        return
+    }
+    val base = if (grise) GRIS_ABSENT else couleurHex(m.couleur) ?: P.avatarDefaut
+    Box(cadre.background(fondAvatar(base)), contentAlignment = Alignment.Center) {
+        val i = initialesMembre(m.nom)
+        if (i != null) {
+            Text(i, color = Color.White, fontSize = (taille.value * 0.38f).sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        } else {
+            Icon(Icons.Filled.Person, null, tint = Color.White, modifier = Modifier.size(taille * 0.5f))
         }
     }
 }

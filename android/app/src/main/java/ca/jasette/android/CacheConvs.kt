@@ -67,7 +67,12 @@ object CacheConvs {
     // ---- Lecture (au démarrage) ----
 
     /** Ce qu'on a gardé de la liste d'un service. */
-    class Listes(val convs: List<Conv>, val archives: List<Conv>, val avatars: Map<String, String>)
+    class Listes(
+        val convs: List<Conv>,
+        val archives: List<Conv>,
+        val avatars: Map<String, String>,
+        val mosaiques: Map<String, List<MembreMosaique>> = emptyMap(),
+    )
 
     /** Les services dont une liste est gardée (pour les montrer avant que le serveur les annonce). */
     fun servicesGardes(): List<Service> {
@@ -94,7 +99,15 @@ object CacheConvs {
                     if (p.isNotEmpty() && File(p).isFile) av[k] = p
                 }
             }
-            Listes(convs("convs"), convs("archives"), av)
+            // Les mosaïques des groupes sans image ; une photo disparue redevient des initiales.
+            val mo = HashMap<String, List<MembreMosaique>>()
+            o.optJSONObject("mosaiques")?.let { m ->
+                for (k in m.keys()) {
+                    val l = MembreMosaique.liste(m.optJSONArray(k)).map { if (it.photo != null && !File(it.photo).isFile) it.copy(photo = null) else it }
+                    if (l.isNotEmpty()) mo[k] = l
+                }
+            }
+            Listes(convs("convs"), convs("archives"), av, mo)
         } catch (e: Exception) {
             Log.w(ETIQUETTE, "cache des conversations (${service.court}) illisible : ignoré", e)
             null
@@ -212,6 +225,11 @@ object CacheConvs {
                     put("convs", JSONArray(c.map { it.json() }))
                     put("archives", JSONArray(a.map { it.json() }))
                     put("avatars", JSONObject().apply { av.forEach { (k, v) -> put(k, v) } })
+                    put("mosaiques", JSONObject().apply {
+                        for (k in (c + a).filter { it.group }.map { it.id }) {
+                            Depot.mosaiques[k]?.let { l -> put(k, JSONArray(l.map { it.json() })) }
+                        }
+                    })
                 })
             }
         }

@@ -98,7 +98,9 @@ class PontService : ServiceAndroid() {
         val texte = if (conv?.group == true && m.sender.isNotEmpty()) "${m.sender}${t(" : ")}${m.apercu()}" else m.apercu()
         // L'avatar de la personne : photo du contact si on l'utilise, sinon celle du service.
         val photo = conv?.let { Contacts.photoPour(it, grande = true) ?: Depot.avatarDe(it) } ?: Depot.avatars[m.conv]
+        // Un groupe sans image : la mosaïque de ses membres (avatars_groupe), comme dans l'app.
         val image = avatarRond(this, photo)
+            ?: if (conv?.group == true) mosaiqueRonde(this, Depot.mosaiques[conv.id]) else null
         // Le raccourci de la conversation (partage direct) : Android traite alors
         // la notification en conversation (priorité, bulles). Jamais pour une privée.
         val raccourci = conv?.let { Raccourcis.pourNotification(this, it, image) }

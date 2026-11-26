@@ -12,6 +12,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.compose.ui.graphics.toArgb
 import androidx.core.app.Person
 import androidx.core.content.LocusIdCompat
 import androidx.core.content.pm.ShortcutInfoCompat
@@ -234,4 +235,44 @@ fun avatarRond(ctx: Context, chemin: String?): Bitmap? {
     } catch (_: Exception) {
         null
     }
+}
+
+/**
+ * La mosaïque d'un groupe sans image ([Depot.mosaiques]) en image ronde de
+ * [cote] px, pour les notifications : les mêmes places que l'app
+ * ([ca.jasette.android.ui.placesMosaique]), photos rondes ou initiales sur
+ * leur couleur. Null sans membres.
+ */
+fun mosaiqueRonde(ctx: Context, membres: List<MembreMosaique>?, cote: Int = 256): Bitmap? {
+    if (membres.isNullOrEmpty()) return null
+    val p = ca.jasette.android.ui.placesMosaique(membres.size)
+    val d = (cote * p.cote).toInt().coerceAtLeast(1)
+    val sortie = Bitmap.createBitmap(cote, cote, Bitmap.Config.ARGB_8888)
+    val toile = Canvas(sortie)
+    val pinceau = Paint(Paint.ANTI_ALIAS_FLAG)
+    for ((m, place) in membres.zip(p.places)) {
+        val x = place.first * cote
+        val y = place.second * cote
+        // Un liseré blanc sépare les membres qui se chevauchent.
+        pinceau.color = android.graphics.Color.WHITE
+        toile.drawCircle(x + d / 2f, y + d / 2f, d / 2f + cote * 0.012f, pinceau)
+        val photo = avatarRond(ctx, m.photo)?.let { Bitmap.createScaledBitmap(it, d, d, true) }
+        if (photo != null) {
+            toile.drawBitmap(photo, x, y, null)
+            continue
+        }
+        val couleur = ca.jasette.android.ui.couleurHex(m.couleur)?.let { it.toArgb() }
+            ?: 0xFF3B82F6.toInt() // l'accent, comme les avatars sans couleur de l'app
+        pinceau.color = couleur
+        toile.drawCircle(x + d / 2f, y + d / 2f, d / 2f, pinceau)
+        val i = ca.jasette.android.ui.initialesMembre(m.nom) ?: continue
+        pinceau.color = android.graphics.Color.WHITE
+        pinceau.textSize = d * 0.38f
+        pinceau.textAlign = Paint.Align.CENTER
+        pinceau.isFakeBoldText = true
+        val base = y + d / 2f - (pinceau.descent() + pinceau.ascent()) / 2f
+        toile.drawText(i, x + d / 2f, base, pinceau)
+        pinceau.isFakeBoldText = false
+    }
+    return sortie
 }
