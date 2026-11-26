@@ -494,6 +494,8 @@ struct Palette {
     bord_avatar: Hsla,
     danger: Hsla,
     succes: Hsla,
+    /// Un avertissement (moins grave que `danger`).
+    averti: Hsla,
 }
 
 impl Palette {
@@ -540,6 +542,7 @@ impl Palette {
             bord_avatar: blanc(0.8),
             danger: c(DANGER),
             succes: c(SUCCES),
+            averti: c(AVERTI),
         }
     }
     fn sombre() -> Self {
@@ -583,6 +586,7 @@ impl Palette {
             bord_avatar: hsla(0., 0., 0., 0.),
             danger: c(0xff453a),
             succes: c(0x30d158),
+            averti: c(0xff9f0a),
         }
     }
     /// L'EGA de Claude Desktop (ega-theme.css) : tout sur fond noir, texte
@@ -630,6 +634,7 @@ impl Palette {
             bord_avatar: hsla(0., 0., 0., 0.),
             danger: c(EGA_ROUGE_VIF),
             succes: c(EGA_VERT_VIF),
+            averti: c(EGA_JAUNE),
         }
     }
 }
@@ -1370,6 +1375,44 @@ impl Etat {
     }
     fn associe(self) -> bool {
         matches!(self, Etat::Connexion | Etat::Pret | Etat::TelephoneHorsLigne | Etat::Reconnexion)
+    }
+}
+
+/// Le résumé de l'état des services en haut de Comptes (mode client).
+#[derive(Clone, PartialEq)]
+enum Resume {
+    /// Le serveur Jasette ne répond plus (depuis 10 s).
+    Injoignable,
+    /// Un service se (re)connecte depuis moins de 30 s : rien d'alarmant encore.
+    Verification,
+    ToutVaBien,
+    /// Les services en difficulté, dans l'ordre de la barre latérale.
+    Soucis(Vec<(Service, Souci)>),
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Souci {
+    /// Vu connecté, maintenant non associé (ou téléphone hors ligne depuis 30 s).
+    NonConnecte,
+    /// En connexion ou en reconnexion depuis plus de 30 s.
+    Reconnexion,
+    /// Le pont de ce service s'est arrêté.
+    PontArrete,
+}
+
+impl Souci {
+    fn texte(self, svc: Service) -> String {
+        match self {
+            Souci::NonConnecte => t("Votre %s ne semble pas connecté.").replace("%s", svc.court()),
+            Souci::Reconnexion => t("%s se reconnecte…").replace("%s", svc.court()),
+            Souci::PontArrete => t("%s : pont arrêté.").replace("%s", svc.court()),
+        }
+    }
+    fn couleur(self) -> Hsla {
+        match self {
+            Souci::Reconnexion => th().averti,
+            Souci::NonConnecte | Souci::PontArrete => th().danger,
+        }
     }
 }
 
@@ -2172,6 +2215,15 @@ struct Jasette {
     photos_noms: HashMap<String, PathBuf>,
     /// La dernière demande `contacts` au pont Google (refaite toutes les 30 minutes).
     contacts_demandes: Option<Instant>,
+    /// Le résumé des services (Comptes, mode client) : l'état de chaque
+    /// service et depuis quand, les services vus connectés (ici ou dans le
+    /// cache : ceux-là seulement comptent), depuis quand le serveur ne
+    /// répond plus, le dernier résumé montré, et « Détails » ouvert.
+    etats_depuis: HashMap<Service, (Etat, Instant)>,
+    services_connus: HashSet<Service>,
+    serveur_perdu: Option<Instant>,
+    resume_vu: Option<Resume>,
+    details_serveur: bool,
     /// Les membres d'un groupe sans photo (nom, couleur, photo), pour la mosaïque.
     mosaiques: HashMap<String, Vec<(String, String, Option<PathBuf>)>>,
     // Réglages
@@ -2858,6 +2910,7 @@ impl Jasette {
                             this.nouvelle(l);
                             change = true;
                         }
+                        change |= this.suivre_services();
                         // Les photos des contacts du téléphone : une fois Google prêt, puis toutes les 30 minutes.
                         if this.etat == Etat::Pret
                             && this.reglages.photos_contacts
@@ -2993,6 +3046,7 @@ impl Jasette {
             notes: Default::default(),
             plus_anciens: cache.fils.iter().map(|(k, f)| (k.clone(), f.more)).collect(),
             messages: cache.fils.into_iter().map(|(k, f)| (k, f.items)).collect(),
+            services_connus: cache.convs.iter().chain(&cache.archives).map(|c| service_de(&c.id)).collect(),
             convs: cache.convs,
             archives: cache.archives,
             archives_chargees: false,
@@ -3061,6 +3115,10 @@ impl Jasette {
             photos_numeros: HashMap::new(),
             photos_noms: HashMap::new(),
             contacts_demandes: None,
+            etats_depuis: HashMap::new(),
+            serveur_perdu: None,
+            resume_vu: None,
+            details_serveur: false,
             mosaiques: HashMap::new(),
             reglages,
             suivi_marques: pont::SuiviMarques::default(),
@@ -3167,8 +3225,82 @@ impl Jasette {
         SERVICES_META.into_iter().filter(|s| !self.meta(*s).absent).collect()
     }
 
+    /// L'état d'un service, Google compris.
+    fn etat_de(&self, svc: Service) -> Etat {
+        if svc == Service::GoogleMessages { self.etat } else { self.meta(svc).etat }
+    }
+
+    /// Suit l'état des services pour le résumé de Comptes : depuis quand
+    /// chacun est dans son état, ceux vus connectés, le serveur joignable ou
+    /// non. Vrai si le résumé change (il change aussi avec le temps : 30 s).
+    fn suivre_services(&mut self) -> bool {
+        let maintenant = Instant::now();
+        for svc in std::iter::once(Service::GoogleMessages).chain(SERVICES_META) {
+            let etat = self.etat_de(svc);
+            if self.etats_depuis.get(&svc).is_none_or(|(e, _)| *e != etat) {
+                self.etats_depuis.insert(svc, (etat, maintenant));
+            }
+            if etat == Etat::Pret {
+                self.services_connus.insert(svc);
+            }
+        }
+        if self.pont.as_ref().and_then(|p| p.serveur_joignable()) == Some(false) {
+            self.serveur_perdu.get_or_insert(maintenant);
+        } else {
+            self.serveur_perdu = None;
+        }
+        let resume = Some(self.resume());
+        let change = resume != self.resume_vu;
+        self.resume_vu = resume;
+        change
+    }
+
+    /// Le résumé des services. Ne compte que les services vus connectés
+    /// (dans cette session, ou dont des conversations sont gardées en
+    /// cache), offerts par le serveur et pas cachés : un service jamais
+    /// associé (Bluesky jamais branché) ne fait pas un problème. Une
+    /// (re)connexion n'en est un qu'après 30 s, pour ne pas clignoter.
+    fn resume(&self) -> Resume {
+        if self.serveur_perdu.is_some_and(|t| t.elapsed() >= Duration::from_secs(10)) {
+            return Resume::Injoignable;
+        }
+        let mut soucis = Vec::new();
+        let mut en_cours = false;
+        for svc in std::iter::once(Service::GoogleMessages).chain(self.services_presents()) {
+            if !self.services_connus.contains(&svc) || self.reglages.service_cache(svc) {
+                continue;
+            }
+            let pont = if svc == Service::GoogleMessages { self.pont.as_ref() } else { self.meta(svc).pont.as_ref() };
+            if pont.is_none() {
+                soucis.push((svc, Souci::PontArrete));
+                continue;
+            }
+            let etat = self.etat_de(svc);
+            let long = self
+                .etats_depuis
+                .get(&svc)
+                .is_some_and(|(e, depuis)| *e == etat && depuis.elapsed() >= Duration::from_secs(30));
+            match etat {
+                Etat::Pret | Etat::Association => {}
+                Etat::NonAssocie => soucis.push((svc, Souci::NonConnecte)),
+                _ if !long => en_cours = true,
+                Etat::TelephoneHorsLigne => soucis.push((svc, Souci::NonConnecte)),
+                Etat::Demarrage | Etat::Connexion | Etat::Reconnexion => soucis.push((svc, Souci::Reconnexion)),
+            }
+        }
+        if !soucis.is_empty() {
+            Resume::Soucis(soucis)
+        } else if en_cours {
+            Resume::Verification
+        } else {
+            Resume::ToutVaBien
+        }
+    }
+
     /// Retire de l'écran tout ce qui vient d'un service (déconnexion).
     fn oublier_service(&mut self, svc: Service) {
+        // Déconnecté exprès : son absence n'est plus un problème.
+        self.services_connus.remove(&svc);
         self.convs.retain(|c| service_de(&c.id) != svc);
         self.archives.retain(|c| service_de(&c.id) != svc);
         if self.choisie.as_deref().is_some_and(|c| service_de(c) == svc) {
@@ -9396,13 +9528,17 @@ impl Jasette {
         // Par un serveur Jasette : les services se gèrent sur le serveur.
         if self.reglages.mode_serveur == "client" {
             let adresse = self.reglages.serveur.as_ref().map(|c| c.adresse.clone()).unwrap_or_default();
-            let etats: Vec<String> = std::iter::once(Service::GoogleMessages)
-                .chain(self.services_presents())
-                .map(|s| {
-                    let e = if s == Service::GoogleMessages { self.etat } else { self.meta(s).etat };
-                    format!("{} : {}", s.court(), e.texte())
-                })
-                .collect();
+            // L'état de chaque service, une ligne chacun (sous « Détails »).
+            let etats = std::iter::once(Service::GoogleMessages).chain(self.services_presents()).map(|s| {
+                let e = self.etat_de(s);
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(div().size(px(7.)).rounded(rayon(7.)).bg(c(e.couleur())))
+                    .child(format!("{}{} {}", s.court(), if anglais() { ":" } else { " :" }, t(e.texte())))
+            });
             // Les services autres que Google se connectent d'ici, par le serveur :
             // les commandes passent par lui, les QR reviennent par son rejeu, et
             // les fenêtres de connexion (Messenger, Instagram, X) s'ouvrent ici.
@@ -9413,6 +9549,74 @@ impl Jasette {
                 }
                 lignes = lignes.child(self.ligne_compte_meta(svc, cx));
             }
+            // À la place de l'état de chaque service : une ligne si tout va
+            // bien, sinon une par service en difficulté (voir `resume`).
+            let ligne = |id: SharedString, nom_icone: &str, texte: String, couleur: Hsla| {
+                div()
+                    .id(id)
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(6.))
+                    .text_size(px(13.))
+                    .text_color(couleur)
+                    .child(icone(nom_icone, 14., couleur))
+                    .child(texte)
+            };
+            let mut resume = div().flex().flex_col().gap(px(3.)).pt(px(2.));
+            match self.resume() {
+                Resume::Injoignable => {
+                    resume = resume.child(ligne("res-injoignable".into(), "triangle-alert", t("Serveur Jasette injoignable").into(), th().danger));
+                }
+                Resume::ToutVaBien => {
+                    resume = resume.child(ligne("res-ok".into(), "check", t("Tous vos services sont en ligne.").into(), th().succes));
+                }
+                Resume::Verification => {
+                    resume = resume.child(ligne("res-verif".into(), "ellipsis", t("Vérification de vos services…").into(), th().texte_pale));
+                }
+                Resume::Soucis(soucis) => {
+                    for (svc, souci) in soucis {
+                        let mut l = ligne(
+                            SharedString::from(format!("res-{}", svc.cle())),
+                            "triangle-alert",
+                            souci.texte(svc),
+                            souci.couleur(),
+                        );
+                        // Un service à reconnecter : un clic ouvre sa connexion
+                        // (Google se connecte sur le serveur, pas d'ici).
+                        if souci == Souci::NonConnecte && svc != Service::GoogleMessages && self.meta(svc).pont.is_some() {
+                            l = l
+                                .cursor_pointer()
+                                .hover(|s| s.opacity(0.75))
+                                .child(icone("chevron-right", 13., souci.couleur()))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.connecter_meta(svc);
+                                    cx.notify();
+                                }));
+                        }
+                        resume = resume.child(l);
+                    }
+                }
+            }
+            // « Détails » : l'ancienne liste complète, repliée par défaut.
+            let ouvert = self.details_serveur;
+            let details = div()
+                .id("srv-details")
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(2.))
+                .pt(px(4.))
+                .text_size(px(12.))
+                .text_color(th().texte_pale)
+                .cursor_pointer()
+                .hover(|s| s.opacity(0.7))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.details_serveur = !this.details_serveur;
+                    cx.notify();
+                }))
+                .child(t("Détails"))
+                .child(icone(if ouvert { "chevron-down" } else { "chevron-right" }, 12., th().texte_pale));
             return carte_section(t("Comptes"))
                 .child(
                     groupe().child(
@@ -9436,7 +9640,11 @@ impl Jasette {
                                             .text_color(th().texte_fort)
                                             .child(format!("{} · {adresse}", t("Serveur Jasette"))),
                                     )
-                                    .child(div().text_size(px(12.)).text_color(th().texte_pale).child(etats.join(" · "))),
+                                    .child(resume)
+                                    .child(div().flex().child(details))
+                                    .when(ouvert, |d| {
+                                        d.child(div().flex().flex_col().gap(px(2.)).pt(px(2.)).text_size(px(12.)).text_color(th().texte_pale).children(etats))
+                                    }),
                             )
                             .child(bouton_texte("srv-quitter", t("Ne plus l'utiliser"), DANGER).on_click(cx.listener(
                                 |this, _, _, cx| {
@@ -9446,10 +9654,12 @@ impl Jasette {
                             ))),
                     ),
                 )
-                .child(div().pt(px(12.)).text_size(px(12.)).text_color(th().texte_pale).child(t(
-                    "Les services se connectent et se déconnectent sur le serveur.",
-                )))
-                .child(div().mt(px(14.)).child(lignes))
+                .when(ouvert, |d| {
+                    d.child(div().pt(px(12.)).text_size(px(12.)).text_color(th().texte_pale).child(t(
+                        "Les services se connectent et se déconnectent sur le serveur.",
+                    )))
+                    .child(div().mt(px(14.)).child(lignes))
+                })
                 .child(self.boite_services(cx))
                 .into_any_element();
         }
@@ -9502,6 +9712,7 @@ impl Jasette {
                 bouton_texte("gm-deco", t("Déconnecter"), DANGER)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.commande(json!({"cmd": "unpair"}));
+                        this.services_connus.remove(&Service::GoogleMessages);
                         this.convs.clear();
                         this.archives.clear();
                         this.messages.clear();
@@ -12234,6 +12445,13 @@ fn t(fr: &'static str) -> &'static str {
         "Révoquer" => "Revoke",
         "Cette interface passe par le serveur local" => "This window goes through the local server",
         "Connectez les services dans Comptes." => "Connect services in Accounts.",
+        "Tous vos services sont en ligne." => "All your services are online.",
+        "Votre %s ne semble pas connecté." => "Your %s doesn't seem connected.",
+        "%s se reconnecte…" => "%s is reconnecting…",
+        "%s : pont arrêté." => "%s: bridge stopped.",
+        "Serveur Jasette injoignable" => "Jasette server unreachable",
+        "Vérification de vos services…" => "Checking your services…",
+        "Détails" => "Details",
         "Votre serveur" => "Your server",
         "Pour changer de serveur, choisissez « Sur cet appareil », puis jumelez de nouveau." => "To change server, choose “On this device”, then pair again.",
         "Le serveur" => "Does the server",

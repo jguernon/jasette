@@ -180,6 +180,14 @@ impl Pont {
 }
 
 impl Pont {
+    /// Le serveur Jasette est-il joignable en ce moment ? `None` pour un pont local.
+    pub fn serveur_joignable(&self) -> Option<bool> {
+        match &self.genre {
+            Genre::Local { .. } => None,
+            Genre::Distant(d) => Some(d.joignable()),
+        }
+    }
+
     /// Les marques reçues du serveur Jasette (rien pour un pont local).
     pub fn recevoir_marques(&self) -> Vec<NouvelleMarques> {
         match &self.genre {

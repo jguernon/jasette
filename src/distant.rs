@@ -1048,6 +1048,11 @@ impl PontDistant {
     pub fn envoyer_marques(&self, trame: &Value) -> bool {
         self.cx.envoyer_direct(&trame.to_string())
     }
+
+    /// La connexion au serveur est-elle établie en ce moment ?
+    pub fn joignable(&self) -> bool {
+        self.cx.canal().is_some()
+    }
 }
 
 impl Drop for PontDistant {

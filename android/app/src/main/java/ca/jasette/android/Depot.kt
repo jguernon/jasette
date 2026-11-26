@@ -214,6 +214,7 @@ object Depot {
             Marques.brancher(null, null)
         }
         CacheConvs.initialiser(appli)
+        CacheConvs.servicesGardes().forEach { connus[it] = true }
         if (cfg != null) {
             // WhatsApp, Signal et X attendent que le serveur les annonce (servicesOfferts) ;
             // ceux qu'il offrait la dernière fois (gardés en cache) se montrent déjà.
@@ -305,7 +306,7 @@ object Depot {
             } else {
                 ponts.remove(s)?.arreter()
                 oublier(s)
-                etats[s] = Etat.DEMARRAGE
+                poserEtat(s, Etat.DEMARRAGE)
                 noms.remove(s)
                 avatarsMoi.remove(s)
             }
@@ -315,6 +316,30 @@ object Depot {
     }
 
     fun etat(service: Service): Etat = etats[service] ?: Etat.DEMARRAGE
+
+    /**
+     * Change l'état d'un service en notant depuis quand (le résumé de
+     * Réglages → Comptes attend 30 s avant de parler d'une reconnexion), et
+     * retient les services vus connectés : eux seuls comptent dans ce résumé.
+     */
+    private fun poserEtat(service: Service, etat: Etat) {
+        if (etats[service] != etat) etatDepuis[service] = System.currentTimeMillis()
+        etats[service] = etat
+        if (etat == Etat.PRET) connus[service] = true
+    }
+
+    /** Depuis quand (ms) chaque service est dans son état. */
+    val etatDepuis = mutableStateMapOf<Service, Long>()
+
+    /**
+     * Les services vus connectés : dans cette session, ou dont des
+     * conversations sont gardées en cache. Un service jamais associé n'y est
+     * pas ; un service déconnecté exprès en sort.
+     */
+    val connus = mutableStateMapOf<Service, Boolean>()
+
+    /** Mode client : depuis quand (ms) le serveur ne répond pas ; 0 s'il répond (ou sans serveur). */
+    val serveurCoupeDepuis: Long get() = connexion?.coupeDepuis ?: 0
 
     fun arreter() {
         CacheConvs.ecrireMaintenant()
@@ -362,7 +387,8 @@ object Depot {
         ouvrirApres.clear()
         fraiches.clear()
         demandesFil.clear()
-        Service.entries.forEach { etats[it] = Etat.DEMARRAGE }
+        Service.entries.forEach { poserEtat(it, Etat.DEMARRAGE) }
+        connus.clear()
         services = Service.LOCAUX
         noms.clear()
         avatarsMoi.clear()
@@ -492,7 +518,7 @@ object Depot {
         } catch (e: Exception) {
             Log.e("jasette", "pont ${service.court}", e)
             erreur = "${t("Le pont ne démarre pas")} (${service.court}) : ${e.message}"
-            etats[service] = Etat.ARRETE
+            poserEtat(service, Etat.ARRETE)
         }
     }
 
@@ -630,6 +656,8 @@ object Depot {
             utiliserSms(appli, false)
             return
         }
+        // Déconnecté exprès : son absence n'est plus un problème.
+        connus.remove(service)
         qr.remove(service)
         codeAssociation.remove(service)
         // Le service est déconnecté : son cache (listes et messages) est effacé.
@@ -669,7 +697,7 @@ object Depot {
         fraiches.removeAll { Service.de(it) == Service.GOOGLE }
         demandesFil.removeAll { Service.de(it) == Service.GOOGLE }
         CacheConvs.effacer(Service.GOOGLE)
-        etats[Service.GOOGLE] = Etat.DEMARRAGE
+        poserEtat(Service.GOOGLE, Etat.DEMARRAGE)
         lancer(Service.GOOGLE)
     }
 
@@ -722,7 +750,7 @@ object Depot {
      */
     fun blueskyConnexion(identifiant: String, motDePasse: String) {
         erreur = null
-        etats[Service.BLUESKY] = Etat.ASSOCIATION
+        poserEtat(Service.BLUESKY, Etat.ASSOCIATION)
         commande(Service.BLUESKY, JSONObject().put("cmd", "login").put("number", identifiant).put("password", motDePasse))
     }
 
@@ -762,7 +790,7 @@ object Depot {
             "state" -> {
                 val avant = etat(service)
                 val apres = Etat.de(v.chaine("state"), avant)
-                etats[service] = apres
+                poserEtat(service, apres)
                 if (apres == Etat.PRET && avant != Etat.PRET) {
                     commande(service, JSONObject().put("cmd", "conversations").put("count", 50))
                     pretPourArchives(service)
@@ -789,7 +817,7 @@ object Depot {
             "paired" -> {
                 qr.remove(service)
                 codeAssociation.remove(service)
-                etats[service] = Etat.CONNEXION
+                poserEtat(service, Etat.CONNEXION)
             }
             // WhatsApp et Signal : un code QR (renouvelé) à scanner.
             "qr" -> v.chaine("code").ifEmpty { v.chaine("data") }.let {
@@ -854,7 +882,7 @@ object Depot {
         when (v.chaine("ev")) {
             "state" -> {
                 val avant = etat(Service.GOOGLE)
-                etats[Service.GOOGLE] = Etat.de(v.chaine("state"), avant)
+                poserEtat(Service.GOOGLE, Etat.de(v.chaine("state"), avant))
                 when (etat(Service.GOOGLE)) {
                     Etat.NON_ASSOCIE -> {
                         emoji = null
@@ -878,7 +906,7 @@ object Depot {
             "emoji" -> emoji = v.chaine("emoji").ifEmpty { null }
             "paired" -> {
                 emoji = null
-                etats[Service.GOOGLE] = Etat.CONNEXION
+                poserEtat(Service.GOOGLE, Etat.CONNEXION)
             }
             "conversations" -> {
                 val items = v.optJSONArray("items") ?: return
@@ -1156,7 +1184,7 @@ object Depot {
     /** Un pont s'est arrêté tout seul : on le relance après quelques secondes. */
     private fun pontFerme(service: Service) {
         if (!enMarche) return
-        etats[service] = Etat.ARRETE
+        poserEtat(service, Etat.ARRETE)
         principal.postDelayed({
             if (enMarche && ponts[service]?.vivant() != true && service in services) lancer(service)
         }, 5000)

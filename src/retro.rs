@@ -63,6 +63,7 @@ impl Palette {
             bord_avatar: hsla(0., 0., 0., 0.),
             danger: c(0xc0281a),
             succes: c(0x2f8a22),
+            averti: c(0xb86400),
         }
     }
 
@@ -108,6 +109,7 @@ impl Palette {
             bord_avatar: hsla(0., 0., 0., 0.),
             danger: c(0xc01818),
             succes: c(0x1f8a2f),
+            averti: c(0xa05a00),
         }
     }
 }

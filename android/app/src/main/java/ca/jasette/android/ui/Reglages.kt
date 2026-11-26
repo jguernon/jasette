@@ -40,6 +40,7 @@ import kotlin.math.roundToInt
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,6 +64,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -444,6 +447,15 @@ private fun BandeauEmoji(e: String) {
 /** Mode client : à la place des services, la carte du serveur. */
 @Composable
 private fun CarteServeur(adresse: String) {
+    var details by rememberSaveable { mutableStateOf(false) }
+    // L'horloge du résumé : les 30 s d'une reconnexion, les 10 s d'une coupure du serveur.
+    var maintenant by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1000)
+            maintenant = System.currentTimeMillis()
+        }
+    }
     Column(
         Modifier.fillMaxWidth().carte(16.dp).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -458,31 +470,90 @@ private fun CarteServeur(adresse: String) {
                 )
             }
         }
-        // Écran étroit (Fold plié) : le service sur une ligne, l'état et le compte sur la suivante.
-        val etroit = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 600
-        for (s in Depot.services) {
-            val etat = Depot.etat(s)
-            // WhatsApp, Signal et X s'associent depuis Jasette sur l'ordinateur (QR, code, cookies).
-            val aConnecter = s.serveurSeulement && (etat == Etat.NON_ASSOCIE || etat == Etat.ASSOCIATION)
-            Row(verticalAlignment = if (etroit) Alignment.Top else Alignment.CenterVertically) {
-                PastilleEtat(etat, Modifier.padding(top = if (etroit) (6.dp - (taillePastilleEtat - 8.dp) / 2).coerceAtLeast(1.dp) else 0.dp))
-                Spacer(Modifier.width(8.dp))
-                val nom = Depot.noms[s]?.takeIf { etat.associe }
-                if (etroit) {
-                    Column {
-                        Text(s.court, color = P.texteFort, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                        Text(listOfNotNull(etat.texte, nom).joinToString(" · "), color = P.texte, fontSize = 13.sp)
-                        if (aConnecter) Text(t("Connecte-le depuis Jasette sur ton ordinateur"), color = P.textePale, fontSize = 12.sp)
+        // À la place de l'état de chaque service : une ligne si tout va bien,
+        // sinon une par service en difficulté (voir resumeServices).
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            for ((texte, couleur, ok) in resumeServices(maintenant)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (ok != null) {
+                        Icon(if (ok) Icons.Filled.Check else Icons.Filled.Warning, null, tint = couleur, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
                     }
-                } else {
-                    Column {
-                        Text("${s.court}${t(" : ")}${etat.texte}${nom?.let { " · $it" } ?: ""}", color = P.texte, fontSize = 13.sp)
-                        if (aConnecter) Text(t("Connecte-le depuis Jasette sur ton ordinateur"), color = P.textePale, fontSize = 12.sp)
-                    }
+                    Text(texte, color = couleur, fontSize = 14.sp)
                 }
             }
         }
-        Text(t("Les services se connectent et se déconnectent sur le serveur."), color = P.textePale, fontSize = 12.sp)
+        // « Détails » : l'ancienne liste complète, repliée par défaut.
+        Row(
+            Modifier.clip(RoundedCornerShape(6.dp)).clickable { details = !details }.padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(t("Détails"), color = P.textePale, fontSize = 13.sp)
+            Icon(
+                if (details) Icons.Filled.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                null, tint = P.textePale, modifier = Modifier.size(16.dp),
+            )
+        }
+        if (details) {
+            // Écran étroit (Fold plié) : le service sur une ligne, l'état et le compte sur la suivante.
+            val etroit = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 600
+            for (s in Depot.services) {
+                val etat = Depot.etat(s)
+                // WhatsApp, Signal et X s'associent depuis Jasette sur l'ordinateur (QR, code, cookies).
+                val aConnecter = s.serveurSeulement && (etat == Etat.NON_ASSOCIE || etat == Etat.ASSOCIATION)
+                Row(verticalAlignment = if (etroit) Alignment.Top else Alignment.CenterVertically) {
+                    PastilleEtat(etat, Modifier.padding(top = if (etroit) (6.dp - (taillePastilleEtat - 8.dp) / 2).coerceAtLeast(1.dp) else 0.dp))
+                    Spacer(Modifier.width(8.dp))
+                    val nom = Depot.noms[s]?.takeIf { etat.associe }
+                    if (etroit) {
+                        Column {
+                            Text(s.court, color = P.texteFort, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text(listOfNotNull(etat.texte, nom).joinToString(" · "), color = P.texte, fontSize = 13.sp)
+                            if (aConnecter) Text(t("Connecte-le depuis Jasette sur ton ordinateur"), color = P.textePale, fontSize = 12.sp)
+                        }
+                    } else {
+                        Column {
+                            Text("${s.court}${t(" : ")}${etat.texte}${nom?.let { " · $it" } ?: ""}", color = P.texte, fontSize = 13.sp)
+                            if (aConnecter) Text(t("Connecte-le depuis Jasette sur ton ordinateur"), color = P.textePale, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+            Text(t("Les services se connectent et se déconnectent sur le serveur."), color = P.textePale, fontSize = 12.sp)
+        }
+    }
+}
+
+/**
+ * Le résumé des services du serveur : (texte, couleur, réussite) ; réussite
+ * null pour une ligne neutre. Ne comptent que les services vus connectés
+ * (Depot.connus : dans cette session, ou dont des conversations sont gardées
+ * en cache), offerts par le serveur et pas cachés : un service jamais associé
+ * ne fait pas un problème. Une (re)connexion n'en est un qu'après 30 s.
+ */
+@Composable
+private fun resumeServices(maintenant: Long): List<Triple<String, androidx.compose.ui.graphics.Color, Boolean?>> {
+    val coupe = Depot.serveurCoupeDepuis
+    if (coupe > 0 && maintenant - coupe >= 10_000) return listOf(Triple(t("Serveur Jasette injoignable"), P.danger, false))
+    val soucis = ArrayList<Triple<String, androidx.compose.ui.graphics.Color, Boolean?>>()
+    var enCours = false
+    for (s in Depot.services) {
+        if (Depot.connus[s] != true || ServicesCaches.cache(s)) continue
+        val etat = Depot.etat(s)
+        val long = maintenant - (Depot.etatDepuis[s] ?: maintenant) >= 30_000
+        when {
+            etat == Etat.PRET || etat == Etat.ASSOCIATION -> {}
+            etat == Etat.ARRETE -> soucis += Triple(t("%s : pont arrêté.").replace("%s", s.court), P.danger, false)
+            etat == Etat.NON_ASSOCIE -> soucis += Triple(t("Votre %s ne semble pas connecté.").replace("%s", s.court), P.danger, false)
+            !long -> enCours = true
+            etat == Etat.TELEPHONE_HORS_LIGNE -> soucis += Triple(t("Votre %s ne semble pas connecté.").replace("%s", s.court), P.danger, false)
+            else -> soucis += Triple(t("%s se reconnecte…").replace("%s", s.court), P.averti, false)
+        }
+    }
+    return when {
+        soucis.isNotEmpty() -> soucis
+        enCours -> listOf(Triple(t("Vérification de vos services…"), P.textePale, null))
+        else -> listOf(Triple(t("Tous vos services sont en ligne."), P.succes, true))
     }
 }
 

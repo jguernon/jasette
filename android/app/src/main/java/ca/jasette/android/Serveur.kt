@@ -355,6 +355,9 @@ class ConnexionServeur(
     @Volatile var ferme = false
         private set
     @Volatile private var dejaConnecte = false
+    /** Depuis quand (ms) le serveur ne répond pas ; 0 quand la connexion est établie. */
+    @Volatile var coupeDepuis: Long = System.currentTimeMillis()
+        private set
     /** Les services offerts par le serveur (après l'auth). */
     @Volatile var services: List<String> = emptyList()
         private set
@@ -533,6 +536,7 @@ class ConnexionServeur(
             dejaConnecte = true
             val gardees = synchronized(verrou) {
                 lien = l
+                coupeDepuis = 0
                 ArrayList(enAttente).also { enAttente.clear() }
             }
             // Après `lien` : un service ajouté maintenant redemande son état (« rejouer »).
@@ -553,6 +557,7 @@ class ConnexionServeur(
             } catch (_: Exception) {
             }
             synchronized(verrou) { lien = null }
+            coupeDepuis = System.currentTimeMillis()
             l.fermer()
             // Les requêtes de fichiers en cours échouent tout de suite.
             val perdue = JSONObject().put("erreur", t("connexion perdue")).put("fin", true)
