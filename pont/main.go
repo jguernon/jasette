@@ -766,6 +766,13 @@ func (p *Pont) msgOut(m *gmproto.Message) Message {
 	if m.Subject != nil && m.GetSubject() != "" {
 		text = m.GetSubject() + "\n" + text
 	}
+	// Mon envoi renvoyé par Google avec seulement le nom du fichier : la pièce
+	// gardée au moment de l'envoi (voir envoyes.go).
+	if fromMe && len(attachments) == 0 && media != "" {
+		if p, ok := pieceEnvoyee(media, m.GetTmpID()); ok {
+			attachments = append(attachments, p)
+		}
+	}
 	kind := "rcs"
 	switch m.GetType() {
 	case 1:
@@ -967,6 +974,7 @@ func (p *Pont) sendMedia(cmd Cmd) {
 	if tmp == "" {
 		tmp = fmt.Sprintf("tmp_%012d", time.Now().UnixNano()%1_000_000_000_000)
 	}
+	retenirEnvoye(media, filepath.Base(cmd.Path), mime, tmp, data)
 	req := &gmproto.SendMessageRequest{
 		ConversationID: cmd.Conv,
 		MessagePayload: &gmproto.MessagePayload{
