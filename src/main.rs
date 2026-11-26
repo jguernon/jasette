@@ -7008,6 +7008,18 @@ impl Jasette {
                 if !lp.image.is_empty() {
                     continue;
                 }
+                // Un aperçu du service sans aucune image (un reel Facebook partagé
+                // dans Messenger) : Jasette cherche celui de son adresse, pour l'image.
+                if lp.sans_image() {
+                    if self.reglages.apercus_liens
+                        && let Some(u) = Self::adresse_apercu(lp, &m.text)
+                        && !self.apercus.contains_key(&u)
+                    {
+                        self.apercus.insert(u.clone(), None);
+                        taches.push(apercu::Tache::Page(u));
+                    }
+                    continue;
+                }
                 if let Some(p) = lp.image_media.as_ref().and_then(|v| serde_json::from_value::<Piece>(v.clone()).ok()) {
                     pieces.push(p);
                 } else if !lp.image_url.is_empty() && !self.images_apercu.contains_key(&lp.image_url) {
@@ -7039,6 +7051,13 @@ impl Jasette {
     /// L'aperçu du lien d'un message (du service, sinon cherché) et son image.
     fn apercu_de(&self, m: &Msg) -> Option<(apercu::Apercu, Option<PathBuf>)> {
         Some(if let Some(lp) = &m.link_preview {
+            // Sans image du service : celle de l'aperçu cherché par Jasette, s'il y en a un.
+            if lp.sans_image() && self.reglages.apercus_liens {
+                let cherche = Self::adresse_apercu(lp, &m.text).and_then(|u| self.apercus.get(&u).cloned().flatten());
+                let a = lp.complete_par(cherche.as_ref());
+                let image = (!a.image.is_empty()).then(|| PathBuf::from(&a.image));
+                return Some((a, image));
+            }
             let image = if !lp.image.is_empty() {
                 Some(PathBuf::from(&lp.image))
             } else if let Some(mid) = lp.image_media.as_ref().and_then(|v| v.get("media_id")).and_then(Value::as_str) {
@@ -7057,6 +7076,12 @@ impl Jasette {
             let image = (!a.image.is_empty()).then(|| PathBuf::from(&a.image));
             (a, image)
         })
+    }
+
+    /// L'adresse dont chercher l'aperçu quand celui du service n'a pas d'image :
+    /// la sienne, sinon la première du texte.
+    fn adresse_apercu(lp: &apercu::Apercu, texte: &str) -> Option<String> {
+        if lp.url.trim().is_empty() { apercu::premier_lien(texte) } else { Some(lp.url.trim().to_string()) }
     }
 
     /// Le texte à montrer dans la bulle : sans l'adresse quand la carte a déjà

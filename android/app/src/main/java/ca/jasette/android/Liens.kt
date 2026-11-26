@@ -48,6 +48,29 @@ data class LienApercu(
     /** Le domaine affiché sous la carte. */
     val domaine get() = Liens.hote(url)?.removePrefix("www.") ?: ""
 
+    /**
+     * Aucune source d'image (ni fichier, ni adresse, ni pièce) : Messenger en
+     * envoie ainsi pour un reel Facebook partagé. Jasette cherche alors elle-même
+     * l'aperçu de [url] pour en prendre l'image ([completePar]).
+     */
+    val sansImage get() = image.isEmpty() && imageUrl.isEmpty() && imageMedia == null
+
+    /**
+     * Cet aperçu (du service) complété par celui que Jasette a cherché : l'image
+     * de [c], et ses titre, description et site là où le service n'en a pas mis.
+     * Sans [c] (pas encore trouvé) : celui-ci tel quel.
+     */
+    fun completePar(c: LienApercu?): LienApercu {
+        if (c == null) return this
+        return LienApercu(
+            url = url.ifBlank { c.url },
+            title = title.ifBlank { c.title },
+            description = description.ifBlank { c.description },
+            site = site.ifBlank { c.site },
+            image = c.image,
+        )
+    }
+
     companion object {
         fun de(o: JSONObject?): LienApercu? {
             if (o == null) return null
@@ -419,6 +442,19 @@ object Apercus {
             val lp = m.apercu
             if (lp != null) {
                 if (lp.image.isNotEmpty()) continue
+                // Un aperçu du service sans aucune image (un reel Facebook partagé dans
+                // Messenger) : on cherche celui de son adresse, pour l'image.
+                if (lp.sansImage) {
+                    if (!actifs) continue
+                    val u = adresse(lp, m.text) ?: continue
+                    if (pages.containsKey(u)) continue
+                    pages[u] = null
+                    fils.execute {
+                        val a = page(u, serveur, d)
+                        principal.post { pages[u] = a }
+                    }
+                    continue
+                }
                 val piece = lp.imageMedia
                 if (piece != null) {
                     Depot.telecharger(piece)
@@ -456,9 +492,17 @@ object Apercus {
         return Liens.chercher(u, d)
     }
 
+    /** L'adresse dont chercher l'aperçu quand celui du service n'a pas d'image : la sienne, sinon la première du texte. */
+    private fun adresse(lp: LienApercu, texte: String): String? = lp.url.trim().ifEmpty { null } ?: Liens.premier(texte)
+
     /** L'aperçu à montrer sous ce message, et le fichier de sa vignette. */
     fun de(m: Msg): Pair<LienApercu, String?>? {
         val lp = m.apercu
+        if (lp != null && lp.sansImage && actifs) {
+            // Sans image du service : celle de l'aperçu cherché par Jasette, s'il y en a un.
+            val a = lp.completePar(adresse(lp, m.text)?.let { pages[it] })
+            return a to a.image.ifEmpty { null }
+        }
         if (lp != null) {
             val img = when {
                 lp.image.isNotEmpty() -> lp.image

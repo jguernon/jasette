@@ -63,6 +63,30 @@ impl Apercu {
     pub fn domaine(&self) -> String {
         hote(&self.url).map(|h| h.trim_start_matches("www.").to_string()).unwrap_or_default()
     }
+
+    /// Vrai si l'aperçu n'a aucune source d'image (ni fichier, ni adresse, ni
+    /// pièce) : Messenger en envoie ainsi pour un reel Facebook partagé. Jasette
+    /// cherche alors elle-même l'aperçu de `url` pour en prendre l'image.
+    pub fn sans_image(&self) -> bool {
+        self.image.is_empty() && self.image_url.is_empty() && self.image_media.is_none()
+    }
+
+    /// L'aperçu du service complété par celui que Jasette a cherché : l'image
+    /// de `cherche`, et ses titre, description et site là où le service n'en
+    /// a pas mis. Sans `cherche` (pas encore trouvé), celui du service tel quel.
+    pub fn complete_par(&self, cherche: Option<&Apercu>) -> Apercu {
+        let Some(c) = cherche else { return self.clone() };
+        let ou = |a: &String, b: &String| if a.trim().is_empty() { b.clone() } else { a.clone() };
+        Apercu {
+            url: ou(&self.url, &c.url),
+            title: ou(&self.title, &c.title),
+            description: ou(&self.description, &c.description),
+            site: ou(&self.site, &c.site),
+            image: c.image.clone(),
+            image_url: String::new(),
+            image_media: None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -643,6 +667,35 @@ fn absolue(lien: &str, base: &str) -> String {
 mod essais {
     use super::*;
     use ureq::Resolver;
+
+    /// Un aperçu du service sans image (reel Facebook dans Messenger) : il
+    /// prend l'image de celui que Jasette a cherché et garde son titre.
+    #[test]
+    fn apercu_du_service_sans_image() {
+        let service = Apercu {
+            url: "https://www.facebook.com/share/r/1ALWXsFjZY/".into(),
+            title: "Reel de Camille".into(),
+            site: "facebook.com".into(),
+            ..Default::default()
+        };
+        assert!(service.sans_image());
+        assert_eq!(service.complete_par(None), service);
+        let cherche = Apercu {
+            url: service.url.clone(),
+            title: "Autre titre".into(),
+            description: "Une description".into(),
+            image: "/medias/apercus/abc.jpg".into(),
+            ..Default::default()
+        };
+        let a = service.complete_par(Some(&cherche));
+        assert_eq!(a.title, "Reel de Camille");
+        assert_eq!(a.description, "Une description");
+        assert_eq!(a.site, "facebook.com");
+        assert_eq!(a.image, "/medias/apercus/abc.jpg");
+        // Une image du service, sous n'importe quelle forme : rien à chercher.
+        assert!(!Apercu { image_url: "https://x/y.jpg".into(), ..Default::default() }.sans_image());
+        assert!(!Apercu { image_media: Some(serde_json::json!({"media_id": "1"})), ..Default::default() }.sans_image());
+    }
 
     fn urls(t: &str) -> Vec<String> {
         liens(t).into_iter().map(|(r, _)| t[r].to_string()).collect()
