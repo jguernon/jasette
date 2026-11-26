@@ -1437,6 +1437,11 @@ struct Reglages {
     /// serveur Jasette s'il y en a un (marque `emojis`). Aucun par défaut.
     #[serde(default)]
     emojis: std::collections::BTreeMap<String, String>,
+    /// « Garder les conversations archivées hors de la boîte de réception » :
+    /// un message reçu ne désarchive plus. Gardé ici, et partagé par le
+    /// serveur Jasette s'il y en a un (marque `garder_archives`). Faux par défaut.
+    #[serde(default)]
+    garder_archives: bool,
     /// La grille du Head : son nombre de colonnes, de 3 à 6 (« 5 ») ; vide = 4.
     /// Une ancienne valeur « colonnes x rangées » (« 8x3 ») donne ses colonnes,
     /// ramenées entre 3 et 6. Propre à cet appareil.
@@ -1566,6 +1571,7 @@ impl Default for Reglages {
             privees: Vec::new(),
             moods: Default::default(),
             emojis: Default::default(),
+            garder_archives: false,
             head_grille: String::new(),
             marques_cache: HashMap::new(),
             heures_messages: true,
@@ -1676,6 +1682,7 @@ impl Reglages {
                     privees: self.privees.clone(),
                     moods: self.moods.clone(),
                     emojis: self.emojis.clone(),
+                    garder_archives: self.garder_archives,
                 },
                 version: self.marques_version,
                 a_envoyer: self.marques_a_envoyer,
@@ -1692,6 +1699,7 @@ impl Reglages {
         self.privees = b.copie.listes.privees;
         self.moods = b.copie.listes.moods;
         self.emojis = b.copie.listes.emojis;
+        self.garder_archives = b.copie.listes.garder_archives;
         self.marques_version = b.copie.version;
         self.marques_a_envoyer = b.copie.a_envoyer;
         self.marques_serveur = b.serveur;
@@ -3612,7 +3620,9 @@ impl Jasette {
     /// plus récent que l'archivage par Jasette, il ramène la conversation dans
     /// l'Inbox. Idempotent ; en mode client, le serveur l'a d'habitude déjà fait.
     fn desarchiver_si_recu(&mut self, id: &str, temps: i64) {
-        if !self.reglages.archivee_jasette(id) {
+        // « Garder les conversations archivées hors de la boîte de réception » :
+        // elle reste dans Archives (non lue et notifiée comme d'habitude).
+        if self.reglages.garder_archives || !self.reglages.archivee_jasette(id) {
             return;
         }
         if self.reglages.archives_depuis.get(id).is_some_and(|depuis| temps > *depuis) {
@@ -8837,6 +8847,19 @@ impl Jasette {
                     )))
                     .child(div().h(px(14.)))
                     .child(groupe().child(ligne_interrupteur(
+                        "a-garder-archives",
+                        t("Garder les conversations archivées hors de la boîte de réception"),
+                        t("Un nouveau message ne les ramène plus dans la boîte de réception."),
+                        self.reglages.garder_archives,
+                        cx.listener(|this, _, _, cx| {
+                            this.reglages.garder_archives = !this.reglages.garder_archives;
+                            // Une marque : gardée, et partagée par le serveur Jasette s'il y en a un.
+                            this.marques_changees();
+                            cx.notify();
+                        }),
+                    )))
+                    .child(div().h(px(14.)))
+                    .child(groupe().child(ligne_interrupteur(
                         "a-apercus-liens",
                         t("Aperçus des liens"),
                         t("Jasette va chercher l'image et le titre des liens (par le serveur Jasette s'il y en a un). Les aperçus envoyés par le service restent affichés."),
@@ -11708,6 +11731,8 @@ fn t(fr: &'static str) -> &'static str {
         "Lavande" => "Lavender",
         "Lilas" => "Lilac",
         "Les emojis que vous utilisez apparaîtront ici." => "Emojis you use will show up here.",
+        "Garder les conversations archivées hors de la boîte de réception" => "Keep archived conversations out of the inbox",
+        "Un nouveau message ne les ramène plus dans la boîte de réception." => "A new message no longer brings them back to the inbox.",
         "Lu" => "Read",
         "Médias" => "Media",
         "Menthe" => "Mint",

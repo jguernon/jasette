@@ -1,5 +1,5 @@
 // Les marques : le Head, les favoris, les épinglées, les archives, les
-// privées, les moods et les emojis rapides de Jasette, partagés entre tous les appareils de l'utilisateur (voir
+// privées, les moods, les emojis rapides et le réglage garder_archives de Jasette, partagés entre tous les appareils de l'utilisateur (voir
 // PROTOCOLE.md, §5.5).
 //
 // Le serveur en garde la copie de référence dans <données>/serveur/marques.json
@@ -32,7 +32,8 @@ const (
 //
 // Archives : l'archivage propre à Jasette, pour les services qui ne savent
 // pas archiver (Messenger, Instagram, Signal, X). Un nouveau message reçu
-// dans une de ces conversations l'en retire (desarchiverSiRecu).
+// dans une de ces conversations l'en retire (desarchiverSiRecu), sauf si
+// GarderArchives est vrai.
 type Marques struct {
 	Head     []string `json:"head"`
 	Favoris  []string `json:"favoris"`
@@ -48,8 +49,12 @@ type Marques struct {
 	Moods map[string]string `json:"moods"`
 	// Emojis : l'« emoji rapide » d'une conversation, {id: emoji}, envoyé
 	// d'un appui par le bouton à droite de la saisie. Absent : aucun.
-	Emojis  map[string]string `json:"emojis"`
-	Version int64             `json:"version"`
+	Emojis map[string]string `json:"emojis"`
+	// GarderArchives : « Garder les conversations archivées hors de la boîte
+	// de réception ». Vrai : un message reçu ne désarchive plus. Absent (ancien
+	// fichier) : faux.
+	GarderArchives bool  `json:"garder_archives"`
+	Version        int64 `json:"version"`
 	// Propre au serveur, jamais envoyé aux clients : depuis quand (ms, horloge
 	// du serveur) chaque id est dans Archives. Seul un message reçu après
 	// cette heure ramène la conversation dans l'Inbox (une réaction ou une
@@ -92,7 +97,7 @@ func (m *Marques) memesListes(n *Marques) bool {
 			return false
 		}
 	}
-	return egalesMoods(m.Moods, n.Moods) && egalesMoods(m.Emojis, n.Emojis)
+	return egalesMoods(m.Moods, n.Moods) && egalesMoods(m.Emojis, n.Emojis) && m.GarderArchives == n.GarderArchives
 }
 
 // nettoyerMoods : jamais nul, sans id ni nom vide ou démesuré, borné.
@@ -294,7 +299,8 @@ func ecrireAtomique(chemin string, data []byte) error {
 func trameMarques(m Marques, id json.RawMessage, refus string) []byte {
 	corps := map[string]any{
 		"head": m.Head, "favoris": m.Favoris, "epingles": m.Epingles, "archives": m.Archives,
-		"privees": m.Privees, "moods": m.Moods, "emojis": m.Emojis, "version": m.Version,
+		"privees": m.Privees, "moods": m.Moods, "emojis": m.Emojis, "garder_archives": m.GarderArchives,
+		"version": m.Version,
 	}
 	if len(id) > 0 {
 		corps["id"] = id
@@ -325,6 +331,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		Privees  *[]string          `json:"privees"`
 		Moods    *map[string]string `json:"moods"`
 		Emojis   *map[string]string `json:"emojis"`
+		Garder   *bool              `json:"garder_archives"`
 		Version  int64              `json:"version"`
 		ID       json.RawMessage    `json:"id"`
 	}
@@ -339,7 +346,8 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	cur := s.marques
 	nouv := Marques{
 		Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Archives: cur.Archives,
-		Privees: cur.Privees, Moods: cur.Moods, Emojis: cur.Emojis, ArchivesDepuis: cur.ArchivesDepuis,
+		Privees: cur.Privees, Moods: cur.Moods, Emojis: cur.Emojis, GarderArchives: cur.GarderArchives,
+		ArchivesDepuis: cur.ArchivesDepuis,
 	}
 	// Une liste absente de la trame ne change pas (un ancien client, qui ne
 	// connaît pas `archives` ou `privees`, ne les vide donc jamais).
@@ -355,6 +363,12 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	// Et pour `emojis` (un client d'avant les emojis rapides ne les efface pas).
 	if d.Emojis != nil {
 		nouv.Emojis = nettoyerEmojis(*d.Emojis)
+	}
+	// Et pour `garder_archives` : absent, le réglage ne change pas (un client
+	// d'avant ce réglage ne le remet jamais à faux). Présent, il est pris tel
+	// quel, même d'un client en retard (un simple oui/non : rien à unir).
+	if d.Garder != nil {
+		nouv.GarderArchives = *d.Garder
 	}
 	repondre := func(m Marques, refus string) {
 		select {
@@ -399,8 +413,8 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		return
 	}
 	s.marques = nouv
-	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d",
-		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis))
+	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, garder_archives %v",
+		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), nouv.GarderArchives)
 	tous := trameMarques(nouv, nil, "")
 	for autre := range s.clients {
 		if autre == c {
@@ -425,9 +439,11 @@ var prefixeService = map[string]string{
 // envoyé par moi) plus récent que l'archivage d'une conversation de
 // `archives` l'en retire : nouvelles marques, gardées puis diffusées à tous,
 // avant l'événement lui-même. Idempotent : une conversation qui n'est plus
-// dans `archives` ne change rien. À appeler sous s.mu.
+// dans `archives` ne change rien. Avec `garder_archives`, rien ne sort des
+// archives (les non-lus et les notifications des clients, eux, suivent leur
+// cours). À appeler sous s.mu.
 func (s *Serveur) desarchiverSiRecu(svc string, ligne []byte) {
-	if len(s.marques.Archives) == 0 {
+	if len(s.marques.Archives) == 0 || s.marques.GarderArchives {
 		return
 	}
 	var ev struct {
@@ -450,7 +466,8 @@ func (s *Serveur) desarchiverSiRecu(svc string, ligne []byte) {
 		return
 	}
 	cur := s.marques
-	nouv := Marques{Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Privees: cur.Privees, Moods: cur.Moods, Emojis: cur.Emojis, ArchivesDepuis: cur.ArchivesDepuis}
+	nouv := Marques{Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Privees: cur.Privees, Moods: cur.Moods, Emojis: cur.Emojis,
+		GarderArchives: cur.GarderArchives, ArchivesDepuis: cur.ArchivesDepuis}
 	for _, a := range cur.Archives {
 		if a != id {
 			nouv.Archives = append(nouv.Archives, a)

@@ -1076,6 +1076,9 @@ pub struct Marques {
     pub moods: BTreeMap<String, String>,
     /// L'emoji rapide de chaque conversation (id → emoji), PROTOCOLE.md §5.5.
     pub emojis: BTreeMap<String, String>,
+    /// « Garder les conversations archivées hors de la boîte de réception » :
+    /// un message reçu ne désarchive plus (PROTOCOLE.md §5.5). Faux par défaut.
+    pub garder_archives: bool,
 }
 
 impl Marques {
@@ -1087,6 +1090,7 @@ impl Marques {
             && self.privees.is_empty()
             && self.moods.is_empty()
             && self.emojis.is_empty()
+            && !self.garder_archives
     }
 
     /// Chaque liste de `dabord`, dans son ordre, puis les ids de `ensuite` qui n'y sont pas.
@@ -1110,6 +1114,8 @@ impl Marques {
             moods: ensuite.moods.iter().chain(dabord.moods.iter()).map(|(k, v)| (k.clone(), v.clone())).collect(),
             // De même pour les emojis rapides.
             emojis: ensuite.emojis.iter().chain(dabord.emojis.iter()).map(|(k, v)| (k.clone(), v.clone())).collect(),
+            // Un oui/non : celui de `dabord`.
+            garder_archives: dabord.garder_archives,
         }
     }
 
@@ -1124,6 +1130,7 @@ impl Marques {
             privees: garder(&self.privees, &autre.privees),
             moods: self.moods.iter().filter(|(k, v)| autre.moods.get(*k) != Some(*v)).map(|(k, v)| (k.clone(), v.clone())).collect(),
             emojis: self.emojis.iter().filter(|(k, v)| autre.emojis.get(*k) != Some(*v)).map(|(k, v)| (k.clone(), v.clone())).collect(),
+            garder_archives: self.garder_archives,
         }
     }
 }
@@ -1137,6 +1144,7 @@ pub enum NouvelleMarques {
     /// `avec_privees` : de même pour un serveur d'avant `privees`.
     /// `avec_moods` : de même pour un serveur d'avant `moods`.
     /// `avec_emojis` : de même pour un serveur d'avant `emojis`.
+    /// `avec_garder` : de même pour un serveur d'avant `garder_archives`.
     Recues {
         marques: Marques,
         version: u64,
@@ -1146,6 +1154,7 @@ pub enum NouvelleMarques {
         avec_privees: bool,
         avec_moods: bool,
         avec_emojis: bool,
+        avec_garder: bool,
     },
     /// La connexion est tombée : rien n'est plus en vol.
     Coupure,
@@ -1180,6 +1189,7 @@ impl NouvelleMarques {
                 privees: liste("privees")?,
                 moods: objet("moods", 64),
                 emojis: objet("emojis", EMOJI_RAPIDE_MAX),
+                garder_archives: v.get("garder_archives").and_then(Value::as_bool).unwrap_or(false),
             },
             version: v.get("version")?.as_u64()?,
             id: v.get("id").and_then(Value::as_u64),
@@ -1188,6 +1198,7 @@ impl NouvelleMarques {
             avec_privees: v.get("privees").is_some_and(Value::is_array),
             avec_moods: v.get("moods").is_some_and(Value::is_object),
             avec_emojis: v.get("emojis").is_some_and(Value::is_object),
+            avec_garder: v.get("garder_archives").is_some_and(Value::is_boolean),
         })
     }
 }
@@ -1250,6 +1261,7 @@ impl SuiviMarques {
             "privees": c.listes.privees,
             "moods": c.listes.moods,
             "emojis": c.listes.emojis,
+            "garder_archives": c.listes.garder_archives,
             "version": c.version,
             "id": id,
         }}))
@@ -1263,7 +1275,17 @@ impl SuiviMarques {
                 self.reinitialiser();
                 return None;
             }
-            NouvelleMarques::Recues { marques, version, id, refus, avec_archives, avec_privees, avec_moods, avec_emojis } => {
+            NouvelleMarques::Recues {
+                marques,
+                version,
+                id,
+                refus,
+                avec_archives,
+                avec_privees,
+                avec_moods,
+                avec_emojis,
+                avec_garder,
+            } => {
                 // Un serveur d'avant `archives` : nos archives restent les nôtres, jamais vidées.
                 let mut marques = marques;
                 if !avec_archives {
@@ -1280,6 +1302,10 @@ impl SuiviMarques {
                 // Et pour les emojis rapides (serveur d'avant `emojis`).
                 if !avec_emojis {
                     marques.emojis = c.listes.emojis.clone();
+                }
+                // Et pour `garder_archives` (serveur d'avant ce réglage).
+                if !avec_garder {
+                    marques.garder_archives = c.listes.garder_archives;
                 }
                 (marques, version, id, refus)
             }
@@ -1525,7 +1551,13 @@ mod essais {
     }
 
     fn recues(marques: Marques, version: u64, id: Option<u64>) -> NouvelleMarques {
-        NouvelleMarques::Recues { marques, version, id, refus: None, avec_archives: true, avec_privees: true, avec_moods: true, avec_emojis: true }
+        NouvelleMarques::Recues { marques, version, id, refus: None,
+            avec_archives: true,
+            avec_privees: true,
+            avec_moods: true,
+            avec_emojis: true,
+            avec_garder: true,
+        }
     }
 
     fn id_de(t: &Value) -> u64 {
@@ -1665,6 +1697,38 @@ mod essais {
     }
 
     #[test]
+    fn marques_garder_archives() {
+        // Absent du rejeu d'un serveur à jour ? Il l'envoie toujours ; faux par défaut.
+        let n = NouvelleMarques::lire(&json!({"head": [], "favoris": [], "epingles": [], "archives": ["m:1"], "privees": [],
+            "moods": {}, "emojis": {}, "garder_archives": false, "version": 3}));
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques::default();
+        s.recu(n.unwrap(), &mut c);
+        assert!(!c.listes.garder_archives);
+        // Activé ici : envoyé.
+        c.listes.garder_archives = true;
+        let t = s.changement(&mut c).expect("envoi");
+        assert_eq!(t["marques"]["garder_archives"], json!(true));
+        // Activé ailleurs : reçu.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 4, ..Default::default() };
+        let n = NouvelleMarques::lire(&json!({"head": [], "favoris": ["b"], "epingles": [], "archives": [], "privees": [],
+            "moods": {}, "emojis": {}, "garder_archives": true, "version": 5}));
+        assert!(s.recu(n.unwrap(), &mut c).is_none());
+        assert!(c.listes.garder_archives);
+        // Un serveur d'avant `garder_archives` : le nôtre reste.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 4, ..Default::default() };
+        c.listes.garder_archives = true;
+        let vieux = NouvelleMarques::lire(&json!({"head": [], "favoris": ["b"], "epingles": [], "archives": [], "privees": [],
+            "moods": {}, "emojis": {}, "version": 5})).unwrap();
+        assert!(s.recu(vieux, &mut c).is_none());
+        assert!(c.listes.garder_archives);
+        // Seul réglage posé : ce n'est pas « vide », le serveur neuf le reçoit.
+        assert!(!c.listes.vide());
+    }
+
+    #[test]
     fn marques_moods() {
         // Les moods vont et viennent ; un objet, jamais null.
         let n = NouvelleMarques::lire(&json!({"head": [], "favoris": [], "epingles": [], "archives": [], "privees": [],
@@ -1721,6 +1785,7 @@ mod essais {
             avec_privees: true,
             avec_moods: true,
             avec_emojis: true,
+            avec_garder: true,
         };
         let t = s.recu(r, &mut c).expect("renvoi");
         assert_eq!(t["marques"]["favoris"], json!(["z", "a", "y", "x"]));

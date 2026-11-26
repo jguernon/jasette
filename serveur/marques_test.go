@@ -19,11 +19,13 @@ func serveurEssai(t *testing.T) (*Serveur, *Client) {
 
 type trameEssai struct {
 	Marques struct {
-		Privees []string          `json:"privees"`
-		Moods   map[string]string `json:"moods"`
-		Emojis  map[string]string `json:"emojis"`
-		Version int64             `json:"version"`
-		Refus   string            `json:"refus"`
+		Privees  []string          `json:"privees"`
+		Moods    map[string]string `json:"moods"`
+		Emojis   map[string]string `json:"emojis"`
+		Archives []string          `json:"archives"`
+		Garder   *bool             `json:"garder_archives"`
+		Version  int64             `json:"version"`
+		Refus    string            `json:"refus"`
 	} `json:"marques"`
 }
 
@@ -164,6 +166,63 @@ func TestEmojis(t *testing.T) {
 		t.Fatal(err)
 	}
 	if m := chargerMarques(); m.Emojis == nil || len(m.Emojis) != 0 {
+		t.Fatalf("ancien fichier : %+v", m)
+	}
+}
+
+// garder_archives : faux par défaut (et pour un ancien fichier) ; vrai, un
+// message reçu ne désarchive plus ; un ancien client (sans le champ) ne le
+// remet pas à faux ; gardé sur disque.
+func TestGarderArchives(t *testing.T) {
+	s, c := serveurEssai(t)
+	recu := []byte(`{"item":{"conv":"7","time":99999999999999}}`)
+
+	s.recevoirMarques(c, json.RawMessage(`{"archives":["m:7","s:1"],"version":0}`))
+	tr := lireTrame(t, c)
+	if tr.Marques.Garder == nil || *tr.Marques.Garder {
+		t.Fatalf("défaut : %+v", tr.Marques)
+	}
+
+	// Activé : la conversation reste dans les archives, sans nouvelle version.
+	s.recevoirMarques(c, json.RawMessage(`{"archives":["m:7","s:1"],"garder_archives":true,"version":1}`))
+	tr = lireTrame(t, c)
+	if tr.Marques.Version != 2 || tr.Marques.Garder == nil || !*tr.Marques.Garder {
+		t.Fatalf("activé : %+v", tr.Marques)
+	}
+	s.desarchiverSiRecu("messenger", recu)
+	if len(s.marques.Archives) != 2 || s.marques.Version != 2 {
+		t.Fatalf("gardée : %+v", s.marques)
+	}
+
+	// Un ancien client (sans le champ) ne le désactive pas.
+	s.recevoirMarques(c, json.RawMessage(`{"head":["a"],"archives":["m:7","s:1"],"version":2}`))
+	tr = lireTrame(t, c)
+	if tr.Marques.Version != 3 || !*tr.Marques.Garder {
+		t.Fatalf("ancien client : %+v", tr.Marques)
+	}
+
+	// Relu sur disque.
+	if m := chargerMarques(); !m.GarderArchives || m.Version != 3 {
+		t.Fatalf("relu : %+v", m)
+	}
+
+	// Désactivé : la règle d'avant revient.
+	s.recevoirMarques(c, json.RawMessage(`{"head":["a"],"archives":["m:7","s:1"],"garder_archives":false,"version":3}`))
+	tr = lireTrame(t, c)
+	if tr.Marques.Version != 4 || *tr.Marques.Garder {
+		t.Fatalf("désactivé : %+v", tr.Marques)
+	}
+	s.desarchiverSiRecu("messenger", recu)
+	if len(s.marques.Archives) != 1 || s.marques.Archives[0] != "s:1" || s.marques.GarderArchives {
+		t.Fatalf("désarchivage : %+v", s.marques)
+	}
+
+	// Un fichier d'avant ce réglage : faux.
+	t.Setenv("JASETTE_DATA", t.TempDir())
+	if err := ecrireAtomique(marquesPath(), []byte(`{"head":["a"],"archives":["m:7"],"version":3}`)); err != nil {
+		t.Fatal(err)
+	}
+	if m := chargerMarques(); m.GarderArchives {
 		t.Fatalf("ancien fichier : %+v", m)
 	}
 }

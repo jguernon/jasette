@@ -179,6 +179,10 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
             ChoixVolets()
 
             Spacer(Modifier.height(12.dp))
+            Text(t("Conversations"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            ChoixGarderArchives()
+
+            Spacer(Modifier.height(12.dp))
             Text(t("Gestes"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             ChoixGestes()
 
@@ -780,6 +784,30 @@ private fun ChoixHeures() {
             Spacer(Modifier.width(12.dp))
             // L'interrupteur du bureau : piste d'accent allumé, grise et visible éteint.
             Interrupteur(oui) { ca.jasette.android.Marques.choisirHeureChaqueMessage(it) }
+        }
+    }
+}
+
+/**
+ * Réglages → Conversations : « Garder les conversations archivées hors de la
+ * boîte de réception » (désactivé par défaut ; marque `garder_archives`,
+ * partagée par le serveur Jasette s'il y en a un).
+ */
+@Composable
+private fun ChoixGarderArchives() {
+    val oui = ca.jasette.android.Marques.garderArchives
+    Groupe {
+        Row(
+            Modifier.fillMaxWidth().clickable { ca.jasette.android.Marques.choisirGarderArchives(!oui) }
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(t("Garder les conversations archivées hors de la boîte de réception"), color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text(t("Un nouveau message ne les ramène plus dans la boîte de réception."), color = P.textePale, fontSize = 13.sp)
+            }
+            Spacer(Modifier.width(12.dp))
+            Interrupteur(oui) { ca.jasette.android.Marques.choisirGarderArchives(it) }
         }
     }
 }

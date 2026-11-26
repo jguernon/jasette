@@ -30,7 +30,8 @@ const val EMOJI_RAPIDE_MAX = 32
  * Et les archives de Jasette : les conversations archivées par Jasette elle-même,
  * pour les services qui ne savent pas archiver (Messenger, Instagram, Signal,
  * X ; Google et WhatsApp archivent pour de vrai). Un nouveau message reçu les
- * ramène dans la boîte de réception ([desarchiverSiRecu]).
+ * ramène dans la boîte de réception ([desarchiverSiRecu]), sauf avec
+ * [garderArchives].
  *
  * En mode client du serveur Jasette, le serveur est la source : il garde les
  * quatre listes et les partage entre les appareils (serveur/PROTOCOLE.md,
@@ -76,6 +77,21 @@ object Marques {
      * ni la mise à jour d'un vieux message). Propre à l'appareil, jamais envoyé.
      */
     private val archivesDepuis = HashMap<String, Long>()
+
+    /**
+     * « Garder les conversations archivées hors de la boîte de réception » :
+     * vrai, un message reçu ne désarchive plus ([desarchiverSiRecu]). Faux par
+     * défaut. Une marque comme les listes (`garder_archives`, §5.5) : partagée
+     * par le serveur Jasette s'il y en a un, gardée ici sinon.
+     */
+    var garderArchives by mutableStateOf(false)
+        private set
+
+    fun choisirGarderArchives(oui: Boolean) {
+        if (oui == garderArchives) return
+        garderArchives = oui
+        changement()
+    }
 
     /** Chaque bulle montre son heure (et sa date si ce n'est pas aujourd'hui), comme `details_heures`. */
     var heureChaqueMessage by mutableStateOf(true)
@@ -171,6 +187,7 @@ object Marques {
         moods.putAll(lireMoods(p.getString("moods", "{}") ?: "{}"))
         emojis.clear()
         emojis.putAll(lireObjet("emojis", p.getString("emojis", "{}") ?: "{}", EMOJI_RAPIDE_MAX))
+        garderArchives = p.getBoolean("garder_archives", false)
         archivesDepuis.clear()
         try {
             val o = JSONObject(p.getString("archives_depuis", "{}") ?: "{}")
@@ -233,6 +250,7 @@ object Marques {
             ?.putString("privees", JSONArray(privees.toList()).toString())
             ?.putString("moods", JSONObject(moods.toMap()).toString())
             ?.putString("emojis", JSONObject(emojis.toMap()).toString())
+            ?.putBoolean("garder_archives", garderArchives)
             ?.putString("archives_depuis", JSONObject(archivesDepuis.toMap()).toString())
             ?.putLong("version", version)
             ?.putBoolean("a_envoyer", aEnvoyer)
@@ -299,6 +317,9 @@ object Marques {
      * et sa diffusion arrive d'habitude avant le message : rien à faire alors.
      */
     fun desarchiverSiRecu(id: String, temps: Long) {
+        // Gardées hors de la boîte de réception : elle reste dans Archives
+        // (non lue et notifiée comme d'habitude, voir Depot.recevoirMessage).
+        if (garderArchives) return
         val depuis = archivesDepuis[id] ?: return
         if (id !in archives || temps <= depuis) return
         archives.remove(id)
@@ -358,9 +379,10 @@ object Marques {
         val privees: List<String>,
         val moods: Map<String, String>,
         val emojis: Map<String, String>,
+        val garderArchives: Boolean,
     ) {
         fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty() && privees.isEmpty() &&
-            moods.isEmpty() && emojis.isEmpty()
+            moods.isEmpty() && emojis.isEmpty() && !garderArchives
 
         /** Chaque liste de this, dans son ordre, puis les ids de [b] qui n'y sont pas. */
         fun union(b: Listes) = Listes(
@@ -373,6 +395,8 @@ object Marques {
             b.moods + moods,
             // De même pour les emojis rapides.
             b.emojis + emojis,
+            // Un oui/non : celui de this.
+            garderArchives,
         )
 
         /** Les ids de this absents de [b], liste par liste. */
@@ -381,11 +405,15 @@ object Marques {
             archives - b.archives.toSet(), privees - b.privees.toSet(),
             moods.filter { (k, v) -> b.moods[k] != v },
             emojis.filter { (k, v) -> b.emojis[k] != v },
+            garderArchives,
         )
     }
 
     private fun listes() =
-        Listes(head.toList(), favoris.toList(), epingles.toList(), archives.toList(), privees.toList(), moods.toMap(), emojis.toMap())
+        Listes(
+            head.toList(), favoris.toList(), epingles.toList(), archives.toList(), privees.toList(), moods.toMap(), emojis.toMap(),
+            garderArchives,
+        )
 
     private fun poser(l: Listes) {
         if (head.toList() != l.head) { head.clear(); head.addAll(l.head) }
@@ -399,6 +427,7 @@ object Marques {
         }
         if (moods.toMap() != l.moods) { moods.clear(); moods.putAll(l.moods) }
         if (emojis.toMap() != l.emojis) { emojis.clear(); emojis.putAll(l.emojis) }
+        garderArchives = l.garderArchives
     }
 
     /** Envoie une trame au serveur ; faux si la connexion est coupée. Posé par [Depot] en mode client. */
@@ -437,6 +466,7 @@ object Marques {
             .put("privees", JSONArray(l.privees))
             .put("moods", JSONObject(l.moods))
             .put("emojis", JSONObject(l.emojis))
+            .put("garder_archives", l.garderArchives)
             .put("version", version).put("id", prochain)
         if (!envoi(JSONObject().put("marques", corps))) {
             // La connexion tombe : le rejeu suivant tranchera.
@@ -465,6 +495,8 @@ object Marques {
             if (m.optJSONObject("moods") != null) objetMoods(m.optJSONObject("moods")) else moods.toMap(),
             // Et pour les emojis rapides (serveur d'avant `emojis`).
             if (m.optJSONObject("emojis") != null) objetMoods(m.optJSONObject("emojis"), EMOJI_RAPIDE_MAX) else emojis.toMap(),
+            // Et pour `garder_archives` (serveur d'avant ce réglage) : le nôtre reste.
+            if (m.opt("garder_archives") is Boolean) m.optBoolean("garder_archives") else garderArchives,
         )
         val v = m.optLong("version", -1)
         if (v < 0) return

@@ -353,7 +353,7 @@ compte et le relais `did:web:api.bsky.chat`) :
   conversation Bluesky ; un message : `<conversation>/<id>`. Les résultats de
   `search` ont le DID de la personne pour id (à passer à `new`).
 
-### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides)
+### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, garder_archives)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
@@ -377,13 +377,20 @@ S'y ajoutent deux objets (facultatifs) :
 - `emojis` : l'**emoji rapide** de chaque conversation, `{id: "👍"}` (voir
   « Règle des emojis rapides » plus bas).
 
+Et un réglage (facultatif) :
+
+- `garder_archives` (booléen, **faux** par défaut) : « Garder les
+  conversations archivées hors de la boîte de réception ». Vrai : un message
+  reçu ne ramène plus une conversation de `archives` dans l'Inbox (voir
+  « Règle des archives » plus bas).
+
 C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 
 **Serveur → client** (rejeu, juste après `{"auth":"ok"}`, puis à chaque
 changement, à **tous** les clients) :
 
 ```json
-{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"version":7}}
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"version":7}}
 ```
 
 `version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
@@ -392,7 +399,7 @@ encore rien reçu (listes vides).
 **Client → serveur** :
 
 ```json
-{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"version":7,"id":12}}
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"version":7,"id":12}}
 ```
 
 - `version` : la dernière version reçue du serveur (0 si aucune).
@@ -407,6 +414,10 @@ encore rien reçu (listes vides).
   id, 64 par nom. Le serveur envoie toujours `moods` (objet, jamais `null`).
   Même règle pour `emojis`, avec au plus **32 octets** par emoji (un
   graphème : 👍, ❤️, 👨‍👩‍👧…) ; plus long, l'entrée est retirée.
+- `garder_archives` : absent, rien ne change (un client d'avant ce réglage
+  ne le remet jamais à faux) ; présent, il est pris tel quel, même d'un
+  client en retard (un oui/non : rien à unir, pas de garde-fou). Le serveur
+  l'envoie toujours ; absent de `marques.json` (fichier d'avant) : faux.
 
 Règles du serveur :
 
@@ -442,7 +453,10 @@ réponse. À la réception :
 Rien n'est mis en file pendant une coupure : à la reconnexion, le rejeu
 donne l'état du serveur et la règle ci-dessus s'applique. Un serveur d'avant
 `archives` (ou `privees`) n'envoie pas ce champ : le client garde alors ses
-archives (ou ses privées) pour lui seul, sans les vider.
+archives (ou ses privées) pour lui seul, sans les vider. De même pour
+`garder_archives` : un serveur d'avant ce réglage ne l'envoie pas, et le
+client garde le sien pour lui (il l'applique alors lui-même). Union de deux
+copies : `garder_archives` de celle qui passe d'abord.
 
 **Règle des moods.**
 
@@ -494,10 +508,19 @@ archives (ou ses privées) pour lui seul, sans les vider.
   lui-même. Idempotent : un id qui n'y est plus ne change rien. Un message
   envoyé par moi (`from_me`), une réaction ou la mise à jour d'un message
   plus vieux que l'archivage ne la ramènent pas.
+- **Sauf avec `garder_archives`** : le serveur ne retire alors rien
+  d'`archives` (pas de nouvelle version) ; la conversation reste dans la vue
+  Archives. L'événement `message` part comme d'habitude : chez les clients,
+  elle devient non lue (pastille de la vue Archives) et notifie comme
+  avant (bureau : bulle `notify-send` ; Android : notification ordinaire,
+  sans raccourci de conversation, comme pour toute archivée). Désactivé, la
+  règle reprend pour les messages suivants (ceux d'entre-temps ne ramènent
+  rien après coup).
 - Sans serveur (ponts locaux), le client applique la même règle lui-même, à la
   réception du message (Android : `Marques.desarchiverSiRecu`, avec l'heure où
-  l'id est entré dans sa liste). En mode client, il peut le faire aussi : la
-  diffusion du serveur arrive d'abord, et l'id n'y est déjà plus.
+  l'id est entré dans sa liste ; bureau : `desarchiver_si_recu`), en tenant
+  compte de son `garder_archives` local. En mode client, il peut le faire
+  aussi : la diffusion du serveur arrive d'abord, et l'id n'y est déjà plus.
 
 **Règle des privées.**
 
@@ -809,8 +832,8 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"svc":…,"ev":{"ev":"messages",…,"cache":true}}` | copie du cache, avant la réponse du pont (§5.8) |
 | C→S | `{"rejouer":"<svc>"}` | redemander l'état d'un service |
 | ↔ | `{"ping":n}` / `{"pong":n}` | signes de vie |
-| S→C | `{"marques":{"head","favoris","epingles","archives","privees","version"[,"id","refus"]}}` | rejeu, changement |
-| C→S | `{"marques":{"head","favoris","epingles","archives","privees","version"[,"id"]}}` | changement local |
+| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","version"[,"id","refus"]}}` | rejeu, changement |
+| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","version"[,"id"]}}` | changement local |
 | C→S | `{"get":{"id","chemin","sha256"}}` | télécharger |
 | S→C | `{"fichier":{"id",…}}` | morceaux ou erreur |
 | C→S | `{"put":{"id","nom","donnees","fin"}}` | téléverser |

@@ -365,6 +365,9 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Échec de l'envoi · Réessayer" to "Failed to send · Retry",
     // Réglages → Gestes : les glissements sur les conversations de la liste.
     "Gestes" to "Gestures",
+    "Conversations" to "Conversations",
+    "Garder les conversations archivées hors de la boîte de réception" to "Keep archived conversations out of the inbox",
+    "Un nouveau message ne les ramène plus dans la boîte de réception." to "A new message no longer brings them back to the inbox.",
     "Glisser vers la droite" to "Swipe right",
     "Glisser vers la gauche" to "Swipe left",
     "Répondre" to "Reply",
