@@ -7527,7 +7527,7 @@ impl Jasette {
             let sans_lien = if flou { None } else { self.texte_sans_lien(m).map(|text| Msg { text, ..m.clone() }) };
             let m = sans_lien.as_ref().unwrap_or(m);
             let echec = statut(&m.status) == "Échec";
-            // Mes messages : les coches, dans la bulle (en bas à droite).
+            // Mes messages : les coches, à droite de l'heure.
             let coches = if m.from_me && !flou { coche(&m.status) } else { None };
             // En sombre, l'heure se loge dans la bulle, en bas à droite.
             // Un émoji seul (src/pop.rs) : en grand, sans bulle ; l'heure dessous.
@@ -7578,7 +7578,8 @@ impl Jasette {
                 // Le coin du côté de l'expéditeur se resserre sur la dernière bulle d'une suite.
                 let r_bulle = mesure(20., 18.);
                 let pointu = 5.;
-                let pied_dedans = heure_dedans || coches.is_some();
+                // Les coches suivent l'heure : dans la bulle si l'heure y est, sinon dessous (comme Android).
+                let pied_dedans = heure_dedans;
                 let bulle = div()
                     .max_w(px(520.))
                     .px(px(mesure(14., 12.)))
@@ -7711,8 +7712,8 @@ impl Jasette {
                         .text_size(px(11.))
                         .text_color(couleur)
                         .child(pied)
-                        // Sans texte, pas de bulle : les coches suivent l'heure.
-                        .when(m.text.is_empty() || seul, |d| d.when_some(coches, |d, k| d.child(self.coches(m, k, couleur, cx)))),
+                        // Les coches suivent l'heure, à droite, sous la bulle (sauf si l'heure est dedans).
+                        .when(!heure_dedans || m.text.is_empty() || seul, |d| d.when_some(coches, |d, k| d.child(self.coches(m, k, couleur, cx)))),
                 );
             } else if heure_dedans && dernier {
                 // La fin d'une suite garde son souffle.
