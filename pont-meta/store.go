@@ -140,6 +140,9 @@ type convState struct {
 	LastText   string `json:"last_text,omitempty"`
 	LastFromMe bool   `json:"last_from_me,omitempty"`
 	LastTime   int64  `json:"last_time,omitempty"`
+	// Le fil parent donné par Messenger (ParentThreadKey) : pour une
+	// discussion de communauté, le dossier du Groupe Facebook.
+	Parent int64 `json:"parent,omitempty"`
 }
 
 type contact struct {

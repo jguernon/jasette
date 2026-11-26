@@ -24,15 +24,15 @@
 //     (« api_id », « api_hash »). Aucune valeur par défaut n'est fournie :
 //     surtout pas celles, publiques, d'une autre application.
 //   - la connexion :
-//       {"cmd":"login","number":"+15145551234","api_id":123,"api_hash":"…"}
-//         → {"ev":"login_step","step":"code","via":"app|sms|…"}
-//       {"cmd":"login_code","code":"12345"}
-//         → ready, ou {"ev":"login_step","step":"password","hint":"…"}
-//       {"cmd":"login_password","password":"…"}
-//       {"cmd":"pair","api_id":123,"api_hash":"…"} (code QR : Paramètres >
-//         Appareils > Connecter un appareil sur le téléphone)
-//         → des {"ev":"qr","code":"tg://login?token=…","data":"…"} renouvelés,
-//           puis peut-être le mot de passe (login_step password).
+//     {"cmd":"login","number":"+15145551234","api_id":123,"api_hash":"…"}
+//     → {"ev":"login_step","step":"code","via":"app|sms|…"}
+//     {"cmd":"login_code","code":"12345"}
+//     → ready, ou {"ev":"login_step","step":"password","hint":"…"}
+//     {"cmd":"login_password","password":"…"}
+//     {"cmd":"pair","api_id":123,"api_hash":"…"} (code QR : Paramètres >
+//     Appareils > Connecter un appareil sur le téléphone)
+//     → des {"ev":"qr","code":"tg://login?token=…","data":"…"} renouvelés,
+//     puis peut-être le mot de passe (login_step password).
 //     Réussite : paired, account, state ready. Échec : error (where : login,
 //     login_code, login_password ou pair) ; l'étape reste ouverte quand on
 //     peut réessayer (code ou mot de passe faux).
@@ -86,6 +86,13 @@ type Conversation struct {
 	// Le sens qu'il a pour Messenger (fil « secret » à part) : toujours faux
 	// ici (les conversations secrètes de Telegram ne passent pas par l'API).
 	E2EE bool `json:"e2ee"`
+
+	// Onglet Groupes (PROTOCOLE.md §5.13) : un canal (« channel ») ou un
+	// supergroupe (« supergroup ») est un grand espace ; un groupe simple non.
+	Large bool   `json:"large,omitempty"`
+	Kind  string `json:"kind,omitempty"`
+	// Les non-lus qui me mentionnent (unread_mentions_count de Telegram).
+	Mentions int `json:"mentions,omitempty"`
 }
 
 type Message struct {
@@ -109,6 +116,11 @@ type Message struct {
 
 	// L'aperçu du lien, tel que Telegram l'envoie (apercu.go).
 	LinkPreview *LinkPreview `json:"link_preview,omitempty"`
+
+	// Le message me mentionne (drapeau « mentioned » de Telegram) ; il
+	// répond à un de mes messages (§5.13).
+	MentionsMe bool `json:"mentions_me,omitempty"`
+	ReplyToMe  bool `json:"reply_to_me,omitempty"`
 }
 
 type Attachment struct {

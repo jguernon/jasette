@@ -50,6 +50,7 @@ func (p *Pont) convOut(id string, c *convState) Conversation {
 	if name == "" {
 		name = "Conversation Telegram"
 	}
+	large, kind := grandEspace(pe)
 	return Conversation{
 		ID:       id,
 		Name:     name,
@@ -61,7 +62,23 @@ func (p *Pont) convOut(id string, c *convState) Conversation {
 		Members:  orEmpty(members),
 		ReadOnly: readOnly,
 		Archived: c.Archived,
+		Large:    large,
+		Kind:     kind,
+		Mentions: c.Mentions,
 	}
+}
+
+// Le classement de l'onglet Groupes (§5.13) : un canal de diffusion
+// (« channel ») ou un supergroupe (« supergroup ») ; une personne ou un
+// groupe simple ('g') n'est pas un grand espace.
+func grandEspace(pe *peer) (bool, string) {
+	if pe == nil || pe.Kind != 'c' {
+		return false, ""
+	}
+	if pe.Broadcast {
+		return true, "channel"
+	}
+	return true, "supergroup"
 }
 
 func orEmpty(s []string) []string {
@@ -247,6 +264,7 @@ func (p *Pont) refreshFolder(folder int) {
 			c.Pinned = d.Pinned
 			c.ReadInbox, c.ReadOutbox = d.ReadInboxMaxID, d.ReadOutboxMaxID
 			c.Unread, c.UnreadMark = d.UnreadCount, d.UnreadMark
+			c.Mentions = d.UnreadMentionsCount
 			c.TopID = max(c.TopID, d.TopMessage)
 			c.Hidden = false
 			p.saveConv(k, c)
@@ -544,7 +562,8 @@ func (p *Pont) markRead(cmd Cmd) {
 	}
 	top := max(c.TopID, c.ReadInbox)
 	wasUnread := c.Unread > 0 || c.UnreadMark
-	c.Unread, c.UnreadMark = 0, false
+	mentions := c.Mentions > 0
+	c.Unread, c.UnreadMark, c.Mentions = 0, false, 0
 	c.ReadInbox = top
 	p.saveConv(cmd.Conv, c)
 	p.listDirty = true
@@ -566,6 +585,13 @@ func (p *Pont) markRead(cmd Cmd) {
 	}
 	if err != nil {
 		log.Debug().Err(err).Msg("lu")
+	}
+	// Lire l'historique n'efface pas les mentions chez Telegram : sans cet
+	// appel, la prochaine liste des fils les rendrait (seulement s'il y en a).
+	if mentions {
+		if _, err := api.MessagesReadMentions(ctx, &tg.MessagesReadMentionsRequest{Peer: ip}); err != nil {
+			log.Debug().Err(err).Msg("mentions lues")
+		}
 	}
 	if wasUnread {
 		_, _ = api.MessagesMarkDialogUnread(ctx, &tg.MessagesMarkDialogUnreadRequest{Peer: &tg.InputDialogPeer{Peer: ip}, Unread: false})

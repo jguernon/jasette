@@ -535,10 +535,18 @@ func (p *Pont) waRow(cli *whatsmeow.Client, conv string, evt *events.Message) *m
 				quoted = mediaWord(q)
 			}
 		}
-		if orig := p.getMsg(ci.GetStanzaID()); orig != nil {
+		orig := p.getMsg(ci.GetStanzaID())
+		if orig != nil {
 			quoted = cmp.Or(quoted, snippet(cmp.Or(orig.Body, orig.Text), orig.Attachments))
 		}
+		// Répond à un de mes messages : l'auteur cité (participant) est moi,
+		// ou, faute de participant, l'original gardé est de moi.
+		r.ReplyToMe = !r.FromMe && (who == "moi" || (orig != nil && orig.FromMe))
 		setReply(r, ci.GetStanzaID(), who, shorten(quoted, 80))
+	}
+	// Me mentionne : mon numéro ou mon LID parmi les JID mentionnés.
+	if ci := contextOf(m); ci != nil && !r.FromMe && len(ci.GetMentionedJID()) > 0 && cli.Store.ID != nil {
+		r.MentionsMe = mentionneMoi(ci.GetMentionedJID(), *cli.Store.ID, cli.Store.LID)
 	}
 	if r.Text == "" && len(r.Attachments) == 0 {
 		if !hasVisibleField(m) {
@@ -587,6 +595,22 @@ func mediaWord(m *waE2E.Message) string {
 		return "Autocollant"
 	}
 	return ""
+}
+
+// Vrai si un des JID mentionnés (texte) est moi : mon numéro ou mon LID,
+// sans tenir compte de l'appareil.
+func mentionneMoi(mentionnes []string, moi, lid types.JID) bool {
+	for _, s := range mentionnes {
+		j, err := types.ParseJID(s)
+		if err != nil || j.IsEmpty() {
+			continue
+		}
+		j = j.ToNonAD()
+		if (!moi.IsEmpty() && j == moi.ToNonAD()) || (!lid.IsEmpty() && j == lid.ToNonAD()) {
+			return true
+		}
+	}
+	return false
 }
 
 // Le contexte (citation) d'un message, quel que soit son type.

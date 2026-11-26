@@ -74,6 +74,11 @@ type convState struct {
 	LastText   string `json:"last_text,omitempty"`
 	LastFromMe bool   `json:"last_from_me,omitempty"`
 	LastTime   int64  `json:"last_time,omitempty"`
+	// Communautés (GroupInfo) : le groupe parent lui-même, le JID du parent
+	// d'un groupe rattaché, et « seuls les admins écrivent ».
+	Community bool   `json:"community,omitempty"`
+	Parent    string `json:"parent,omitempty"`
+	Announce  bool   `json:"announce,omitempty"`
 }
 
 func (p *Pont) loadCache() {

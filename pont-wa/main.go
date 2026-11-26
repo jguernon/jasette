@@ -60,6 +60,15 @@ type Conversation struct {
 	// Tout WhatsApp est chiffré de bout en bout, mais le champ garde le sens
 	// qu'il a pour Messenger (fil « secret » à part) : toujours faux ici.
 	E2EE bool `json:"e2ee"`
+
+	// Onglet Groupes (PROTOCOLE.md §5.13) : une communauté (« community »)
+	// et ses groupes rattachés (« community_group ») sont de grands espaces ;
+	// un groupe WhatsApp ordinaire n'a aucun de ces champs.
+	Large      bool   `json:"large,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	Announce   bool   `json:"announce,omitempty"`
+	Parent     string `json:"parent,omitempty"`
+	ParentName string `json:"parent_name,omitempty"`
 }
 
 type Message struct {
@@ -87,6 +96,10 @@ type Message struct {
 
 	// L'aperçu du lien, tel que WhatsApp l'envoie (apercu.go).
 	LinkPreview *LinkPreview `json:"link_preview,omitempty"`
+
+	// Me mentionne (mon numéro ou mon LID) ; répond à un de mes messages (§5.13).
+	MentionsMe bool `json:"mentions_me,omitempty"`
+	ReplyToMe  bool `json:"reply_to_me,omitempty"`
 }
 
 type Attachment struct {

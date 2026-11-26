@@ -622,19 +622,56 @@ func (p *Pont) convOut(id string, c *convState) Conversation {
 	}
 	t := max(c.LastActivity, c.LastTime)
 	unread := !fromMe && t > c.ReadWM && c.ReadWM >= 0 && t > 0
-	return Conversation{
-		ID:       id,
-		Name:     name,
-		Preview:  preview,
-		FromMe:   fromMe,
-		Time:     t,
-		Unread:   unread,
-		Group:    group,
-		Members:  orEmpty(members),
-		ReadOnly: c.ReadOnly,
-		Archived: c.Folder != "" && c.Folder != "inbox",
-		E2EE:     c.Type.IsWhatsApp(),
+	kind := kindOf(c.Type)
+	archived := c.Folder != "" && c.Folder != "inbox"
+	var parent, parentName string
+	if kind != "" {
+		// Le dossier « community » n'est pas une archive : c'est la place
+		// des discussions de communauté chez Messenger.
+		if c.Folder == "community" {
+			archived = false
+		}
+		if c.Parent > 0 && c.Parent != c.Key {
+			parent = idStr(c.Parent)
+			if pc := p.convs[parent]; pc != nil {
+				parentName = pc.Name
+			}
+		}
 	}
+	return Conversation{
+		ID:         id,
+		Name:       name,
+		Preview:    preview,
+		FromMe:     fromMe,
+		Time:       t,
+		Unread:     unread,
+		Group:      group,
+		Members:    orEmpty(members),
+		ReadOnly:   c.ReadOnly,
+		Archived:   archived,
+		E2EE:       c.Type.IsWhatsApp(),
+		Large:      kind != "",
+		Kind:       kind,
+		Parent:     parent,
+		ParentName: parentName,
+	}
+}
+
+// La sorte de grand espace d'un fil (§5.13), vide pour une personne ou un
+// groupe ordinaire. Les types viennent de messagix (table.ThreadType).
+func kindOf(tt table.ThreadType) string {
+	switch tt {
+	case table.COMMUNITY_GROUP, table.COMMUNITY_GROUP_UNJOINED, table.COMMUNITY_GROUP_INVITED_UNJOINED,
+		table.COMMUNITY_SUB_THREAD,
+		table.COMMUNITY_PRIVATE_HIDDEN_JOINED_THREAD, table.COMMUNITY_PRIVATE_HIDDEN_UNJOINED_THREAD,
+		table.DISCOVERABLE_PUBLIC_CHAT, table.DISCOVERABLE_PUBLIC_CHAT_UNJOINED,
+		table.DISCOVERABLE_PUBLIC_CHAT_V2, table.DISCOVERABLE_PUBLIC_CHAT_V2_UNJOINED:
+		return "community_chat"
+	case table.COMMUNITY_BROADCAST_JOINED_THREAD, table.COMMUNITY_BROADCAST_UNJOINED_THREAD,
+		table.DISCOVERABLE_PUBLIC_BROADCAST_CHAT, table.DISCOVERABLE_PUBLIC_BROADCAST_CHAT_UNJOINED:
+		return "broadcast"
+	}
+	return ""
 }
 
 func orEmpty(s []string) []string {

@@ -139,6 +139,9 @@ func (p *Pont) incoming(mc tg.MessageClass, nouveau bool) {
 	c := p.getOrMakeConv(r.Conv)
 	if nouveau && !r.FromMe && r.Kind != "admin" && r.Num > c.ReadInbox {
 		c.Unread++
+		if r.MentionsMe {
+			c.Mentions++
+		}
 	}
 	c.Hidden = false
 	if nouveau && r.Num > c.TopID {
@@ -188,6 +191,7 @@ func (p *Pont) readInbox(conv string, maxID, still int) {
 	c.Unread = still
 	if still == 0 {
 		c.UnreadMark = false
+		c.Mentions = 0
 	}
 	p.saveConv(conv, c)
 	p.listDirty = true
@@ -389,6 +393,9 @@ func (p *Pont) convertMsg(m *tg.Message) *msgRow {
 		SenderID: sender,
 		Num:      m.ID,
 	}
+	// Telegram lève « mentioned » pour une mention de moi (ou une réponse à
+	// un de mes messages) ; jamais sur mes propres messages.
+	r.MentionsMe = m.Mentioned && !m.Out
 	if m.Out {
 		r.Status = "OUTGOING_COMPLETE"
 	}
@@ -434,6 +441,9 @@ func (p *Pont) convertMsg(m *tg.Message) *msgRow {
 		p.mu.Lock()
 		if orig != nil {
 			quoted = cmp.Or(quoted, snippet(orig.Body, orig.Attachments))
+			// Répond à un de mes messages : connu seulement si l'original est
+			// dans le cache (aucune requête de plus).
+			r.ReplyToMe = orig.FromMe && !m.Out
 			if orig.FromMe {
 				who = "Vous"
 			} else {

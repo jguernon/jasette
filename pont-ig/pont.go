@@ -618,6 +618,9 @@ func (p *Pont) upsertThread(t *slidetypes.ThreadInfo, withMsgs bool) string {
 		}
 		e.Int64("fil", key).Strs("types", types).Int("accusés", len(t.SlideReadReceipts)).
 			Bool("non_lu", t.MarkedAsUnread).Str("dossier", t.SystemFolder+"/"+t.Folder).
+			// Pour reconnaître un jour les canaux de diffusion (§5.13) : instameow
+			// ne connaît que les sous-types direct, entreprise, IA et groupe.
+			Str("sous_type", string(t.ThreadSubtype)).Bool("diffusion", t.CreatorBroadcastThreadData != nil).
 			Strs("champs_inconnus", extra).Msg("fil reçu")
 	}
 	if key == 0 {

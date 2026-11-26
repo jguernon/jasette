@@ -68,25 +68,27 @@ type convState struct {
 	InDialogs    bool  `json:"in_dialogs,omitempty"`
 	LastActivity int64 `json:"last_activity,omitempty"`
 	Hidden       bool  `json:"hidden,omitempty"`
+	// Les non-lus qui me mentionnent (unread_mentions_count du dialogue).
+	Mentions int `json:"mentions,omitempty"`
 }
 
 // Une personne, un groupe ou un canal connu.
 type peer struct {
-	Kind       byte   `json:"kind"` // 'u', 'g' (groupe simple) ou 'c' (canal, supergroupe)
-	ID         int64  `json:"id"`
-	Hash       int64  `json:"hash,omitempty"`
-	Name       string `json:"name,omitempty"`
-	Username   string `json:"username,omitempty"`
-	Phone      string `json:"phone,omitempty"`
-	Photo      int64  `json:"photo,omitempty"`
-	Self       bool   `json:"self,omitempty"`
-	Bot        bool   `json:"bot,omitempty"`
-	Broadcast  bool   `json:"broadcast,omitempty"` // canal (pas un groupe)
-	CanPost    bool   `json:"can_post,omitempty"`  // canal : je peux y publier
-	Left       bool   `json:"left,omitempty"`
-	Members    int    `json:"members,omitempty"`
-	ContactOf  bool   `json:"contact,omitempty"`
-	Deleted    bool   `json:"deleted,omitempty"`
+	Kind      byte   `json:"kind"` // 'u', 'g' (groupe simple) ou 'c' (canal, supergroupe)
+	ID        int64  `json:"id"`
+	Hash      int64  `json:"hash,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Username  string `json:"username,omitempty"`
+	Phone     string `json:"phone,omitempty"`
+	Photo     int64  `json:"photo,omitempty"`
+	Self      bool   `json:"self,omitempty"`
+	Bot       bool   `json:"bot,omitempty"`
+	Broadcast bool   `json:"broadcast,omitempty"` // canal (pas un groupe)
+	CanPost   bool   `json:"can_post,omitempty"`  // canal : je peux y publier
+	Left      bool   `json:"left,omitempty"`
+	Members   int    `json:"members,omitempty"`
+	ContactOf bool   `json:"contact,omitempty"`
+	Deleted   bool   `json:"deleted,omitempty"`
 }
 
 func (p *Pont) loadCache() {

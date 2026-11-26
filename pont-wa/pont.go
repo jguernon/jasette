@@ -656,6 +656,12 @@ func (p *Pont) upsertGroup(cli *whatsmeow.Client, g *types.GroupInfo) {
 		c.Members = members
 	}
 	c.ReadOnly = g.IsAnnounce && !p.amAdmin(cli, g)
+	c.Community = g.IsParent
+	c.Parent = ""
+	if !g.LinkedParentJID.IsEmpty() {
+		c.Parent = g.LinkedParentJID.ToNonAD().String()
+	}
+	c.Announce = g.IsAnnounce || g.IsDefaultSubGroup
 	if c.LastActivity == 0 && !g.GroupCreated.IsZero() {
 		c.LastActivity = g.GroupCreated.UnixMilli()
 	}
@@ -700,11 +706,14 @@ func (p *Pont) handleGroupInfo(cli *whatsmeow.Client, evt *events.GroupInfo) {
 	}
 	if evt.Announce != nil {
 		c.ReadOnly = evt.Announce.IsAnnounce
+		c.Announce = evt.Announce.IsAnnounce
 	}
 	p.saveConv(id, c)
 	p.listDirty = true
 	p.mu.Unlock()
-	if evt.Announce != nil {
+	// Annonces changées, ou groupe rattaché à une communauté (ou détaché) :
+	// on redemande le groupe (admins, parent).
+	if evt.Announce != nil || evt.Link != nil || evt.Unlink != nil {
 		// Les administrateurs peuvent quand même écrire : on redemande le groupe.
 		go func() {
 			ctx, annule := context.WithTimeout(p.ctx, 30*time.Second)
@@ -749,18 +758,55 @@ func (p *Pont) convOut(id string, c *convState) Conversation {
 	if name == "" {
 		name = "Conversation WhatsApp"
 	}
+	ge := p.grandEspace(c)
 	return Conversation{
-		ID:       id,
-		Name:     name,
-		Preview:  c.LastText,
-		FromMe:   c.LastFromMe,
-		Time:     max(c.LastActivity, c.LastTime),
-		Unread:   c.MarkedUnread || c.Unread > 0,
-		Group:    c.Group,
-		Members:  orEmpty(members),
-		ReadOnly: c.ReadOnly,
-		Archived: c.Archived,
+		ID:         id,
+		Name:       name,
+		Preview:    c.LastText,
+		FromMe:     c.LastFromMe,
+		Time:       max(c.LastActivity, c.LastTime),
+		Unread:     c.MarkedUnread || c.Unread > 0,
+		Group:      c.Group,
+		Members:    orEmpty(members),
+		ReadOnly:   c.ReadOnly,
+		Archived:   c.Archived,
+		Large:      ge.Large,
+		Kind:       ge.Kind,
+		Announce:   ge.Announce,
+		Parent:     ge.Parent,
+		ParentName: ge.ParentName,
 	}
+}
+
+// Les champs de l'onglet Groupes (§5.13), vides pour un groupe ordinaire.
+type espace struct {
+	Large, Announce          bool
+	Kind, Parent, ParentName string
+}
+
+// À appeler avec p.mu.
+func (p *Pont) grandEspace(c *convState) espace {
+	parentName := ""
+	if c.Parent != "" {
+		if pc := p.convs[c.Parent]; pc != nil {
+			parentName = pc.Name
+		}
+	}
+	return classeEspace(c, parentName)
+}
+
+// Une communauté (le groupe parent) ou un groupe qui y est rattaché ; les
+// autres conversations ne changent pas.
+func classeEspace(c *convState, parentName string) espace {
+	switch {
+	case !c.Group:
+		return espace{}
+	case c.Community:
+		return espace{Large: true, Kind: "community", Announce: c.Announce}
+	case c.Parent != "":
+		return espace{Large: true, Kind: "community_group", Announce: c.Announce, Parent: c.Parent, ParentName: parentName}
+	}
+	return espace{}
 }
 
 func orEmpty(s []string) []string {

@@ -51,6 +51,14 @@ type Conversation struct {
 	Archived bool     `json:"archived"`
 	// Propre à Messenger : la conversation est chiffrée de bout en bout.
 	E2EE bool `json:"e2ee"`
+
+	// Onglet Groupes (PROTOCOLE.md §5.13) : une discussion de communauté d'un
+	// Groupe Facebook (« community_chat ») ou un canal de diffusion
+	// (« broadcast ») ; parent : le fil du Groupe Facebook qui la contient.
+	Large      bool   `json:"large,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	Parent     string `json:"parent,omitempty"`
+	ParentName string `json:"parent_name,omitempty"`
 }
 
 type Message struct {
@@ -70,6 +78,10 @@ type Message struct {
 	Reactions []Reaction `json:"reactions,omitempty"`
 	// L'aperçu du lien, tel que Messenger l'envoie (apercu.go).
 	LinkPreview *LinkPreview `json:"link_preview,omitempty"`
+
+	// Me mentionne (MentionIds) ; répond à un de mes messages (ReplyToUserId).
+	MentionsMe bool `json:"mentions_me,omitempty"`
+	ReplyToMe  bool `json:"reply_to_me,omitempty"`
 }
 
 type Attachment struct {

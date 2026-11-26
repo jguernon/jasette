@@ -89,6 +89,9 @@ func (p *Pont) handleTable(tbl *table.LSTable, initial bool) {
 		if th.FolderName != "" {
 			c.Folder = th.FolderName
 		}
+		if th.ParentThreadKey > 0 {
+			c.Parent = th.ParentThreadKey
+		}
 		c.LastActivity = max(c.LastActivity, th.LastActivityTimestampMs)
 		c.ReadWM = max(c.ReadWM, th.LastReadWatermarkTimestampMs)
 		c.Hidden = false
@@ -110,6 +113,9 @@ func (p *Pont) handleTable(tbl *table.LSTable, initial bool) {
 		if th.FolderName != "" {
 			c.Folder = th.FolderName
 		}
+		if th.ParentThreadKey > 0 {
+			c.Parent = th.ParentThreadKey
+		}
 		c.LastActivity = max(c.LastActivity, th.LastActivityTimestampMs)
 		c.ReadWM = max(c.ReadWM, th.LastReadWatermarkTimestampMs)
 		c.Hidden = false
@@ -120,6 +126,9 @@ func (p *Pont) handleTable(tbl *table.LSTable, initial bool) {
 		c := p.getOrMakeConv(key, th.ThreadType)
 		if th.FolderName != "" && c.Folder == "" {
 			c.Folder = th.FolderName
+		}
+		if th.ParentThreadKey > 0 && c.Parent == 0 {
+			c.Parent = th.ParentThreadKey
 		}
 		touched[idStr(key)] = true
 	}
@@ -522,6 +531,10 @@ func (p *Pont) fbRow(wm *table.WrappedMessage) *msgRow {
 			r.Text += "\n• " + o.Text
 		}
 	}
+	if !r.FromMe && me != 0 && r.Kind != "admin" {
+		r.MentionsMe = mentionneMoi(wm.MentionIds, me)
+		r.ReplyToMe = wm.ReplyToUserId == me
+	}
 	r.Media = mediaSummary(r.Attachments)
 	if r.Text == "" && len(r.Attachments) == 0 {
 		if wm.IsAdminMessage {
@@ -530,6 +543,21 @@ func (p *Pont) fbRow(wm *table.WrappedMessage) *msgRow {
 		r.Text = "(message non pris en charge : ouvre Messenger)"
 	}
 	return r
+}
+
+// Vrai si mon identifiant est parmi les mentions d'un message (MentionIds :
+// des identifiants séparés par des virgules).
+func mentionneMoi(ids string, me int64) bool {
+	if ids == "" || me == 0 {
+		return false
+	}
+	moi := strconv.FormatInt(me, 10)
+	for _, s := range strings.Split(ids, ",") {
+		if strings.TrimSpace(s) == moi {
+			return true
+		}
+	}
+	return false
 }
 
 func mediaSummary(atts []Attachment) string {
