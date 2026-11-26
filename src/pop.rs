@@ -11,7 +11,7 @@ use std::cell::RefCell;
 const DUREE_POP: Duration = Duration::from_millis(420);
 
 /// Le grossissement d'un émoji seul par rapport à la taille du texte.
-pub(crate) const ECHELLE_EMOJI_SEUL: f32 = 2.;
+pub(crate) const ECHELLE_EMOJI_SEUL: f32 = 3.;
 
 thread_local! {
     /// Les pops en cours : id (ou tmp_id) du message → son départ.

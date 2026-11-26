@@ -24,7 +24,7 @@ import ca.jasette.android.emojiSeul
 private const val DUREE_POP = 420
 
 /** Le grossissement d'un émoji seul par rapport à la taille du texte. */
-const val ECHELLE_EMOJI_SEUL = 2f
+const val ECHELLE_EMOJI_SEUL = 3f
 
 /**
  * Les arrivées en direct d'un fil : les messages déjà là au premier passage
