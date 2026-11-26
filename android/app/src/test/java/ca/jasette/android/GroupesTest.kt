@@ -37,14 +37,11 @@ class GroupesTest {
     @Test
     fun regleDeLaBoite() {
         // Sans `large` : toujours dans la boîte de réception.
-        assertTrue(dansBoiteDeReception(conv("w:1", large = false), false, false, false))
-        // `large` : seulement montrée, épinglée ou demandant mon attention.
+        assertTrue(dansBoiteDeReception(conv("w:1", large = false)))
+        // `large` : jamais, même avec des mentions (« inbox = chat »).
         val g = conv("d:g1:2", kind = "server")
-        assertFalse(dansBoiteDeReception(g, false, false, false))
-        assertTrue(dansBoiteDeReception(g, true, false, false))
-        assertTrue(dansBoiteDeReception(g, false, true, false))
-        assertTrue(dansBoiteDeReception(g, false, false, true))
-        assertTrue(dansBoiteDeReception(g.copy(mentions = 2), false, false, false))
+        assertFalse(dansBoiteDeReception(g))
+        assertFalse(dansBoiteDeReception(g.copy(mentions = 2, unread = true)))
     }
 
     @Test
@@ -54,13 +51,12 @@ class GroupesTest {
         assertFalse("pas mes propres messages", demandeAttention(msg("t:1", fromMe = true, mentionsMe = true)))
         assertFalse(demandeAttention(msg("t:1")))
         val canal = conv("t:1", kind = "channel")
-        // Hors de la boîte : seulement sur mention ou réponse.
-        assertFalse(notifierMessage(canal, msg("t:1"), dansBoite = false))
-        assertTrue(notifierMessage(canal, msg("t:1", mentionsMe = true), dansBoite = false))
-        assertTrue(notifierMessage(canal, msg("t:1"), dansBoite = true))
+        // Un grand espace : seulement sur mention ou réponse.
+        assertFalse(notifierMessage(canal, msg("t:1")))
+        assertTrue(notifierMessage(canal, msg("t:1", mentionsMe = true)))
         // Une conversation ordinaire, ou inconnue : comme avant.
-        assertTrue(notifierMessage(conv("w:2", large = false), msg("w:2"), dansBoite = true))
-        assertTrue(notifierMessage(null, msg("w:3"), dansBoite = false))
+        assertTrue(notifierMessage(conv("w:2", large = false), msg("w:2")))
+        assertTrue(notifierMessage(null, msg("w:3")))
     }
 
     @Test

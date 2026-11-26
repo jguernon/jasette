@@ -293,11 +293,6 @@ private fun RangeeEspace(c: Conv, choisie: Boolean, retrait: Boolean, retiree: (
                         fontWeight = if (c.unread) FontWeight.Bold else FontWeight.SemiBold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), fontSize = Taille.liste(15f),
                     )
-                    // Montré aussi dans la boîte de réception.
-                    if (Marques.estMontreeDansBoite(c.id)) {
-                        Spacer(Modifier.width(4.dp))
-                        Icon(Icones.inbox, t("Dans la boîte de réception"), tint = P.textePale, modifier = Modifier.size(14.dp))
-                    }
                     Spacer(Modifier.width(6.dp))
                     Text(
                         heureListe(c.time), color = if (blanc) P.surSelection else if (c.unread) P.accent else P.textePale,
@@ -390,10 +385,6 @@ private fun RangeeSalon(c: Conv, choisie: Boolean, retiree: (String) -> Unit, on
                 fontWeight = if (c.unread) FontWeight.Bold else FontWeight.Normal,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), fontSize = Taille.liste(15f),
             )
-            if (Marques.estMontreeDansBoite(c.id)) {
-                Spacer(Modifier.width(4.dp))
-                Icon(Icones.inbox, t("Dans la boîte de réception"), tint = P.textePale, modifier = Modifier.size(14.dp))
-            }
             EtatNonLu(c, choisie)
         }
         MenuDeListe(c, menu, fermer = { menu = false }, retiree = retiree, ouvrir = onClick)

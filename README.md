@@ -117,10 +117,10 @@ Les ids de conversation portent le préfixe `d:`.
 
 **Onglet Groupes** : les grands espaces (serveurs Discord, canaux et
 supergroupes Telegram, communautés WhatsApp, discussions de communauté et
-canaux de diffusion Messenger) y vivent, hors de la boîte de réception ; ils
-y reviennent sur une mention, une réponse à un de tes messages, s'ils sont
-épinglés, ou par « Montrer dans la boîte de réception » (menu de la
-conversation). Les groupes de personnes ne bougent pas. Voir
+canaux de diffusion Messenger) y vivent, jamais dans la boîte de réception
+(elle reste pour le chat) ; une mention ou une réponse à un de tes messages
+s'y voit par une pastille « @ » et une notification. Les groupes de
+personnes ne bougent pas. Voir
 `serveur/PROTOCOLE.md`, §5.13.
 
 **Risque** : Discord interdit officiellement les clients tiers sur un compte

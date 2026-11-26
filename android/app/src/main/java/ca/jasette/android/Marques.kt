@@ -90,13 +90,6 @@ object Marques {
      */
     val emojis: SnapshotStateMap<String, String> = mutableStateMapOf()
     /**
-     * Les grands espaces (conversations `large`, PROTOCOLE.md §5.13) montrés
-     * aussi dans la boîte de réception (« Montrer dans la boîte de
-     * réception »), dans l'ordre d'ajout. Partagée par le serveur comme les
-     * archives (`groupes_inbox`, §5.5), gardée ici sinon.
-     */
-    val groupesInbox: SnapshotStateList<String> = mutableStateListOf()
-    /**
      * Depuis quand (ms, horloge du téléphone) chaque id est dans [archives], ici :
      * seul un message reçu après cette heure la désarchive (pas une réaction
      * ni la mise à jour d'un vieux message). Propre à l'appareil, jamais envoyé.
@@ -312,8 +305,6 @@ object Marques {
         archives.addAll(lire(p, "archives"))
         privees.clear()
         privees.addAll(lire(p, "privees"))
-        groupesInbox.clear()
-        groupesInbox.addAll(lire(p, "groupes_inbox").take(GROUPES_INBOX_MAX))
         moods.clear()
         moods.putAll(lireMoods(p.getString("moods", "{}") ?: "{}"))
         emojis.clear()
@@ -388,7 +379,6 @@ object Marques {
             ?.putString("head", JSONArray(head.toList()).toString())
             ?.putString("archives", JSONArray(archives.toList()).toString())
             ?.putString("privees", JSONArray(privees.toList()).toString())
-            ?.putString("groupes_inbox", JSONArray(groupesInbox.toList()).toString())
             ?.putString("moods", JSONObject(moods.toMap()).toString())
             ?.putString("emojis", JSONObject(emojis.toMap()).toString())
             ?.putBoolean("garder_archives", garderArchives)
@@ -411,23 +401,6 @@ object Marques {
     fun estDansHead(id: String) = id in head
     fun estArchivee(id: String) = id in archives
     fun estPrivee(id: String) = id in privees
-    fun estMontreeDansBoite(id: String) = id in groupesInbox
-
-    /**
-     * « Montrer dans la boîte de réception » ([oui]) ou « Garder dans Groupes
-     * seulement » : un grand espace entre dans `groupes_inbox` (à la fin) ou
-     * en sort ; rien si c'est déjà fait.
-     */
-    fun montrerDansBoite(id: String, oui: Boolean) {
-        if (oui == (id in groupesInbox)) return
-        if (oui) {
-            if (groupesInbox.size >= GROUPES_INBOX_MAX) return
-            groupesInbox.add(id)
-        } else {
-            groupesInbox.remove(id)
-        }
-        changement()
-    }
 
     /** Le mood choisi pour [id] (id du mood), ou null : « Par défaut ». */
     fun mood(id: String): String? = moods[id]
@@ -529,9 +502,8 @@ object Marques {
         val e = privees.remove(id)
         val f = moods.remove(id) != null
         val g = emojis.remove(id) != null
-        val h = groupesInbox.remove(id)
         if (d) majDepuis()
-        if (a || b || c || d || e || f || g || h) changement()
+        if (a || b || c || d || e || f || g) changement()
     }
 
     // ---- La synchronisation avec le serveur Jasette (§5.5) ----
@@ -553,12 +525,10 @@ object Marques {
         val notesMusique: String = "",
         val notesMusiqueFormat: String = "artiste",
         val notesServices: List<String> = listOf("tout"),
-        val groupesInbox: List<String> = emptyList(),
     ) {
         fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty() && privees.isEmpty() &&
             moods.isEmpty() && emojis.isEmpty() && !garderArchives && cacherApresJours == 0 && presenceEnLigne &&
-            sons == "bulle" && notesContacts && notesMusique.isEmpty() && notesMusiqueFormat == "artiste" && notesServices == listOf("tout") &&
-            groupesInbox.isEmpty()
+            sons == "bulle" && notesContacts && notesMusique.isEmpty() && notesMusiqueFormat == "artiste" && notesServices == listOf("tout")
 
         /** Chaque liste de this, dans son ordre, puis les ids de [b] qui n'y sont pas. */
         fun union(b: Listes) = Listes(
@@ -581,7 +551,6 @@ object Marques {
             notesMusique,
             notesMusiqueFormat,
             notesServices,
-            (groupesInbox + b.groupesInbox).filter { it.isNotEmpty() }.distinct().take(GROUPES_INBOX_MAX),
         )
 
         /** Les ids de this absents de [b], liste par liste. */
@@ -598,7 +567,6 @@ object Marques {
             notesMusique,
             notesMusiqueFormat,
             notesServices,
-            groupesInbox - b.groupesInbox.toSet(),
         )
     }
 
@@ -606,7 +574,7 @@ object Marques {
         Listes(
             head.toList(), favoris.toList(), epingles.toList(), archives.toList(), privees.toList(), moods.toMap(), emojis.toMap(),
             garderArchives, cacherApresJours, presenceEnLigne, sonsConversation,
-            notesContacts, notesMusique, notesMusiqueFormat, notesServices, groupesInbox.toList(),
+            notesContacts, notesMusique, notesMusiqueFormat, notesServices,
         )
 
     private fun poser(l: Listes) {
@@ -621,7 +589,6 @@ object Marques {
         }
         if (moods.toMap() != l.moods) { moods.clear(); moods.putAll(l.moods) }
         if (emojis.toMap() != l.emojis) { emojis.clear(); emojis.putAll(l.emojis) }
-        if (groupesInbox.toList() != l.groupesInbox) { groupesInbox.clear(); groupesInbox.addAll(l.groupesInbox) }
         garderArchives = l.garderArchives
         cacherApresJours = l.cacherApresJours
         if (presenceEnLigne != l.presenceEnLigne) {
@@ -682,7 +649,6 @@ object Marques {
             .put("notes_musique", l.notesMusique)
             .put("notes_musique_format", l.notesMusiqueFormat)
             .put("notes_services", JSONArray(l.notesServices))
-            .put("groupes_inbox", JSONArray(l.groupesInbox))
             .put("version", version).put("id", prochain)
         if (!envoi(JSONObject().put("marques", corps))) {
             // La connexion tombe : le rejeu suivant tranchera.
@@ -728,12 +694,6 @@ object Marques {
             (m.opt("notes_musique") as? String)?.let { bornerOctets(it, 128) } ?: notesMusique,
             (m.opt("notes_musique_format") as? String)?.let { formatMusique(it) } ?: notesMusiqueFormat,
             m.optJSONArray("notes_services")?.let { servicesNotes(it.chaines()) } ?: notesServices,
-            // Et pour `groupes_inbox` (§5.13 ; serveur d'avant : la nôtre reste).
-            if (m.has("groupes_inbox")) {
-                m.optJSONArray("groupes_inbox").chaines().filter { it.isNotEmpty() }.distinct().take(GROUPES_INBOX_MAX)
-            } else {
-                groupesInbox.toList()
-            },
         )
         val v = m.optLong("version", -1)
         if (v < 0) return
@@ -790,9 +750,6 @@ object Marques {
         pousser()
     }
 }
-
-/** `groupes_inbox` garde 5000 ids au plus (PROTOCOLE.md §5.5). */
-const val GROUPES_INBOX_MAX = 5000
 
 /** Un jeu de sons connu, sinon "bulle" (le défaut). */
 fun jeuSons(j: String?): String = when (j) {

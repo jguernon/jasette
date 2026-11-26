@@ -61,6 +61,7 @@ import ca.jasette.android.ContactTrouve
 import ca.jasette.android.Contacts
 import ca.jasette.android.Conv
 import ca.jasette.android.Depot
+import ca.jasette.android.Sorte
 import ca.jasette.android.Marques
 import ca.jasette.android.Service
 import ca.jasette.android.t
@@ -157,7 +158,11 @@ fun App(activite: Activity, prive: Boolean = false) {
             Depot.aOuvrir = null
         } else if (aOuvrir != null) {
             pile = listOf(Ecran.Liste)
-            vue = Vue.Tout
+            // Un grand espace (§5.13) s'ouvre depuis l'onglet Groupes, dans son
+            // serveur Discord : il n'est jamais dans la boîte de réception.
+            val espace = Depot.convs.firstOrNull { it.id == aOuvrir && it.large }
+            vue = if (espace != null) Vue.Groupes else Vue.Tout
+            espaceGroupes = espace?.takeIf { it.kind == Sorte.SERVEUR && it.parent.isNotEmpty() }?.parent
             ouverte = aOuvrir
             Depot.aOuvrir = null
         }

@@ -45,10 +45,6 @@ type Marques struct {
 	// cachées partout ailleurs que dans la vue Privées des clients, et
 	// exclues du MCP. Le code qui ouvre cette vue reste sur chaque appareil.
 	Privees []string `json:"privees"`
-	// GroupesInbox : les grands espaces (salons de serveurs Discord, canaux
-	// Telegram, communautés WhatsApp… : `large`, PROTOCOLE.md §5.13) qu'on
-	// montre aussi dans la boîte de réception. Seuls les clients filtrent.
-	GroupesInbox []string `json:"groupes_inbox"`
 	// Moods : le « Mood » choisi pour une conversation (couleurs des bulles et
 	// fond du fil), {id: nom}. Le serveur ne connaît pas les noms : il les
 	// garde tels quels ; un client ignore un nom qu'il ne connaît pas.
@@ -93,9 +89,9 @@ type Marques struct {
 
 func marquesPath() string { return filepath.Join(serveurDir(), "marques.json") }
 
-// listes rend les six listes, dans l'ordre (pour les boucles).
+// listes rend les cinq listes, dans l'ordre (pour les boucles).
 func (m *Marques) listes() []*[]string {
-	return []*[]string{&m.Head, &m.Favoris, &m.Epingles, &m.Archives, &m.Privees, &m.GroupesInbox}
+	return []*[]string{&m.Head, &m.Favoris, &m.Epingles, &m.Archives, &m.Privees}
 }
 
 // normaliser : jamais de liste nulle (elle s'écrirait `null`), ids propres,
@@ -349,7 +345,7 @@ func ecrireAtomique(chemin string, data []byte) error {
 func trameMarques(m Marques, id json.RawMessage, refus string) []byte {
 	corps := map[string]any{
 		"head": m.Head, "favoris": m.Favoris, "epingles": m.Epingles, "archives": m.Archives,
-		"privees": m.Privees, "groupes_inbox": m.GroupesInbox, "moods": m.Moods, "emojis": m.Emojis, "garder_archives": m.GarderArchives,
+		"privees": m.Privees, "moods": m.Moods, "emojis": m.Emojis, "garder_archives": m.GarderArchives,
 		"cacher_apres_jours": m.CacherApresJours, "presence_en_ligne": m.PresenceEnLigne,
 		"sons_conversation": jeuSons(m.SonsConversation), "notes_contacts": m.NotesContacts,
 		"notes_musique": m.NotesMusique, "notes_musique_format": formatMusique(m.NotesMusiqueFormat), "notes_services": nettoyerServicesNotes(m.NotesServices), "version": m.Version,
@@ -381,7 +377,6 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		Epingles *[]string          `json:"epingles"`
 		Archives *[]string          `json:"archives"`
 		Privees  *[]string          `json:"privees"`
-		GrInbox  *[]string          `json:"groupes_inbox"`
 		Moods    *map[string]string `json:"moods"`
 		Emojis   *map[string]string `json:"emojis"`
 		Garder   *bool              `json:"garder_archives"`
@@ -406,15 +401,14 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	cur := s.marques
 	nouv := Marques{
 		Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Archives: cur.Archives,
-		Privees: cur.Privees, GroupesInbox: cur.GroupesInbox, Moods: cur.Moods, Emojis: cur.Emojis, GarderArchives: cur.GarderArchives,
+		Privees: cur.Privees, Moods: cur.Moods, Emojis: cur.Emojis, GarderArchives: cur.GarderArchives,
 		CacherApresJours: cur.CacherApresJours, PresenceEnLigne: cur.PresenceEnLigne, SonsConversation: cur.SonsConversation,
 		NotesContacts: cur.NotesContacts, NotesMusique: cur.NotesMusique, NotesMusiqueFormat: cur.NotesMusiqueFormat, NotesServices: cur.NotesServices,
 		ArchivesDepuis: cur.ArchivesDepuis,
 	}
 	// Une liste absente de la trame ne change pas (un ancien client, qui ne
-	// connaît pas `archives`, `privees` ou `groupes_inbox`, ne les vide donc
-	// jamais).
-	for i, l := range []*[]string{d.Head, d.Favoris, d.Epingles, d.Archives, d.Privees, d.GrInbox} {
+	// connaît pas `archives` ou `privees`, ne les vide donc jamais).
+	for i, l := range []*[]string{d.Head, d.Favoris, d.Epingles, d.Archives, d.Privees} {
 		if l != nil {
 			*nouv.listes()[i] = nettoyerIds(*l)
 		}
@@ -504,8 +498,8 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		return
 	}
 	s.marques = nouv
-	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, groupes_inbox %d, moods %d, emojis %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s, notes_contacts %v, notes_services %v",
-		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.GroupesInbox), len(nouv.Moods), len(nouv.Emojis), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation, nouv.NotesContacts, nouv.NotesServices)
+	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s, notes_contacts %v, notes_services %v",
+		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation, nouv.NotesContacts, nouv.NotesServices)
 	if nouv.PresenceEnLigne != cur.PresenceEnLigne {
 		s.presenceChangee(nouv.PresenceEnLigne)
 	}
@@ -563,7 +557,7 @@ func (s *Serveur) desarchiverSiRecu(svc string, ligne []byte) {
 		return
 	}
 	cur := s.marques
-	nouv := Marques{Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Privees: cur.Privees, GroupesInbox: cur.GroupesInbox, Moods: cur.Moods, Emojis: cur.Emojis,
+	nouv := Marques{Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Privees: cur.Privees, Moods: cur.Moods, Emojis: cur.Emojis,
 		GarderArchives: cur.GarderArchives, CacherApresJours: cur.CacherApresJours, PresenceEnLigne: cur.PresenceEnLigne,
 		SonsConversation: cur.SonsConversation, NotesContacts: cur.NotesContacts, NotesMusique: cur.NotesMusique, NotesMusiqueFormat: cur.NotesMusiqueFormat,
 		NotesServices: cur.NotesServices, ArchivesDepuis: cur.ArchivesDepuis}

@@ -1537,10 +1537,6 @@ struct Reglages {
     /// `privees`, partagée par le serveur). Le code est dans prive.json.
     #[serde(default)]
     privees: Vec<String>,
-    /// Les grands espaces (onglet Groupes) montrés aussi dans la boîte de
-    /// réception (marque `groupes_inbox`, partagée par le serveur).
-    #[serde(default)]
-    groupes_inbox: Vec<String>,
     /// Les sections de l'onglet Groupes repliées (noms de services), sur cet
     /// appareil seulement.
     #[serde(default)]
@@ -1744,7 +1740,6 @@ impl Default for Reglages {
             archives: Vec::new(),
             archives_depuis: HashMap::new(),
             privees: Vec::new(),
-            groupes_inbox: Vec::new(),
             groupes_replies: Vec::new(),
             moods: Default::default(),
             emojis: Default::default(),
@@ -1865,7 +1860,6 @@ impl Reglages {
                     epingles: self.epingles.clone(),
                     archives: self.archives.clone(),
                     privees: self.privees.clone(),
-                    groupes_inbox: self.groupes_inbox.clone(),
                     moods: self.moods.clone(),
                     emojis: self.emojis.clone(),
                     garder_archives: self.garder_archives,
@@ -1890,7 +1884,6 @@ impl Reglages {
         self.epingles = b.copie.listes.epingles;
         self.archives = b.copie.listes.archives;
         self.privees = b.copie.listes.privees;
-        self.groupes_inbox = b.copie.listes.groupes_inbox;
         self.moods = b.copie.listes.moods;
         self.emojis = b.copie.listes.emojis;
         self.garder_archives = b.copie.listes.garder_archives;
@@ -2262,8 +2255,9 @@ struct Jasette {
     /// Les conversations marquées absentes (service déconnecté, pas prêt ou
     /// absent), refaites depuis `marques_cache` : montrées grisées.
     fantomes: Vec<Conv>,
-    /// Les grands espaces qui demandent mon attention (mention ou réponse à
-    /// moi depuis la dernière lecture) : ils reviennent dans la boîte.
+    /// Les grands espaces où l'on m'a mentionné, ou répondu, depuis la
+    /// dernière lecture : la pastille « @ » de l'onglet Groupes (ils ne
+    /// reviennent jamais dans la boîte de réception).
     attention: HashSet<String>,
     /// L'onglet Groupes : le serveur Discord ouvert (id de conversation de
     /// son parent, préfixé : « d:g<guilde> »).
@@ -2448,15 +2442,11 @@ fn est_numero(s: &str) -> bool {
     chiffres >= 3 && s.chars().all(|c| c.is_ascii_digit() || " +-().".contains(c))
 }
 
-/// Un grand espace qui reste dans l'onglet Groupes (PROTOCOLE.md §5.13) :
-/// `large`, pas dans `groupes_inbox`, pas épinglé, sans mention non lue ni
-/// attention en cours. Toute autre conversation va dans la boîte.
-fn hors_boite(c: &Conv, groupes_inbox: &[String], epingles: &[String], attention: &HashSet<String>) -> bool {
+/// Un grand espace (PROTOCOLE.md §5.13) : il vit seulement dans l'onglet
+/// Groupes, jamais dans la boîte de réception (« inbox = chat »), même avec
+/// une mention, une réponse à moi ou une épingle.
+fn hors_boite(c: &Conv) -> bool {
     c.large
-        && !(c.unread && c.mentions > 0)
-        && !groupes_inbox.contains(&c.id)
-        && !epingles.contains(&c.id)
-        && !attention.contains(&c.id)
 }
 
 fn service_de(id: &str) -> Service {
@@ -3061,6 +3051,7 @@ impl Jasette {
                         if let Some(id) = cliquee {
                             this.section = None;
                         this.galerie = None;
+                            this.vers_espace(&id);
                             this.choisir(id);
                             activer = true;
                             change = true;
@@ -3952,31 +3943,28 @@ impl Jasette {
             .count()
     }
 
-    /// Un grand espace (§5.13) qui reste dans l'onglet Groupes : ni montré
-    /// dans la boîte (`groupes_inbox`), ni épinglé, ni en attente de mon
-    /// attention (mention ou réponse à moi depuis la dernière lecture).
     fn hors_boite(&self, c: &Conv) -> bool {
-        hors_boite(c, &self.reglages.groupes_inbox, &self.reglages.epingles, &self.attention)
+        hors_boite(c)
+    }
+
+    /// Ouvrir un grand espace d'ailleurs (notification) : par l'onglet
+    /// Groupes, au serveur Discord qui le contient.
+    fn vers_espace(&mut self, id: &str) {
+        if let Some(c) = self.conv(id).filter(|c| c.large) {
+            self.serveur_ouvert =
+                (c.kind == "server" && !c.parent.is_empty()).then(|| format!("{}{}", service_de(&c.id).prefixe(), c.parent));
+            self.vue = Vue::Groupes;
+        }
+    }
+
+    /// Une mention ou une réponse à moi non lue dans un grand espace.
+    fn mentions_groupes(&self) -> bool {
+        self.convs.iter().any(|c| c.large && c.unread && !self.privee(&c.id) && (c.mentions > 0 || self.attention.contains(&c.id)))
     }
 
     /// Les grands espaces non lus (la pastille de l'onglet Groupes).
     fn non_lus_groupes(&self) -> usize {
         self.convs.iter().filter(|c| c.large && c.unread && !self.privee(&c.id)).count()
-    }
-
-    /// « Montrer dans la boîte de réception » (oui) ou « Garder dans Groupes
-    /// seulement » (non) : la marque `groupes_inbox`.
-    fn montrer_dans_boite(&mut self, id: &str, oui: bool) {
-        let l = &mut self.reglages.groupes_inbox;
-        if oui == l.iter().any(|x| x == id) {
-            return;
-        }
-        if oui {
-            l.push(id.to_string());
-        } else {
-            l.retain(|x| x != id);
-        }
-        self.marques_changees();
     }
 
     /// Les non-lues d'un service (son icône du rail, quand il est caché de la boîte).
@@ -4086,7 +4074,6 @@ impl Jasette {
         r.epingles.retain(|x| x != id);
         r.archives.retain(|x| x != id);
         r.privees.retain(|x| x != id);
-        r.groupes_inbox.retain(|x| x != id);
         let mood = r.moods.remove(id).is_some() | r.emojis.remove(id).is_some();
         if mood || r.head.len() + r.etoiles.len() + r.epingles.len() + r.archives.len() + r.privees.len() != avant {
             self.marques_changees();
@@ -4492,8 +4479,8 @@ impl Jasette {
                         conv.time = conv.time.max(m.time);
                         if nouveau && !m.from_me && !(ouverte && actif) {
                             conv.unread = true;
-                            // Une mention ou une réponse à moi : le grand
-                            // espace revient dans la boîte (§5.13).
+                            // Une mention ou une réponse à moi : une pastille
+                            // « @ » dans l'onglet Groupes (§5.13).
                             if conv.large && (m.mentions_me || m.reply_to_me) {
                                 self.attention.insert(m.conv.clone());
                             }
@@ -5756,7 +5743,14 @@ impl Jasette {
                         cx.notify();
                     }))
                     .child(icone("users", 22., ton(th().texte_fort, th().icone)))
-                    .when(non_lus_groupes > 0, |d| d.child(pastille_nombre(non_lus_groupes, ton(th().texte_pale, th().accent)))),
+                    // Rouge quand on m'y mentionne (pastille seulement : rien ne
+                    // revient dans la boîte de réception).
+                    .when(non_lus_groupes > 0, |d| {
+                        d.child(pastille_nombre(
+                            non_lus_groupes,
+                            if self.mentions_groupes() { c(DANGER) } else { ton(th().texte_pale, th().accent) },
+                        ))
+                    }),
             )
             .child(
                 Self::bouton_rail("r-archives", !en_reglages && self.vue == Vue::Archives)
@@ -8661,7 +8655,6 @@ impl Jasette {
                     cx.notify();
                 })),
             )
-            .children(self.item_menu_groupes(&id, cx))
             .children(self.item_menu_prive(&id, cx))
             .children(self.item_menu_mood(&id, cx))
             .child(item("menu-rechercher", "search", t("Rechercher").into(), th().texte_fort, true).on_click(cx.listener(

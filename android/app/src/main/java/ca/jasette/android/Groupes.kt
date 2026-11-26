@@ -8,25 +8,22 @@ package ca.jasette.android
  */
 
 /**
- * La règle de la boîte de réception (§5.13, point 2). Une conversation sans
- * `large` y va toujours (et jamais dans Groupes). Une `large` y va aussi si
- * elle est montrée exprès (marque `groupes_inbox`, [montree]), épinglée, ou si
- * elle demande mon attention : `mentions` > 0, ou une mention ou une réponse
- * reçue depuis la dernière lecture ([attention], gardée en mémoire).
+ * La règle de la boîte de réception (§5.13) : « la boîte de réception, c'est
+ * le chat ». Une conversation sans `large` y va toujours (et jamais dans
+ * Groupes) ; une `large` n'y va jamais, même avec une mention, une réponse à
+ * moi ou une épingle : ses mentions se voient dans l'onglet Groupes.
  */
-fun dansBoiteDeReception(c: Conv, montree: Boolean, epinglee: Boolean, attention: Boolean): Boolean =
-    !c.large || montree || epinglee || attention || c.mentions > 0
+fun dansBoiteDeReception(c: Conv): Boolean = !c.large
 
 /** Un message reçu qui demande mon attention : il me mentionne ou me répond. */
 fun demandeAttention(m: Msg): Boolean = !m.fromMe && (m.mentionsMe || m.replyToMe)
 
 /**
- * Faut-il notifier [m] ? (§5.13, point 3) Une conversation `large` hors de la
- * boîte de réception ([dansBoite] faux) ne notifie que sur une mention ou une
- * réponse à moi ; les autres, comme avant.
+ * Faut-il notifier [m] ? (§5.13, point 4) Une conversation `large` ne notifie
+ * que sur une mention ou une réponse à moi ; les autres, comme avant.
  */
-fun notifierMessage(c: Conv?, m: Msg, dansBoite: Boolean): Boolean =
-    c == null || !c.large || dansBoite || demandeAttention(m)
+fun notifierMessage(c: Conv?, m: Msg): Boolean =
+    c == null || !c.large || demandeAttention(m)
 
 /** Les sortes de grands espaces connues (`kind`, §5.13). Une autre valeur : icône générique. */
 object Sorte {

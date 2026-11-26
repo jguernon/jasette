@@ -554,14 +554,6 @@ fun MenuConversation(
         Item(if (dansHead) t("Retirer du Head") else t("Ajouter au Head"), Icones.grille) { Marques.basculerHead(c.id) }
         Item(if (favori) t("Retirer des favoris") else t("Ajouter aux favoris"), Icons.Filled.Star) { Marques.basculerFavori(c.id) }
         Item(if (epinglee) t("Désépingler") else t("Épingler en haut"), Icones.epingle) { Marques.basculerEpingle(c.id) }
-        // Un grand espace (§5.13) : le montrer aussi dans la boîte de réception, ou l'y retirer.
-        if (c.large) {
-            if (Marques.estMontreeDansBoite(c.id)) {
-                Item(t("Garder dans Groupes seulement"), Icones.groupes) { Marques.montrerDansBoite(c.id, false) }
-            } else {
-                Item(t("Montrer dans la boîte de réception"), Icones.inbox) { Marques.montrerDansBoite(c.id, true) }
-            }
-        }
         // Liste privée : seulement si elle est activée sur cet appareil.
         if (ca.jasette.android.Prive.actif) {
             val privee = Marques.estPrivee(c.id)

@@ -411,10 +411,10 @@ modifiée de mautrix-discord) :
   (§5.8). Pas d'archives chez Discord (celles de Jasette, §5.5) ; 10 Mo au
   plus par fichier envoyé.
 
-### 5.5 Marques (Head, favoris, épinglées, archives, privées, groupes_inbox, moods, emojis rapides, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*)
+### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
-tous ses appareils. Ce sont six listes **ordonnées** d'ids de
+tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
 conversations, tels que l'interface les voit (« m: » pour Messenger,
 « i: » pour Instagram, « w: » pour WhatsApp, « s: » pour Signal, « x: »
 pour X, « t: » pour Telegram, « b: » pour Bluesky, « d: » pour Discord, sans préfixe pour Google) :
@@ -426,11 +426,10 @@ pour X, « t: » pour Telegram, « b: » pour Bluesky, « d: » pour Discord, sa
   savent pas archiver (Messenger, Instagram, Signal, X, Bluesky, Discord). Google, WhatsApp et
   Telegram archivent pour de vrai (commande `archive` de leur pont) et n'y
   vont pas ;
-- `privees` : la **Liste privée** (voir « Règle des privées » plus bas) ;
-- `groupes_inbox` : les grands espaces (`large` : salons de serveurs
-  Discord, canaux et supergroupes Telegram, communautés WhatsApp…) qu'on
-  montre aussi dans la boîte de réception (§5.13). Un client d'avant ce
-  champ ne l'envoie pas : le serveur garde la liste.
+- `privees` : la **Liste privée** (voir « Règle des privées » plus bas).
+
+Un champ inconnu (par exemple `groupes_inbox`, essayé puis abandonné) est
+ignoré, d'un client comme d'un ancien `marques.json`.
 
 S'y ajoutent deux objets (facultatifs) :
 
@@ -490,7 +489,7 @@ C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 changement, à **tous** les clients) :
 
 ```json
-{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"groupes_inbox":["d:g81384:99120"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"version":7}}
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"version":7}}
 ```
 
 `version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
@@ -499,7 +498,7 @@ encore rien reçu (listes vides).
 **Client → serveur** :
 
 ```json
-{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"groupes_inbox":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"version":7,"id":12}}
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"version":7,"id":12}}
 ```
 
 - `version` : la dernière version reçue du serveur (0 si aucune).
@@ -1225,30 +1224,23 @@ tout reste comme avant) :
   `@moi` ; WhatsApp : mention de mon numéro ou de mon LID) ;
 - `reply_to_me` (booléen) : il répond à un de mes messages.
 
-**Marque `groupes_inbox`** (§5.5) : la liste ordonnée des grands espaces
-(ids préfixés, comme les autres marques) qu'on a choisi de **montrer dans la
-boîte de réception**. Même règles que `archives` : absente, rien ne change ;
-garde-fou et union des clients en retard ; 5000 ids au plus.
-
 **Règle de la boîte de réception** (côté clients ; le serveur ne filtre
-rien) :
+rien) : « la boîte de réception, c'est le chat ».
 
 1. Une conversation sans `large` va dans la boîte de réception, comme
    avant, et **jamais** dans Groupes.
-2. Une conversation `large` va dans Groupes. Elle va **aussi** dans la
-   boîte de réception (vue « Tout » et vues par service ; Favoris, Head,
-   Archives et Privées gardent leurs propres règles) si :
-   - son id est dans `groupes_inbox` (« Montrer dans la boîte de
-     réception » ; « Garder dans Groupes seulement » l'en retire) ;
-   - ou elle est épinglée (`epingles`) ;
-   - ou elle demande **mon attention** : `mentions` > 0, ou un message
-     reçu (pas `from_me`, pas d'un historique) avec `mentions_me` ou
-     `reply_to_me` depuis la dernière lecture. Chaque client garde cette
-     attention en mémoire et l'oublie quand la conversation est lue.
-3. Notifications : une conversation `large` qui n'est pas dans la boîte de
-   réception ne notifie que sur une mention ou une réponse à moi. Les
-   pastilles de l'Inbox ne comptent que ce qu'elle montre ; l'onglet
-   Groupes a sa propre pastille.
+2. Une conversation `large` va **seulement** dans Groupes, **jamais** dans
+   la boîte de réception ni dans les vues par service, même avec une
+   mention, une réponse à moi ou une épingle. Favoris, Head et Privées
+   gardent leurs propres règles.
+3. Les mentions se voient **dans Groupes** : pastille `@N` sur le salon et
+   sur le serveur (`mentions`, plus les messages reçus avec `mentions_me`
+   ou `reply_to_me` depuis la dernière lecture, gardés en mémoire par
+   chaque client), et pastille de l'onglet Groupes (rouge s'il y a une
+   mention). Les pastilles de l'Inbox ne comptent pas les espaces `large`.
+4. Notifications : une conversation `large` ne notifie que sur une mention
+   ou une réponse à moi. Toucher la notification ouvre l'espace par
+   l'onglet Groupes (au bureau : le serveur Discord qui le contient).
 
 **Présentation** : une section repliable par service (badge du service,
 nombre d'espaces non lus ; l'état replié est gardé sur l'appareil).
@@ -1391,8 +1383,8 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"svc":…,"ev":{"ev":"messages",…,"cache":true}}` | copie du cache, avant la réponse du pont (§5.8) |
 | C→S | `{"rejouer":"<svc>"}` | redemander l'état d'un service |
 | ↔ | `{"ping":n}` / `{"pong":n}` | signes de vie |
-| S→C | `{"marques":{"head","favoris","epingles","archives","privees","groupes_inbox","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","version"[,"id","refus"]}}` | rejeu, changement |
-| C→S | `{"marques":{"head","favoris","epingles","archives","privees","groupes_inbox","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","version"[,"id"]}}` | changement local |
+| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","version"[,"id","refus"]}}` | rejeu, changement |
+| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","version"[,"id"]}}` | changement local |
 | S→C | `{"svc":…,"ev":{"ev":"presence","item":{"conv","user","online","last_active"}}}` | présence (§5.10), aussi au rejeu |
 | S→C | `{"svc":…,"ev":{"ev":"typing","conv","on"[,"name","audio"]}}` | « en train d'écrire » (§5.11) |
 | C→S | `{"svc":…,"cmd":{"cmd":"note_set","text","audience","source"[,"req"]}}` | publier ma note (§5.12) |

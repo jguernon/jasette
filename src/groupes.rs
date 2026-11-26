@@ -88,45 +88,6 @@ impl Jasette {
         self.convs.iter().filter(|c| c.large && self.correspond(c)).collect()
     }
 
-    /// Menu ⋮ d'un grand espace : « Montrer dans la boîte de réception » ou
-    /// « Garder dans Groupes seulement ». Rien pour une autre conversation.
-    pub(crate) fn item_menu_groupes(&self, id: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.conv(id)?.large {
-            return None;
-        }
-        let montre = self.reglages.groupes_inbox.iter().any(|x| x == id);
-        let texte = if montre {
-            tr("Garder dans Groupes seulement", "Keep in Groups only")
-        } else {
-            tr("Montrer dans la boîte de réception", "Show in inbox")
-        };
-        let id = id.to_string();
-        Some(
-            div()
-                .id("menu-groupes")
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(px(10.))
-                .px(px(12.))
-                .py(px(9.))
-                .rounded(rayon(10.))
-                .text_size(px(14.))
-                .text_color(th().texte_fort)
-                .cursor_pointer()
-                .hover(|s| s.bg(th().survol))
-                .child(icone(if montre { "users" } else { "inbox" }, 16., th().texte_fort))
-                // Le texte passe à la ligne plutôt que de déborder (police EGA).
-                .child(div().flex_1().min_w(px(0.)).child(texte))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.montrer_dans_boite(&id, !montre);
-                    this.menu_conv = false;
-                    cx.notify();
-                }))
-                .into_any_element(),
-        )
-    }
-
     /// La liste de l'onglet Groupes (à la place de la liste des conversations).
     pub(crate) fn liste_groupes(&self, haut: f32, cx: &mut Context<Self>) -> gpui::Stateful<Div> {
         let mut col = div()
@@ -517,23 +478,14 @@ mod essais {
 
     #[test]
     fn boite_et_groupes() {
-        let rien: HashSet<String> = HashSet::new();
         let salon = conv(serde_json::json!({"id": "d:g5:11", "name": "général", "large": true, "kind": "server", "parent": "g5"}));
         let groupe = conv(serde_json::json!({"id": "w:1@g.us", "name": "Chalet", "group": true}));
-        // Un groupe de personnes reste dans la boîte ; un salon n'y va pas.
-        assert!(!hors_boite(&groupe, &[], &[], &rien));
-        assert!(hors_boite(&salon, &[], &[], &rien));
-        // Montré dans la boîte, épinglé, ou en attente de mon attention : il y revient.
-        assert!(!hors_boite(&salon, &["d:g5:11".into()], &[], &rien));
-        assert!(!hors_boite(&salon, &[], &["d:g5:11".into()], &rien));
-        let attention: HashSet<String> = ["d:g5:11".to_string()].into();
-        assert!(!hors_boite(&salon, &[], &[], &attention));
-        // Des mentions non lues comptées par le service : aussi.
+        // Un groupe de personnes reste dans la boîte ; un salon n'y va jamais,
+        // même avec des mentions non lues (« inbox = chat »).
+        assert!(!hors_boite(&groupe));
+        assert!(hors_boite(&salon));
         let mentionne = conv(serde_json::json!({"id": "d:g5:12", "name": "x", "large": true, "unread": true, "mentions": 2}));
-        assert!(!hors_boite(&mentionne, &[], &[], &rien));
-        // Lues : non.
-        let lu = conv(serde_json::json!({"id": "d:g5:12", "name": "x", "large": true, "unread": false, "mentions": 2}));
-        assert!(hors_boite(&lu, &[], &[], &rien));
+        assert!(hors_boite(&mentionne));
     }
 
     #[test]

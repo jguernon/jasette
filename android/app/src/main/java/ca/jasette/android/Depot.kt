@@ -1086,7 +1086,8 @@ object Depot {
 
         val conv = conv(m.conv)
         // Un grand espace (§5.13) : une mention ou une réponse à moi demande mon
-        // attention (il passe alors aussi dans la boîte de réception).
+        // attention : une pastille « @ » dans l'onglet Groupes, jamais un retour
+        // dans la boîte de réception (§5.13).
         if (nouveau && !ouverteIci && conv?.large == true && demandeAttention(m)) attention[m.conv] = true
         if (conv != null) {
             var c = conv
@@ -1104,7 +1105,7 @@ object Depot {
         if (nouveau && !m.fromMe) {
             if (ouverteIci) {
                 commande(JSONObject().put("cmd", "read").put("conv", m.conv).put("msg", m.id))
-            } else if (!Marques.estPrivee(m.conv) && notifierMessage(conv, m, conv != null && dansBoite(conv))) {
+            } else if (!Marques.estPrivee(m.conv) && notifierMessage(conv, m)) {
                 // Liste privée : aucune notification, même neutre (rien ne trahit la conversation).
                 // Un grand espace hors de la boîte de réception : seulement sur mention ou réponse (§5.13).
                 notifier?.invoke(m, conv)
@@ -1145,11 +1146,10 @@ object Depot {
 
     /**
      * La conversation va-t-elle dans la boîte de réception (vue Tout et vues
-     * par service) ? Toujours sans `large` ; un grand espace, seulement s'il
-     * est montré exprès, épinglé ou demande mon attention (§5.13).
+     * par service) ? Toujours sans `large` ; un grand espace, jamais (§5.13).
      */
     fun dansBoite(c: Conv): Boolean =
-        dansBoiteDeReception(c, Marques.estMontreeDansBoite(c.id), Marques.estEpinglee(c.id), attention[c.id] == true)
+        dansBoiteDeReception(c)
 
     /** Ce que montre la boîte de réception (vue Tout et vues par service) : [boite] selon [dansBoite]. */
     val inbox: List<Conv> get() = boite.filter { dansBoite(it) }
