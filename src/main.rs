@@ -2341,6 +2341,9 @@ struct Jasette {
     demandes: HashSet<String>,
     echecs: HashSet<String>,
     ouvrir_apres: HashSet<String>,
+    /// Les originaux des pièces dont `medias` n'a qu'une vignette (Discord),
+    /// demandés pour ouvrir l'image en grand ou l'enregistrer.
+    originaux: HashMap<String, PathBuf>,
     avatars: HashMap<String, PathBuf>,
     /// Les photos des auteurs (« préfixe du service + sender_id », §5.13).
     auteurs: HashMap<String, PathBuf>,
@@ -3291,6 +3294,7 @@ impl Jasette {
             demandes: HashSet::new(),
             echecs: HashSet::new(),
             ouvrir_apres: HashSet::new(),
+            originaux: HashMap::new(),
             avatars: cache.avatars,
             auteurs: HashMap::new(),
             fantomes: Vec::new(),
@@ -4211,36 +4215,83 @@ impl Jasette {
         }
     }
 
-    /// Demande au pont de télécharger une pièce jointe (une seule fois).
+    /// Demande au pont de télécharger une pièce jointe (une seule fois), sur
+    /// un geste de l'utilisateur : un échec est réessayé.
     fn telecharger(&mut self, p: &Piece) {
-        if self.medias.contains_key(&p.media_id) || !self.demandes.insert(p.media_id.clone()) {
+        self.demander_media(p, true);
+    }
+
+    /// La même chose pour une pièce qui s'affiche (fil, galerie) : un échec
+    /// n'est pas redemandé de lui-même (pas de boucle), seulement au clic.
+    fn telecharger_auto(&mut self, p: &Piece) {
+        self.demander_media(p, false);
+    }
+
+    fn demander_media(&mut self, p: &Piece, explicite: bool) {
+        let id = &p.media_id;
+        if !a_demander(id, self.medias.contains_key(id), self.demandes.contains(id), self.echecs.contains(id), explicite) {
             return;
         }
-        self.echecs.remove(&p.media_id);
+        self.demandes.insert(id.clone());
+        self.echecs.remove(id);
         self.commande(json!({"cmd": "download", "media_id": p.media_id, "key": p.key, "mime": p.mime}));
     }
 
-    /// Ouvre une pièce jointe avec l'application du système : tout de suite si
-    /// le fichier est là, sinon après son téléchargement (`ouvrir_apres`). Un
-    /// fichier disparu (copie d'envoi effacée, cache vidé) est redemandé.
-    fn ouvrir_piece(&mut self, p: &Piece) {
-        if let Some(chemin) = self.medias.get(&p.media_id) {
-            if chemin.is_file() {
-                ouvrir_fichier(chemin);
-                return;
-            }
-            self.medias.remove(&p.media_id);
+    /// L'original d'une pièce (`full` : Discord ne donne sinon qu'une
+    /// vignette ; les autres ponts donnent toujours l'original).
+    fn telecharger_original(&mut self, p: &Piece) {
+        let cle = cle_original(&p.media_id);
+        if p.media_id.is_empty() || !self.demandes.insert(cle) {
+            return;
         }
-        self.ouvrir_apres.insert(p.media_id.clone());
-        self.telecharger(p);
+        self.echecs.remove(&p.media_id);
+        self.commande(json!({"cmd": "download", "media_id": p.media_id, "key": p.key, "mime": p.mime, "full": true}));
     }
 
-    /// Les images s'affichent d'elles-mêmes : on les télécharge dès qu'elles arrivent.
-    fn telecharger_images(&mut self, msgs: &[Msg]) {
-        let images: Vec<Piece> =
-            msgs.iter().flat_map(|m| m.attachments.iter()).filter(|p| p.est_image() || p.est_audio()).cloned().collect();
-        for p in &images {
-            self.telecharger(p);
+    /// Ouvre une pièce jointe avec l'application du système, en pleine
+    /// résolution : tout de suite si l'original est là, sinon après son
+    /// téléchargement (`ouvrir_apres`). Un fichier disparu (copie d'envoi
+    /// effacée, cache vidé) est redemandé.
+    fn ouvrir_piece(&mut self, p: &Piece) {
+        let id = &p.media_id;
+        let chemin = self.originaux.get(id).or(if vignette_possible(p) { None } else { self.medias.get(id) }).cloned();
+        if let Some(chemin) = chemin {
+            if chemin.is_file() {
+                ouvrir_fichier(&chemin);
+                return;
+            }
+            self.originaux.remove(id);
+            if !vignette_possible(p) {
+                self.medias.remove(id);
+            }
+        }
+        self.ouvrir_apres.insert(id.clone());
+        self.telecharger_original(p);
+    }
+
+    /// Les images et les vocaux du fil ouvert qui sont à l'écran, ou presque
+    /// (une hauteur d'écran au-dessus et au-dessous) : seuls ceux-là sont
+    /// téléchargés. Rien pour les fils fermés ni l'historique hors écran.
+    fn telecharger_visibles(&mut self) {
+        let Some(id) = self.choisie.clone() else { return };
+        let pieces: Vec<Piece> = {
+            let Some(liste) = self.messages.get(&id) else { return };
+            let vue = self.defile.bounds();
+            let (haut, bas) = (f32::from(vue.top()), f32::from(vue.bottom()));
+            let positions = self.positions.borrow();
+            let places: Vec<Option<(f32, f32)>> = liste
+                .iter()
+                .map(|m| positions.get(&m.id).map(|b| (f32::from(b.top()), f32::from(b.bottom()))))
+                .collect();
+            messages_visibles(&places, haut, bas)
+                .into_iter()
+                .flat_map(|i| liste[i].attachments.iter())
+                .filter(|p| p.est_image() || p.est_audio())
+                .cloned()
+                .collect()
+        };
+        for p in &pieces {
+            self.telecharger_auto(p);
         }
     }
 
@@ -4522,15 +4573,31 @@ impl Jasette {
             }
             "media" => {
                 let id = v.get("media_id").and_then(Value::as_str).unwrap_or_default().to_string();
+                // Discord dit s'il s'agit de l'original ; les autres ponts ne
+                // donnent que des originaux.
+                let full = v.get("full").and_then(Value::as_bool).unwrap_or(true);
                 self.demandes.remove(&id);
+                if full {
+                    self.demandes.remove(&cle_original(&id));
+                }
                 if let Some(path) = v.get("path").and_then(Value::as_str) {
                     let path = PathBuf::from(path);
-                    if self.ouvrir_apres.remove(&id) {
-                        ouvrir_fichier(&path);
+                    if full {
+                        if self.ouvrir_apres.remove(&id) {
+                            ouvrir_fichier(&path);
+                        }
+                        // L'aperçu en grand montrait la vignette : l'original la remplace.
+                        if self.apercu.is_some() && self.apercu.as_ref() == self.medias.get(&id) {
+                            self.apercu = Some(path.clone());
+                        }
+                        self.originaux.insert(id.clone(), path.clone());
                     }
-                    self.calculer_onde(&id, &path);
-                    self.medias.insert(id, path);
+                    if !full || !self.medias.contains_key(&id) {
+                        self.calculer_onde(&id, &path);
+                        self.medias.insert(id, path);
+                    }
                 } else {
+                    self.demandes.remove(&cle_original(&id));
                     self.ouvrir_apres.remove(&id);
                     self.echecs.insert(id);
                 }
@@ -4543,7 +4610,6 @@ impl Jasette {
                 // La copie du serveur Jasette (PROTOCOLE.md, §5.8), avant la réponse du pont.
                 let copie = v.get("cache").and_then(Value::as_bool).unwrap_or(false);
                 let frais = self.frais.contains(&conv);
-                self.telecharger_images(&items);
                 let liste = self.messages.entry(conv.clone()).or_default();
                 if older {
                     let mut nouveaux: Vec<Msg> =
@@ -4577,7 +4643,6 @@ impl Jasette {
             }
             "message" => {
                 if let Ok(m) = serde_json::from_value::<Msg>(v["item"].clone()) {
-                    self.telecharger_images(std::slice::from_ref(&m));
                     let ouverte = self.choisie.as_deref() == Some(m.conv.as_str());
                     let liste = self.messages.entry(m.conv.clone()).or_default();
                     let nouveau;
@@ -5102,11 +5167,15 @@ impl Jasette {
             // Google n'a pas de « liste des médias » : on charge les messages
             // récents de chaque conversation, et la galerie se remplit.
             self.galerie_chargee = true;
+            // Pas les grands espaces (salons de serveurs Discord…), et seulement
+            // les plus récentes : chaque page part à tous les appareils.
             let ids: Vec<String> = self
                 .convs
                 .iter()
+                .filter(|c| !c.large)
                 .map(|c| c.id.clone())
                 .filter(|id| !self.messages.contains_key(id) && !self.privee(id))
+                .take(GALERIE_CONVS)
                 .collect();
             for id in ids {
                 self.commande(json!({"cmd": "messages", "conv": id, "count": 60}));
@@ -5140,6 +5209,13 @@ impl Jasette {
                 _ => !est_visuel(p) && !p.est_audio(),
             })
             .collect();
+        // Les premières images de la grille (ce qu'on voit en l'ouvrant) se
+        // téléchargent ; les autres au clic.
+        if onglet == 0 {
+            for (_, p) in choisies.iter().filter(|(_, p)| p.est_image()).take(GALERIE_IMAGES) {
+                self.telecharger_auto(p);
+            }
+        }
         let nom_conv = |id: &str| -> String {
             self.conv(id).map(|c| self.nom_affiche(c)).unwrap_or_else(|| t("Sans nom").into())
         };
@@ -5195,7 +5271,13 @@ impl Jasette {
                         .hover(|s| s.opacity(0.85))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             match (&ouvrir, video) {
-                                (Some(c), false) => this.apercu = Some(c.clone()),
+                                (Some(c), false) => {
+                                    // En grand : l'original (Discord n'a donné qu'une vignette).
+                                    this.apercu = Some(this.originaux.get(&piece.media_id).unwrap_or(c).clone());
+                                    if vignette_possible(&piece) && !this.originaux.contains_key(&piece.media_id) {
+                                        this.telecharger_original(&piece);
+                                    }
+                                }
                                 (Some(c), true) => ouvrir_fichier(c),
                                 (None, _) => {
                                     this.ouvrir_apres.insert(piece.media_id.clone());
@@ -7071,10 +7153,13 @@ impl Jasette {
                 .justify_center();
             return match chemin {
                 Some(chemin) => {
-                    let ouvrir = chemin.clone();
+                    let piece = p.clone();
                     cadre
                         .cursor_pointer()
-                        .on_click(move |_, _, _| ouvrir_fichier(&ouvrir))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.ouvrir_piece(&piece);
+                            cx.notify();
+                        }))
                         .child(img(chemin).size_full().rounded(rayon(if th().live { 4. } else { 18. })).object_fit(ObjectFit::Cover))
                         .into_any_element()
                 }
@@ -7201,6 +7286,7 @@ impl Jasette {
                 })
                 .into_any_element();
         }
+        self.telecharger_visibles();
         let Some(contenu) = self.fil_contenu(false, cx) else {
             return div()
                 .flex()
@@ -7773,7 +7859,7 @@ impl Jasette {
             }
         }
         for p in &pieces {
-            self.telecharger(p);
+            self.telecharger_auto(p);
         }
         let serveur = serveur_actif(&self.reglages).cloned();
         let dossier = dossier_medias().join("apercus");
@@ -13488,6 +13574,97 @@ fn main() {
         .expect("fenêtre");
         cx.activate(true);
     });
+}
+
+// ---- Les téléchargements de pièces jointes ----
+
+/// La galerie de tous les comptes : au plus tant de conversations chargées,
+/// et tant d'images téléchargées d'elles-mêmes (les premières de la grille).
+const GALERIE_CONVS: usize = 40;
+const GALERIE_IMAGES: usize = 48;
+
+/// Sans place connue à l'écran (fil pas encore dessiné), les derniers
+/// messages sont ceux qu'on voit : le fil s'ouvre en bas.
+const DERNIERS_SANS_PLACE: usize = 12;
+
+/// Faut-il demander ce média au pont ? Jamais s'il est déjà là ou demandé ;
+/// après un échec, seulement sur un geste (`explicite`) : pas de boucle.
+fn a_demander(id: &str, deja_la: bool, en_cours: bool, echoue: bool, explicite: bool) -> bool {
+    !id.is_empty() && !deja_la && !en_cours && (explicite || !echoue)
+}
+
+/// La clé, dans `demandes`, de l'original d'une pièce (demande `full`).
+fn cle_original(id: &str) -> String {
+    format!("{id}\u{0}full")
+}
+
+/// Discord ne donne qu'une vignette de ses images pour l'affichage.
+fn vignette_possible(p: &Piece) -> bool {
+    p.media_id.starts_with("dc:") && p.est_image()
+}
+
+/// Les messages (indices) à l'écran ou presque : leur place (haut, bas) dans
+/// la fenêtre coupe la vue agrandie d'une hauteur de vue en haut et en bas.
+/// Sans aucune place connue, les DERNIERS_SANS_PLACE derniers.
+fn messages_visibles(places: &[Option<(f32, f32)>], haut: f32, bas: f32) -> Vec<usize> {
+    let n = places.len();
+    let marge = (bas - haut).max(0.);
+    if bas <= haut || places.iter().all(Option::is_none) {
+        return (n.saturating_sub(DERNIERS_SANS_PLACE)..n).collect();
+    }
+    places
+        .iter()
+        .enumerate()
+        .filter(|(i, p)| match p {
+            Some((h, b)) => *b >= haut - marge && *h <= bas + marge,
+            // Arrivé depuis le dernier dessin : en bas du fil.
+            None => i + DERNIERS_SANS_PLACE >= n,
+        })
+        .map(|(i, _)| i)
+        .collect()
+}
+
+#[cfg(test)]
+mod essais_medias {
+    use super::*;
+
+    // Un média qui a échoué n'est pas redemandé de lui-même, seulement au clic.
+    #[test]
+    fn pas_de_boucle_apres_un_echec() {
+        assert!(a_demander("dc:1", false, false, false, false));
+        assert!(!a_demander("dc:1", false, false, true, false), "redemandé en boucle");
+        assert!(a_demander("dc:1", false, false, true, true), "le clic doit réessayer");
+        assert!(!a_demander("dc:1", true, false, false, true), "déjà là");
+        assert!(!a_demander("dc:1", false, true, false, true), "déjà demandé");
+        assert!(!a_demander("", false, false, false, true));
+    }
+
+    // Seuls les messages à l'écran (à une hauteur près) sont téléchargés.
+    #[test]
+    fn seulement_le_visible() {
+        // Vue de 100 à 600 ; messages de 100 px empilés, de -2000 à 1500.
+        let places: Vec<Option<(f32, f32)>> = (0..35).map(|i| Some((-2000. + 100. * i as f32, -1900. + 100. * i as f32))).collect();
+        let v = messages_visibles(&places, 100., 600.);
+        assert_eq!(v.first(), Some(&15)); // -500..-400 touche 100 - 500
+        assert_eq!(v.last(), Some(&31)); // 1100..1200 touche 600 + 500
+        assert!(v.len() < 20, "trop : {v:?}");
+        // Rien de dessiné encore : les derniers seulement.
+        let v = messages_visibles(&vec![None; 50], 0., 0.);
+        assert_eq!(v, (38..50).collect::<Vec<_>>());
+        // Un message arrivé depuis le dernier dessin (sans place) : en bas, gardé.
+        let mut p = places.clone();
+        p.push(None);
+        assert!(messages_visibles(&p, 100., 600.).contains(&35));
+    }
+
+    #[test]
+    fn vignettes_de_discord_seulement() {
+        let piece = |id: &str, mime: &str| -> Piece { serde_json::from_value(json!({"media_id": id, "mime": mime})).unwrap() };
+        assert!(vignette_possible(&piece("dc:1", "image/png")));
+        assert!(!vignette_possible(&piece("t:1", "image/png")));
+        assert!(!vignette_possible(&piece("dc:2", "application/pdf")));
+        assert_ne!(cle_original("dc:1"), "dc:1");
+    }
 }
 
 #[cfg(test)]

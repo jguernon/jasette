@@ -724,14 +724,47 @@ impl Connexion {
     }
 
     /// Le fil des événements : réécrire les chemins (en téléchargeant), puis
-    /// remettre au bon service, dans l'ordre d'arrivée.
+    /// remettre au bon service, dans l'ordre d'arrivée. Les pièces jointes
+    /// (`media`) passent par leur propre fil : un message ne doit jamais
+    /// attendre derrière le téléchargement d'images.
     fn traitement(self: Arc<Self>, rx: Receiver<(String, Value)>) {
+        let (tx_medias, rx_medias) = channel::<(String, Value)>();
+        let m = self.clone();
+        let _ = std::thread::Builder::new().name("serveur-medias".into()).spawn(move || {
+            for (svc, mut ev) in rx_medias {
+                if !verrou(&m.abonnes).contains_key(&svc) {
+                    continue;
+                }
+                m.reecrire_media(&mut ev);
+                m.vers(&svc, ev);
+            }
+        });
         for (svc, mut ev) in rx {
             if !verrou(&self.abonnes).contains_key(&svc) {
                 continue;
             }
+            if est_media(&ev) {
+                let _ = tx_medias.send((svc, ev));
+                continue;
+            }
             self.reecrire(&mut ev);
             self.vers(&svc, ev);
+        }
+    }
+
+    /// Un `media` : le fichier copié ici ; s'il n'a pas pu l'être, l'événement
+    /// devient un échec (l'interface ne garde pas un chemin du serveur, et ne
+    /// redemande pas d'elle-même).
+    fn reecrire_media(&self, ev: &mut Value) {
+        let Some(distant) = ev.get("path").and_then(Value::as_str).map(str::to_string) else { return };
+        match self.telecharger(&distant) {
+            Some(local) => ev["path"] = Value::String(local.to_string_lossy().into_owned()),
+            None => {
+                if let Some(m) = ev.as_object_mut() {
+                    m.remove("path");
+                    m.insert("error".into(), Value::String("fichier du serveur non reçu".into()));
+                }
+            }
         }
     }
 
@@ -859,6 +892,11 @@ impl Connexion {
         verrou(&self.attentes).remove(&id);
         r
     }
+}
+
+/// Un événement `media` qui porte un fichier du serveur.
+fn est_media(ev: &Value) -> bool {
+    ev.get("ev").and_then(Value::as_str) == Some("media") && ev.get("path").and_then(Value::as_str).is_some_and(|p| p.starts_with('/'))
 }
 
 fn lire_plein(f: &mut fs::File, buf: &mut [u8]) -> io::Result<usize> {
