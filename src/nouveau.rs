@@ -7,7 +7,8 @@ use super::*;
 
 impl Service {
     /// Les ponts qui savent créer un groupe (commande `create_group`, §5.6 bis
-    /// du protocole). X (mautrix-twitter) et Bluesky ne le savent pas.
+    /// du protocole), Discord compris. X (mautrix-twitter) et Bluesky ne le
+    /// savent pas.
     pub(super) fn cree_groupes(self) -> bool {
         !matches!(self, Service::X | Service::Bluesky)
     }
@@ -637,8 +638,9 @@ mod essais {
     #[test]
     fn services_de_groupe() {
         let avec: Vec<Service> = tous_services().filter(|s| s.cree_groupes()).collect();
-        assert_eq!(avec.len(), 6);
+        assert_eq!(avec.len(), 7);
         assert!(!Service::X.cree_groupes() && !Service::Bluesky.cree_groupes());
+        assert!(Service::Discord.cree_groupes() && Service::Discord.nomme_groupes());
         assert!(!Service::Instagram.nomme_groupes() && Service::WhatsApp.nomme_groupes());
     }
 }
