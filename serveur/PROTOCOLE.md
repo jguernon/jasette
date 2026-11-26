@@ -152,9 +152,9 @@ Réponses :
 
 `services` : ceux que ce serveur fait tourner (`--services`), dans l'ordre
 `google`, `messenger`, `instagram`, `whatsapp`, `signal`, `x`, `telegram`,
-`bluesky`, `discord`. Les six derniers sont **facultatifs** : le serveur ne les lance que si leur
+`bluesky`, `discord`, `reddit`. Les sept derniers sont **facultatifs** : le serveur ne les lance que si leur
 binaire est présent (`jasette-wa`, `jasette-signal`, `jasette-x`,
-`jasette-telegram`, `jasette-bluesky`, `jasette-discord`, voir §5.4) ; sinon
+`jasette-telegram`, `jasette-bluesky`, `jasette-discord`, `jasette-reddit`, voir §5.4) ; sinon
 ils sont simplement absents de la liste. Le client n'affiche que les
 services de cette liste. Après `ok`, la connexion passe au régime du §5,
 sans limite de durée.
@@ -171,11 +171,11 @@ Révocation : `jasette-serveur --appareils` liste les appareils,
 {"svc":"google","cmd":{"cmd":"messages","conv":"123","count":30}}
 ```
 
-`svc` : `google`, `messenger`, `instagram`, `whatsapp`, `signal`, `x`, `telegram`, `bluesky` ou `discord`.
+`svc` : `google`, `messenger`, `instagram`, `whatsapp`, `signal`, `x`, `telegram`, `bluesky`, `discord` ou `reddit`.
 `cmd` : exactement la commande qu'on écrirait sur l'entrée standard du pont
 (voir l'en-tête de `pont/main.go`, `pont-meta/main.go`, `pont-wa/main.go`,
 `pont-signal/main.go`, `pont-x/main.go`, `pont-telegram/main.go`,
-`pont-bluesky/main.go` et `pont-discord/main.go`). Particularités :
+`pont-bluesky/main.go`, `pont-discord/main.go` et `pont-reddit/main.go`). Particularités :
 
 - `{"cmd":"quit"}` est **ignoré** : le pont appartient au serveur.
 - `{"cmd":"delete","conv":"<id>"}` : supprime la conversation (§5.6).
@@ -231,9 +231,9 @@ envoie ensuite `hello` puis son état. Le client ne voit jamais `pont_ferme`.
 - Un client trop lent (8192 événements en attente) est coupé ; il se
   reconnecte et reçoit le rejeu.
 
-### 5.4 Connexion des services WhatsApp, Signal, X, Telegram, Bluesky et Discord
+### 5.4 Connexion des services WhatsApp, Signal, X, Telegram, Bluesky, Discord et Reddit
 
-Ces six ponts parlent le même protocole que les autres (mêmes commandes
+Ces sept ponts parlent le même protocole que les autres (mêmes commandes
 `conversations`, `messages`, `send`, `send_media`, `react`, `read`,
 `download`, `new`, `search`, `search_messages`, `unpair`…, mêmes
 événements `hello`, `state`, `account`, `avatar`, `avatar_moi`,
@@ -249,6 +249,7 @@ l'association diffère. États : `connecting`, `pairing`, `ready`,
 | `telegram` | `jasette-telegram` (ou `JASETTE_TELEGRAM`) | `<données>/telegram/` | numéro + code (+ mot de passe), ou QR |
 | `bluesky` | `jasette-bluesky` (ou `JASETTE_BLUESKY`) | `<données>/bluesky/` | identifiant + mot de passe d'app |
 | `discord` | `jasette-discord` (ou `JASETTE_DISCORD`) | `<données>/discord/` | QR (app Discord), ou jeton |
+| `reddit` | `jasette-reddit` (ou `JASETTE_REDDIT`) | `<données>/reddit/` | cookies de reddit.com (fenêtre de connexion) |
 
 Les binaires sont cherchés comme les autres : variable d'environnement,
 `--bin`, à côté de `jasette-serveur`, puis le `PATH`. Le serveur crée le
@@ -411,19 +412,88 @@ modifiée de mautrix-discord) :
   (§5.8). Pas d'archives chez Discord (celles de Jasette, §5.5) ; 10 Mo au
   plus par fichier envoyé.
 
+**Reddit** (le chat de Reddit : conversations, groupes privés et chats de
+subreddit ; le chat de Reddit est un serveur Matrix, `matrix.redditspace.com`,
+que le pont parle avec mautrix-go comme le client web) :
+
+```json
+{"svc":"reddit","cmd":{"cmd":"login","cookies":{"reddit_session":"…","csrf_token":"…","token_v2":"…","loid":"…"},"platform":"reddit"}}
+```
+
+- `login` : les cookies de reddit.com, tels que les rend la fenêtre de
+  connexion (`connexion/jasette-connexion-reddit.py` au bureau, une WebView
+  sur Android : `https://www.reddit.com/login/`, puis `/chat/`).
+  `reddit_session` est requis. Le pont en tire le **jeton du chat** (un JWT)
+  par `POST https://www.reddit.com/svc/shreddit/token` (`csrf_token`,
+  en-têtes du navigateur), sinon par la page `/chat/` (cookie `token_v2`).
+  Le jeton sert de `Bearer` sur Matrix ; l'id Matrix est
+  `@t2_<id>:reddit.com`. Il est renouvelé une heure avant son expiration,
+  ou sur un 401 / `M_UNKNOWN_TOKEN`. Cookies refusés ou session perdue :
+  `error` (`where` : `login`) et `state: unpaired`.
+- Réussite : `paired`, `account`, `state: ready`.
+- Le pont garde les cookies utiles et le jeton dans
+  `<données>/reddit/session.json` (0600 ; dossier 0700), et l'état connu
+  des salons dans `<données>/reddit/salons.json`. Rien de cela n'est écrit
+  dans les journaux. `unpair` oublie la session sur cette machine sans
+  appeler `/logout` (la session web de reddit.com reste la même).
+- Les ids : celui du salon Matrix (`!…:reddit.com`, donc `r:!…:reddit.com`
+  chez les clients) ; un message : son `event_id` (`$…`). Les pièces
+  jointes : `media_id` = l'URI `mxc://…` (téléchargée par
+  `/_matrix/media/v3/download`, qui renvoie vers `i.redd.it`).
+- Sortes de salons (état `com.reddit.chat.type`) : `direct` et
+  `reddit_titled_direct` → conversation à deux ; `private_group` → groupe ;
+  **chat de subreddit** → `large`, `kind: "subreddit"`,
+  `parent: "sr:<nom du subreddit en minuscules>"`, `parent_name: "r/<Nom>"`
+  (§5.13), jamais dans la boîte de réception. La reconnaissance des chats de
+  subreddit est **supposée** (type contenant `subreddit`, `community`,
+  `channel` ou `public`, ou un état `com.reddit.*` qui nomme un subreddit) :
+  un type inconnu est noté une fois dans le journal
+  (« type de salon Reddit peu connu »).
+- **Demandes de message** (invitations, et la section `peek` propre à
+  Reddit) : dans la liste avec `request: true` et l'aperçu « Demande de
+  message ». `{"cmd":"accept","conv":…}` rejoint le salon (l'expéditeur le
+  voit) ; `{"cmd":"ignore","conv":…}` cache une conversation à deux
+  (`com.reddit.hidden_chat`, sans rien dire à l'expéditeur) ou quitte un
+  groupe. Répondre (`send`) accepte aussi. Les demandes marquées spam
+  (`com.reddit.invite_spam_status`) et les conversations cachées n'y sont pas.
+- Commandes : `conversations` (200 conversations, 300 salons au plus),
+  `messages` (une page de 50 au plus ; plus anciens par `before`), `send`
+  (10 000 caractères ; `reply_to` : réponse en fil `m.thread` comme le
+  client web), `send_media` (**images seulement** : JPEG, PNG, GIF, WebP ;
+  20 Mo, 100 Mo pour un GIF ; le texte part en message séparé), `react`,
+  `read` (seulement sur action, et seulement si non lu), `download`, `new`
+  (ouvre une conversation connue ; une nouvelle conversation ou un groupe se
+  commence dans Reddit), `search` (conversations connues),
+  `search_messages` (messages vus depuis le lancement).
+- **Réactions** : Reddit n'accepte que sa palette d'images ; le pont fait
+  correspondre une quarantaine d'émojis courants (👍 ❤️ 😂 😮 😢 😡 🔥 🎉 …)
+  et refuse les autres par `error` (`where` : `react`) « Reddit n'a pas
+  cette réaction : sa palette est fixe ». Les réactions des messages de
+  l'historique ne sont pas chargées (seules celles vues en direct). Les réactions reçues sont rendues en émoji quand
+  c'est possible, sinon par le nom de l'image.
+- Refusés clairement (`error`) : `edit` (Reddit ne modifie pas un message
+  envoyé), `create_group`, `archive`, `delete`, les notes (`note_set` →
+  `note_result` en échec). `typing` et `presence` sont ignorés : le pont
+  **n'envoie jamais** « en train d'écrire » ni présence ; il reçoit ceux des
+  autres (`typing`, sauf dans un chat de subreddit).
+- Prudence : agent de Chrome, 350 ms au moins entre deux requêtes REST,
+  `/sync` sans filtre avec `set_presence=offline`, **aucun rattrapage
+  d'historique** (une page à l'ouverture), aucune action automatique. Pas
+  d'archives chez Reddit (celles de Jasette, §5.5).
+
 ### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, personnes, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
 conversations, tels que l'interface les voit (« m: » pour Messenger,
 « i: » pour Instagram, « w: » pour WhatsApp, « s: » pour Signal, « x: »
-pour X, « t: » pour Telegram, « b: » pour Bluesky, « d: » pour Discord, sans préfixe pour Google) :
+pour X, « t: » pour Telegram, « b: » pour Bluesky, « d: » pour Discord, « r: » pour Reddit, sans préfixe pour Google) :
 
 - `head` : la grille en tête de la boîte de réception ;
 - `favoris` : la vue de l'étoile (`etoiles` dans les réglages du bureau) ;
 - `epingles` : les conversations épinglées en haut de la liste ;
 - `archives` : l'**archivage propre à Jasette**, pour les services qui ne
-  savent pas archiver (Messenger, Instagram, Signal, X, Bluesky, Discord). Google, WhatsApp et
+  savent pas archiver (Messenger, Instagram, Signal, X, Bluesky, Discord, Reddit). Google, WhatsApp et
   Telegram archivent pour de vrai (commande `archive` de leur pont) et n'y
   vont pas ;
 - `privees` : la **Liste privée** (voir « Règle des privées » plus bas).
@@ -631,7 +701,7 @@ pas, et le client garde les siens pour lui.
     `<numéro>@s.whatsapp.net` ; un `@lid` n'en a pas), Signal et Telegram
     (champ `number` de la conversation à deux, quand le pont le connaît :
     contact Signal avec son E.164, contact Telegram dont le numéro est
-    visible). Messenger, Instagram, X, Bluesky et Discord n'en donnent
+    visible). Messenger, Instagram, X, Bluesky, Discord et Reddit n'en donnent
     aucun ;
   - **suggérée** seulement, jamais sûre : un nom très proche (sans accents,
     ni casse, ni ponctuation, quel que soit l'ordre prénom/nom ; une faute
@@ -856,7 +926,8 @@ seulement celles dont la copie manque, date d'avant le lancement du pont, ou
 n'a pas le dernier message annoncé par la liste (`time`). Jamais une
 conversation `large` (§5.13), même marquée. **Discord** :
 8 conversations récentes, 30 messages chacune, 15 conversations au plus
-(marquées comprises), 4 s de pause. Ces réponses (et
+(marquées comprises), 4 s de pause. **Reddit** : la même mesure (8 conversations, 30 messages,
+15 au plus, 4 s de pause), jamais un chat de subreddit. Ces réponses (et
 leurs erreurs `where: "messages"`) ne vont **qu'au cache** : aucun client ne
 les reçoit. Aucun pont ne marque une conversation comme lue sur `messages`
 (seulement sur `read`, que le serveur n'envoie jamais de lui-même).
@@ -1283,7 +1354,8 @@ tout reste comme avant) :
   - `"newsletter"` : une **chaîne** WhatsApp ;
   - `"community_chat"` : une discussion de communauté d'un Groupe Facebook
     (Messenger) ;
-  - `"broadcast"` : un **canal de diffusion** (Instagram, Messenger).
+  - `"broadcast"` : un **canal de diffusion** (Instagram, Messenger) ;
+  - `"subreddit"` : un **chat de subreddit** (Reddit ; parent `sr:<nom>`).
   Un client ignore une valeur qu'il ne connaît pas (icône générique).
 - `announce` (booléen) : seuls les administrateurs y écrivent (groupe
   d'annonces WhatsApp, salon d'annonces Discord).
@@ -1421,7 +1493,8 @@ rien) : « la boîte de réception, c'est le chat ».
 nombre d'espaces non lus ; l'état replié est gardé sur l'appareil), puis
 les règles génériques ci-dessus : Discord montre ses serveurs, WhatsApp
 ses communautés, Messenger les Groupes Facebook de ses discussions de
-communauté, Telegram ses canaux et supergroupes (sans parent).
+communauté, Telegram ses canaux et supergroupes (sans parent), Reddit
+ses chats regroupés par subreddit.
 
 **Préchargement** : le serveur ne précharge **jamais** les messages d'une
 conversation `large` (§5.8) ; l'historique n'est demandé qu'à l'ouverture.
@@ -1430,6 +1503,9 @@ conversation `large` (§5.8) ; l'historique n'est demandé qu'à l'ouverture.
 
 - Discord : salons texte et d'annonces des serveurs (§5.4), `mentions`,
   `mentions_me`, `reply_to_me`.
+- Reddit : chats de subreddit (`subreddit`, parent `sr:<nom>` avec son
+  icône par `avatar`), `mentions_me` (mon nom `u/…` ou une mention Matrix),
+  `reply_to_me`. Reconnaissance supposée (§5.4).
 - Telegram : canaux (`channel`) et supergroupes (`supergroup`) ;
   `mentions` (`unread_mentions_count` des dialogues) ; `mentions_me`
   (drapeau `mentioned`, levé aussi pour une réponse à moi) ; `reply_to_me`
@@ -1531,7 +1607,7 @@ Le serveur ne sert que des fichiers réguliers :
 `<données>` = `JASETTE_DATA`, sinon `$XDG_DATA_HOME/jasette`, sinon
 `~/.local/share/jasette` (le même dossier que les ponts).
 Chaque pont a son dossier, en 0700 : `<données>/whatsapp/`,
-`<données>/signal/`, `<données>/x/`, `<données>/telegram/`, `<données>/bluesky/`, `<données>/discord/` (bases SQLite et session : jamais
+`<données>/signal/`, `<données>/x/`, `<données>/telegram/`, `<données>/bluesky/`, `<données>/discord/`, `<données>/reddit/` (bases SQLite et session : jamais
 servis par `get`, §6.1).
 `<données>/serveur/` (0700) contient `cert.pem`, `cle.pem`,
 `appareils.json` (noms, SHA-256 des jetons, dates), `jumelage.json` (code en

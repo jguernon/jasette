@@ -1,7 +1,7 @@
 # Jasette
 
 Toutes tes messageries dans une seule app : Google Messages (SMS/RCS), Messenger,
-Instagram, WhatsApp, Signal, X, Telegram, Bluesky et Discord. Pour Linux et
+Instagram, WhatsApp, Signal, X, Telegram, Bluesky, Discord et Reddit. Pour Linux et
 Android.
 
 Page de présentation et téléchargements : https://jonathanguernon.net/jasette/
@@ -17,7 +17,9 @@ Page de présentation et téléchargements : https://jonathanguernon.net/jasette
   (messages privés) parle directement l'API XRPC d'AT Protocol. Le pont
   Discord reprend la façon de faire de
   [mautrix-discord](https://github.com/mautrix/discord) et son discordgo
-  modifié ([beeper/discordgo](https://github.com/beeper/discordgo)).
+  modifié ([beeper/discordgo](https://github.com/beeper/discordgo)). Le pont
+  Reddit parle au serveur Matrix du chat de Reddit avec
+  [mautrix-go](https://github.com/mautrix/go).
 - **Serveur Jasette** (`serveur/`) : facultatif. Il garde les sessions sur une
   machine toujours allumée, et tes autres appareils (bureau, Android) s'y
   branchent, par un lien TLS épinglé et un jumelage à code. Protocole :
@@ -115,7 +117,21 @@ du téléphone (Paramètres > Scanner le code QR), ou en collant le **jeton** du
 compte. Le pont garde le jeton dans `<données>/discord/session.json` (0600).
 Les ids de conversation portent le préfixe `d:`.
 
-**Onglet Groupes** : les grands espaces (serveurs Discord, canaux et
+Reddit : le **chat** de Reddit (conversations, groupes privés et, dans
+l'onglet **Groupes**, les chats de subreddit). Connexion dans une fenêtre
+reddit.com (bureau : `connexion/jasette-connexion-reddit.py` ; Android : une
+WebView), où captcha et double authentification se font comme d'habitude ;
+la fenêtre passe ensuite par la page du chat, puis Jasette garde les
+cookies utiles et le jeton du chat dans `<données>/reddit/session.json`
+(0600). Les demandes de message s'acceptent ou s'ignorent au-dessus du
+champ. Images seulement (pas de vidéo ni de fichier), pas de modification
+de message, réactions limitées à la palette de Reddit. Les ids de
+conversation portent le préfixe `r:`. Même prudence que pour Discord : pas
+d'API officielle pour le chat, aucune action automatique, jamais
+« en train d'écrire » envoyé, une page d'historique à l'ouverture ; à tes
+risques.
+
+**Onglet Groupes** : les grands espaces (serveurs Discord, chats de subreddit, canaux et
 supergroupes Telegram, communautés WhatsApp, discussions de communauté et
 canaux de diffusion Messenger) y vivent, jamais dans la boîte de réception
 (elle reste pour le chat) ; une mention ou une réponse à un de tes messages
