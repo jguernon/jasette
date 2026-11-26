@@ -30,7 +30,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -926,7 +925,7 @@ private fun FormulaireClient(occupe: Boolean) {
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                     shape = formeChamp,
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent),
+                    colors = couleursChamp(),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
@@ -936,7 +935,7 @@ private fun FormulaireClient(occupe: Boolean) {
                     // Pas « mot de passe » : un code à usage unique, que les gestionnaires n'ont pas à retenir.
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, autoCorrectEnabled = false),
                     shape = formeChamp,
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent),
+                    colors = couleursChamp(),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Button(
@@ -1006,7 +1005,7 @@ private fun Nip() {
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
             shape = formeChamp,
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent),
+            colors = couleursChamp(),
         )
         Depot.erreurNip?.let { Text(it, color = P.danger, fontSize = 13.sp) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

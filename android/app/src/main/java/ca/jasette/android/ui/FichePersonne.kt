@@ -338,7 +338,7 @@ private fun ChoixLier(groupe: List<String>, retour: () -> Unit, choisir: (String
         )
         Text(t("Lier une autre conversation…"), color = P.texteFort, fontWeight = FontWeight.Bold, fontSize = 16.sp)
     }
-    ChampFiltre(texte, focaliser = false) { texte = it }
+    ChampFiltre(texte, focaliser = false, surSurface = true) { texte = it }
     val cands = (Depot.convs + Depot.archives).filter { !it.group && !it.large && it.id !in groupe && !Marques.estPrivee(it.id) }.distinctBy { it.id }
     val services = Service.entries.filter { s -> cands.any { it.service == s } }
     Row(

@@ -749,11 +749,12 @@ private fun tirerPourChercher(
 
 /** La barre de recherche, sous l'en-tête quand elle est ouverte ; [focaliser] : le clavier tout de suite. */
 @Composable
-internal fun ChampFiltre(texte: String, focaliser: Boolean, changer: (String) -> Unit) {
+internal fun ChampFiltre(texte: String, focaliser: Boolean, surSurface: Boolean = false, changer: (String) -> Unit) {
     val demande = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { if (focaliser) runCatching { demande.requestFocus() } }
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).champRond()
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+            .let { if (surSurface) it.champSurface() else it.champRond() }
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

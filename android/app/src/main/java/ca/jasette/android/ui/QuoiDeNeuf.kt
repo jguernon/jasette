@@ -87,7 +87,7 @@ fun BulleQuoiDeNeuf() {
         }
         // Le champ rond commun (champRond, Theme.kt) ; sur trois lignes, il garde son rayon.
         Box(
-            Modifier.fillMaxWidth().champRond()
+            Modifier.fillMaxWidth().champSurface()
                 .let { if (reste < 0) it.border(1.dp, P.danger, formeChamp) else it }
                 .padding(horizontal = 16.dp, vertical = 11.dp),
             contentAlignment = Alignment.CenterStart,

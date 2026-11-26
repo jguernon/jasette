@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.TextFieldColors
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -485,6 +487,38 @@ val formeChamp: Shape get() = forme(RAYON_CHAMP)
 
 /** Le fond, le contour, la hauteur et le rayon communs des champs arrondis. */
 fun Modifier.champRond(): Modifier = heightIn(min = HAUT_CHAMP).carte(RAYON_CHAMP)
+
+/**
+ * Un champ posé sur une surface surélevée (feuille, dialogue, carte) : la
+ * surface y a déjà le ton de [champRond], qui s'y perdait. Sombre : un ton plus
+ * clair et un liseré ; Verre : le fond teinté et un liseré. Live, Sirène et EGA
+ * détachent déjà leurs champs (blanc bordé, creux, liseré gris).
+ */
+private val sombreSeul get() = !P.clair && !P.ega
+private val verreSeul get() = P.clair && !P.live && !P.sirene
+private val champAPart get() = sombreSeul || verreSeul
+val fondChampSurface: Color get() = when {
+    sombreSeul -> c(0x3a3a3c)
+    verreSeul -> P.fond
+    else -> P.surface
+}
+val bordChampSurface: Color get() = when {
+    sombreSeul -> c(0x4a4a4e)
+    verreSeul -> Color.Black.copy(alpha = 0.12f)
+    else -> P.bordCarte
+}
+fun Modifier.champSurface(): Modifier = heightIn(min = HAUT_CHAMP).carte(RAYON_CHAMP, fondChampSurface, bordChampSurface)
+
+/** Les couleurs communes des OutlinedTextField (jeton Discord, Bluesky, connexion…) : même ton que [champSurface]. */
+@Composable
+fun couleursChamp(): TextFieldColors = if (champAPart) {
+    OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = P.accent, cursorColor = P.accent, unfocusedBorderColor = bordChampSurface,
+        focusedContainerColor = fondChampSurface, unfocusedContainerColor = fondChampSurface,
+    )
+} else {
+    OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent)
+}
 
 /** Une barre flottante : ombre douce, ou fenêtre EGA cadrée à ombre portée dure. */
 fun Modifier.flottant(r: Dp): Modifier {
