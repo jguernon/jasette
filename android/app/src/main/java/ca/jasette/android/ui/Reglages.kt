@@ -1044,8 +1044,8 @@ private fun ChoixPresence() {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(t("Afficher qui est en ligne"), color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                Text(t("Point vert sur les contacts actifs (Messenger, Instagram, WhatsApp, Telegram)."), color = P.textePale, fontSize = 13.sp)
+                Text(t("Afficher qui est en ligne et qui écrit"), color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text(t("Point vert sur les contacts actifs et « … » quand on vous écrit."), color = P.textePale, fontSize = 13.sp)
             }
             Spacer(Modifier.width(12.dp))
             Interrupteur(oui) { ca.jasette.android.Marques.choisirPresenceEnLigne(it) }

@@ -113,6 +113,7 @@ impl Jasette {
         pont::regler_presence(oui);
         if !oui {
             self.presences.clear();
+            self.ecrits.clear();
         }
         for svc in [Service::Messenger, Service::Instagram, Service::WhatsApp, Service::Telegram] {
             if let Some(p) = self.meta(svc).pont.as_ref()

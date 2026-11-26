@@ -45,6 +45,27 @@ object Depot {
     /** La présence en ligne des conversations individuelles (Presence.kt, PROTOCOLE.md §5.10). */
     val presences = mutableStateMapOf<String, Presence>()
 
+    /** Qui écrit, par conversation (Presence.kt). */
+    val ecrits = mutableStateMapOf<String, Ecrit>()
+
+    /** Quelqu'un écrit-il dans cette conversation (et le réglage le montre-t-il) ? */
+    fun ecritDe(id: String): Ecrit? = if (!Marques.presenceEnLigne) null else ecrits[id]
+
+    /** Une ligne `typing` d'un pont (ids déjà préfixés). Jasette n'envoie jamais le sien. */
+    private fun recevoirEcrit(v: JSONObject) {
+        if (!Marques.presenceEnLigne) return
+        val conv = v.chaine("conv")
+        if (conv.isEmpty()) return
+        if (!v.optBoolean("on")) {
+            ecrits.remove(conv)
+            return
+        }
+        val e = Ecrit(v.chaine("name"), System.currentTimeMillis())
+        ecrits[conv] = e
+        // Sans nouvelle depuis 6 s : les « … » s'en vont.
+        principal.postDelayed({ if (ecrits[conv] === e) ecrits.remove(conv) }, ECRIT_DUREE_MS)
+    }
+
     /** La présence d'une conversation à montrer (réglage activé, pas un groupe), ou null. */
     fun presenceDe(c: Conv): Presence? = if (!Marques.presenceEnLigne || c.group) null else presences[c.id]
 
@@ -337,6 +358,7 @@ object Depot {
         qr.clear()
         codeAssociation.clear()
         presences.clear()
+        ecrits.clear()
         emoji = null
         besoinNip = false
         erreurNip = null
@@ -369,7 +391,10 @@ object Depot {
      * prévient les siens) ; désactivé, tout est oublié.
      */
     private fun presenceReglee(oui: Boolean) {
-        if (!oui) presences.clear()
+        if (!oui) {
+            presences.clear()
+            ecrits.clear()
+        }
         if (connexion != null) return
         for (s in SERVICES_PRESENCE) (ponts[s] as? PontLocal)?.envoyer(JSONObject().put("cmd", "presence").put("on", oui))
     }
@@ -752,7 +777,7 @@ object Depot {
             }
             "search" -> recevoirRecherche(v, service)
             "presence" -> recevoirPresence(v)
-            "hello", "e2ee", "typing" -> {}
+            "hello", "e2ee" -> {}
             "error" -> {
                 val texte = v.chaine("text")
                 if (v.chaine("where") == "search") Log.d("jasette", "search ${service.court} : erreur (${texte.length} car.)")
@@ -903,6 +928,7 @@ object Depot {
                 val m = Msg.de(v.optJSONObject("item") ?: return)
                 recevoirMessage(m)
             }
+            "typing" -> recevoirEcrit(v)
             // Ponts Meta : une conversation supprimée (ici, sur un autre appareil ou dans l'app).
             "deleted" -> {
                 val id = v.chaine("conv")
@@ -962,6 +988,8 @@ object Depot {
         }
         messages[m.conv] = liste
         CacheConvs.noterFil(m.conv)
+        // Le message est là : plus de « … ».
+        if (nouveau && !m.fromMe) ecrits.remove(m.conv)
 
         val conv = conv(m.conv)
         if (conv != null) {

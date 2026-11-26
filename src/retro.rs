@@ -576,12 +576,15 @@ impl Jasette {
                                 )
                                 .when(self.en_ligne(conv), |d| d.child(presence::carre_en_ligne())),
                         )
-                        .child(
-                            div()
-                                .truncate()
-                                .text_size(px(12. + plus))
-                                .child(texte_emoji(apercu, if conv.unread { c(0x12335e) } else { c(0x4d6c92) }, None)),
-                        ),
+                        .when(self.ecrit(&conv.id).is_some(), |d| d.child(ecrit::apercu_ecrit(12. + plus)))
+                        .when(self.ecrit(&conv.id).is_none(), |d| {
+                            d.child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(12. + plus))
+                                    .child(texte_emoji(apercu, if conv.unread { c(0x12335e) } else { c(0x4d6c92) }, None)),
+                            )
+                        }),
                 )
                 .child(
                     div()
@@ -623,7 +626,10 @@ impl Jasette {
                     .child(nom),
             )
             .when(self.en_ligne(conv), |d| d.child(presence::carre_en_ligne()))
-            .child(div().flex_1().min_w(px(0.)).truncate().text_size(px(12. + plus)).child(texte_emoji(apercu, pale, None)))
+            .when(self.ecrit(&conv.id).is_some(), |d| d.child(div().flex_1().min_w(px(0.)).child(ecrit::apercu_ecrit(12. + plus))))
+            .when(self.ecrit(&conv.id).is_none(), |d| {
+                d.child(div().flex_1().min_w(px(0.)).truncate().text_size(px(12. + plus)).child(texte_emoji(apercu, pale, None)))
+            })
             .when(conv.unread, |d| {
                 // L'enveloppe jaune d'un nouveau message.
                 d.child(div().flex_none().w(px(14.)).h(px(11.)).bg(c(0xffe26a)).border_1().border_color(c(0x8a6d00)))
@@ -710,6 +716,9 @@ impl Jasette {
             let etat = self.etat_service(service);
             let detail = if conv.group {
                 format!("{} · {} participants", service.nom(), conv.members.len() + 1)
+            } else if self.ecrit(&conv.id).is_some() {
+                // Quelqu'un écrit (src/ecrit.rs).
+                if live { format!("<{}> · {}", service.nom(), t("écrit…")) } else { format!("{} · {}", service.nom(), t("écrit…")) }
             } else if let Some(a) = self.activite(&conv) {
                 // « Actif il y a 12 min » (src/presence.rs).
                 if live { format!("<{}> · {a}", service.nom()) } else { format!("{} · {a}", service.nom()) }

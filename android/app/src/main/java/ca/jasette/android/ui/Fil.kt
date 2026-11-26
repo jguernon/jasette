@@ -263,7 +263,8 @@ fun Fil(
                                 maxLines = 1, overflow = TextOverflow.Ellipsis, style = androidx.compose.material3.LocalTextStyle.current.merge(TITRE_SERRE),
                             )
                             // « Actif il y a 12 min » d'abord (Presence.kt).
-                            val activite = conv?.let { Depot.presenceDe(it) }?.let { texteActivite(it, System.currentTimeMillis()) }
+                            val activite = if (Depot.ecritDe(id) != null) t("écrit…")
+                                else conv?.let { Depot.presenceDe(it) }?.let { texteActivite(it, System.currentTimeMillis()) }
                             Text(
                                 (activite?.let { "$it · " } ?: "") +
                                 Service.de(id).court + (if (conv?.rcs == true) " · RCS" else "") +
@@ -366,6 +367,8 @@ fun Fil(
             reverseLayout = true,
             contentPadding = margesFil,
         ) {
+            // Quelqu'un écrit : la bulle aux trois points, tout en bas (Ecrit.kt).
+            Depot.ecritDe(id)?.let { e -> item(key = "ecrit") { BulleEcrit(e, groupe = conv?.group == true) } }
             items(inverse.size, key = { inverse[it].id }) { i ->
                 val m = inverse[i]
                 val avant = inverse.getOrNull(i + 1) // le message précédent dans le temps

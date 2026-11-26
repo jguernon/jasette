@@ -20,6 +20,7 @@ mod mood;
 mod maj;
 mod retro;
 mod presence;
+mod ecrit;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -2067,6 +2068,8 @@ struct Jasette {
     ondes_pretes: Arc<Mutex<Vec<(String, Vec<f32>, f32)>>>,
     /// La présence en ligne des conversations individuelles (src/presence.rs).
     presences: HashMap<String, presence::Presence>,
+    /// Qui écrit, par conversation (src/ecrit.rs).
+    ecrits: HashMap<String, ecrit::Ecrit>,
     /// Les aperçus de liens faits par Jasette (adresse → aperçu ; None : en
     /// cours, ou rien à montrer), les images `image_url` des services, et les
     /// recherches en cours.
@@ -2736,6 +2739,8 @@ impl Jasette {
                     .update(cx, |this, cx| {
                         // Le chrono de l'enregistrement et la lecture défilent.
                         let mut change = this.vocal.is_some() || this.lecture.is_some();
+                        // Les « … » sans nouvelle depuis 6 s s'en vont.
+                        change |= this.ecrits_perimes();
                         let finie = this.lecture.as_mut().is_some_and(|l| !matches!(l.enfant.try_wait(), Ok(None)));
                         if finie {
                             this.lecture = None;
@@ -2943,6 +2948,7 @@ impl Jasette {
             pauses: HashMap::new(),
             ondes_pretes: Arc::new(Mutex::new(Vec::new())),
             presences: HashMap::new(),
+            ecrits: HashMap::new(),
             apercus: HashMap::new(),
             images_apercu: HashMap::new(),
             travaux_apercus: Arc::new(apercu::Travaux::default()),
@@ -3203,7 +3209,7 @@ impl Jasette {
                 }
             }
             "presence" => self.presence_recue(&v),
-            "hello" | "e2ee" | "typing" => {}
+            "hello" | "e2ee" => {}
             // Un pont d'avant la recherche globale : il ne la connaît pas, ce n'est pas une panne.
             "error" if v.get("text").and_then(Value::as_str).is_some_and(|t| t.contains("search_messages")) => {}
             // Le serveur Jasette n'offre pas ce service : il est absent, sans erreur.
@@ -4079,6 +4085,10 @@ impl Jasette {
                             self.descendre = true;
                         }
                     }
+                    if nouveau && !m.from_me {
+                        // Le message est là : plus de « … ».
+                        self.ecrit_fini(&m.conv);
+                    }
                     let actif = self.active;
                     if let Some(conv) = self.convs.iter_mut().find(|c| c.id == m.conv) {
                         if nouveau || conv.time <= m.time {
@@ -4115,6 +4125,7 @@ impl Jasette {
                     }
                 }
             }
+            "typing" => self.ecrit_recu(&v),
             "sent" => {
                 if !v.get("ok").and_then(Value::as_bool).unwrap_or(false) {
                     let tmp = v.get("tmp_id").and_then(Value::as_str).unwrap_or_default();
@@ -6203,7 +6214,10 @@ impl Jasette {
                                             if lu_par_eux { th().accent } else { th().texte_pale },
                                         ))
                                     })
-                                    .child(
+                                    .when(self.ecrit(&conv.id).is_some(), |d| {
+                                        d.child(div().flex_1().child(ecrit::apercu_ecrit(13. + self.plus_liste())))
+                                    })
+                                    .when(self.ecrit(&conv.id).is_none(), |d| d.child(
                                         div()
                                             .flex_1()
                                             .truncate()
@@ -6218,7 +6232,7 @@ impl Jasette {
 
                                                 None,
                                             )),
-                                    )
+                                    ))
                                     .when(conv.unread, |d| {
                                         d.child(div().flex_none().size(px(9.)).rounded(rayon(999.)).bg(degrade_accent()))
                                     }),
@@ -6923,6 +6937,13 @@ impl Jasette {
             }
             col = col.child(ligne);
             ordre.push(Some(m.id.clone()));
+        }
+        // Quelqu'un écrit : la bulle aux trois points, en bas (src/ecrit.rs).
+        if !flou
+            && let Some(b) = self.conv(&id).and_then(|c| self.bulle_ecrit(c, fond_recu))
+        {
+            col = col.child(b);
+            ordre.push(None);
         }
         if !flou {
             let positions = self.positions.clone();
@@ -8012,7 +8033,8 @@ impl Jasette {
                             format!("{} participants · {}", conv.members.len() + 1, service.nom())
                         } else {
                             let qui = conv.members.first().filter(|m| **m != nom).cloned();
-                            match (self.activite(&conv), qui) {
+                            let ecrit = self.ecrit(&conv.id).map(|_| t("écrit…").to_string());
+                            match (ecrit.or_else(|| self.activite(&conv)), qui) {
                                 // « Actif il y a 12 min » d'abord (src/presence.rs).
                                 (Some(a), _) => format!("{a} · {}", service.nom()),
                                 (None, Some(q)) => format!("{q} · {}", service.nom()),
@@ -9099,8 +9121,8 @@ impl Jasette {
                     .child(div().h(px(14.)))
                     .child(groupe().child(ligne_interrupteur(
                         "a-presence",
-                        t("Afficher qui est en ligne"),
-                        t("Point vert sur les contacts actifs (Messenger, Instagram, WhatsApp, Telegram)."),
+                        t("Afficher qui est en ligne et qui écrit"),
+                        t("Point vert sur les contacts actifs et « … » quand on vous écrit."),
                         self.reglages.presence_en_ligne,
                         cx.listener(|this, _, _, cx| {
                             this.reglages.presence_en_ligne = !this.reglages.presence_en_ligne;
@@ -11989,8 +12011,9 @@ fn t(fr: &'static str) -> &'static str {
         "Lilas" => "Lilac",
         "Les emojis que vous utilisez apparaîtront ici." => "Emojis you use will show up here.",
         "Garder les conversations archivées hors de la boîte de réception" => "Keep archived conversations out of the inbox",
-        "Afficher qui est en ligne" => "Show who's online",
-        "Point vert sur les contacts actifs (Messenger, Instagram, WhatsApp, Telegram)." => "Green dot on active contacts (Messenger, Instagram, WhatsApp, Telegram).",
+        "Afficher qui est en ligne et qui écrit" => "Show who's online and typing",
+        "Point vert sur les contacts actifs et « … » quand on vous écrit." => "Green dot on active contacts and “…” when someone is typing.",
+        "écrit…" => "typing…",
         "Actif maintenant" => "Active now",
         "Cacher les conversations plus anciennes de la boîte de réception" => "Hide older conversations from the inbox",
         "Selon leur dernier message. Les épinglées et les non lues restent ; Favoris, Archives et la recherche les montrent toujours." => "Based on their last message. Pinned and unread ones stay; Favorites, Archives and search always show them.",

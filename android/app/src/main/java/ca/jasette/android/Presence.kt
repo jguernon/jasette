@@ -8,6 +8,15 @@ package ca.jasette.android
  */
 data class Presence(val online: Boolean, val lastActive: Long)
 
+/**
+ * Quelqu'un écrit dans une conversation (l'événement `typing`, PROTOCOLE.md
+ * §5.11) : son nom (groupes, s'il est connu) et l'heure de la dernière nouvelle.
+ */
+data class Ecrit(val nom: String, val depuis: Long)
+
+/** Sans nouvelle depuis 6 s, les « … » s'en vont (au cas où `on:false` ne vient jamais). */
+const val ECRIT_DUREE_MS = 6_000L
+
 /** Au-delà, « Actif il y a… » ne dit plus rien. */
 private const val ACTIVITE_MAX_MS = 24L * 3600 * 1000
 

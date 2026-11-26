@@ -394,7 +394,8 @@ Et des réglages (facultatifs) :
   message la ramène d'elle-même. Le serveur ne filtre rien, le MCP non plus
   (`lister_conversations` a ses propres filtres et sa `limite`).
 - `presence_en_ligne` (booléen, **vrai** par défaut) : « Afficher qui est en
-  ligne » (point vert, « Actif il y a 12 min », §5.10). Le serveur le
+  ligne et qui écrit » (point vert, « Actif il y a 12 min », §5.10 ; « … »
+  quand on vous écrit, §5.11). Le serveur le
   transmet aux ponts ; faux, les ponts ne suivent aucune présence et le
   serveur ne relaie plus l'événement `presence`.
 
@@ -838,6 +839,32 @@ Par service :
   `userStatusOffline` avec `was_online`, sinon heure inconnue) et
   `updateUserStatus`. Le pont ne se déclare jamais en ligne lui-même.
 
+### 5.11 « En train d'écrire »
+
+Tous les ponts annoncent qu'une personne écrit dans une conversation :
+
+```json
+{"ev":"typing","conv":"4155551234@s.whatsapp.net","on":true,"name":"Camille","audio":false}
+```
+
+- `conv` : la conversation (id du pont, sans préfixe) ; `on` : vrai, elle
+  écrit ; faux, elle a arrêté.
+- `name` (facultatif ; WhatsApp, Telegram) : qui écrit, pour les groupes.
+  `audio` (facultatif) : elle enregistre un vocal.
+- Messenger, Instagram, Google Messages et Signal envoient `on:false` ; X et
+  certains services ne le font pas toujours : le client oublie la bulle
+  après **6 s** sans nouvel événement, ou à l'arrivée d'un message de cette
+  conversation.
+- WhatsApp ne transmet les « en train d'écrire » qu'à un appareil
+  disponible : voir §5.10.
+
+Le serveur le relaie à tous les clients, sans le garder ni le rejouer. Les
+clients le montrent (bulle reçue aux trois points qui rebondissent en bas du
+fil, « écrit… » dans la liste et sous le nom dans l'en-tête) si la marque
+`presence_en_ligne` est vraie : « Afficher qui est en ligne et qui écrit ».
+Jasette n'envoie jamais son propre « en train d'écrire » (la commande
+`typing` des ponts Signal et Telegram existe, l'interface ne s'en sert pas).
+
 ## 6. Fichiers
 
 Les événements contiennent des chemins de fichiers **du serveur** :
@@ -941,6 +968,7 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","version"[,"id","refus"]}}` | rejeu, changement |
 | C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","version"[,"id"]}}` | changement local |
 | S→C | `{"svc":…,"ev":{"ev":"presence","item":{"conv","user","online","last_active"}}}` | présence (§5.10), aussi au rejeu |
+| S→C | `{"svc":…,"ev":{"ev":"typing","conv","on"[,"name","audio"]}}` | « en train d'écrire » (§5.11) |
 | C→S | `{"get":{"id","chemin","sha256"}}` | télécharger |
 | S→C | `{"fichier":{"id",…}}` | morceaux ou erreur |
 | C→S | `{"put":{"id","nom","donnees","fin"}}` | téléverser |
