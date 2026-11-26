@@ -50,6 +50,10 @@ type Pont struct {
 	// Sous srv.mu : le dernier événement `presence` de chaque conversation
 	// (PROTOCOLE.md, §5.10), rejoué aux clients qui arrivent.
 	presence map[string][]byte
+	// Sous srv.mu : le dernier `avatar` de chaque conversation (« c:<conv> »)
+	// et `sender_avatar` de chaque auteur (« s:<id> »), rejoués aux clients
+	// qui arrivent après : les ponts ne les annoncent qu'une fois par session.
+	avatars map[string][]byte
 
 	// Sous srv.mu : la dernière liste `notes` (notes des contacts, Instagram,
 	// PROTOCOLE.md §5.12), rejouée après la présence.
@@ -114,7 +118,7 @@ func trouverPont(nom, variable, binDir string) string {
 // nouveauPont prépare le pont d'un service, comme src/pont.rs le ferait.
 func nouveauPont(srv *Serveur, svc, binDir string) (*Pont, error) {
 	p := &Pont{
-		svc: svc, srv: srv, dernier: map[string][]byte{}, demandes: map[string]demande{}, presence: map[string][]byte{},
+		svc: svc, srv: srv, dernier: map[string][]byte{}, demandes: map[string]demande{}, presence: map[string][]byte{}, avatars: map[string][]byte{},
 		prechargeFini: make(chan struct{}, 1), aPrecharger: make(chan struct{}, 1),
 	}
 	switch svc {
@@ -285,6 +289,7 @@ func (p *Pont) recu(ligne []byte) {
 		if tete.State == "unpaired" {
 			// Plus de compte : ses listes et ses messages partent.
 			p.cache.vider()
+			p.avatars = map[string][]byte{}
 		}
 	case "paired":
 		delete(p.dernier, "qr")
@@ -310,6 +315,24 @@ func (p *Pont) recu(ligne []byte) {
 		}
 		if !archive && p.pret {
 			p.declencher()
+		}
+	case "avatar", "sender_avatar":
+		var av struct {
+			Conv string `json:"conv"`
+			ID   string `json:"id"`
+		}
+		if json.Unmarshal(ligne, &av) != nil {
+			return
+		}
+		cle := "c:" + av.Conv
+		if tete.Ev == "sender_avatar" {
+			cle = "s:" + av.ID
+		}
+		if cle == "c:" || cle == "s:" {
+			break
+		}
+		if _, ok := p.avatars[cle]; ok || len(p.avatars) < avatarsMax {
+			p.avatars[cle] = trame
 		}
 	case "presence":
 		if !srv.marques.PresenceEnLigne {
@@ -444,7 +467,11 @@ func (p *Pont) rejeu() [][]byte {
 	for _, l := range p.cache.listesRejeu() {
 		r = append(r, emballer(p.svc, l))
 	}
-	// La présence, après les listes (le client connaît alors les conversations).
+	// Les avatars et la présence, après les listes (le client connaît alors
+	// les conversations).
+	for _, t := range p.avatars {
+		r = append(r, t)
+	}
 	for _, t := range p.presence {
 		r = append(r, t)
 	}
@@ -453,6 +480,9 @@ func (p *Pont) rejeu() [][]byte {
 	}
 	return r
 }
+
+// avatarsMax : au plus autant d'avatars gardés pour le rejeu, par pont.
+const avatarsMax = 5000
 
 // presenceMax : au plus autant de conversations suivies par pont.
 const presenceMax = 500
