@@ -528,8 +528,12 @@ private fun Liste(
             if (bannieresVisibles()) item(key = "bannieres") { Bannieres { reglages(SectionReglages.COMPTES) } }
             if (vue == Vue.Tout && accueilVisible()) item { Accueil(serveur, connecter) }
             // Les puces des services (Tout, puis chacun) : la vue par service sur écran étroit
-            // (sur grand écran, le rail a une tuile par service).
-            if (!large && f.isEmpty() && (vue == Vue.Tout || vue is Vue.DuService) && servicesConnectes().size > 1) {
+            // (sur grand écran, le rail a une tuile par service). Cachées au repos : elles
+            // apparaissent avec la recherche (tirer la liste vers le bas, ou la loupe), et
+            // restent tant qu'un service est choisi, pour pouvoir revenir à « Tout ».
+            if (!large && f.isEmpty() && (rechercheOuverte || vue is Vue.DuService) &&
+                (vue == Vue.Tout || vue is Vue.DuService) && servicesConnectes().size > 1
+            ) {
                 item(key = "puces") { PucesInbox(vue, choisirVue) }
             }
             val vide = when {
