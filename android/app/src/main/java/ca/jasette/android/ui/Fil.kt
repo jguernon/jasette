@@ -916,6 +916,8 @@ private fun Reactions(m: Msg, modifier: Modifier, toucher: () -> Unit) {
 private fun PieceImage(p: Piece, envoi: Boolean, appuiLong: () -> Unit, agrandir: (String) -> Unit) {
     val vignette = Depot.vignettes[p.mediaId]
     val chemin = if (p.estImage) Depot.medias[p.mediaId] else vignette
+    // À l'écran (la liste ne compose que ce qui est visible, ou presque) : on la demande.
+    if (p.estImage && chemin == null) LaunchedEffect(p.mediaId) { Depot.telecharger(p) }
     val ratio = if (p.w > 0 && p.h > 0) (p.w.toFloat() / p.h).coerceIn(0.5f, 2.5f) else 1.3f
     val cadre = Modifier.widthIn(max = 260.dp).fillMaxWidth(0.7f).aspectRatio(ratio)
         .let {
@@ -1439,7 +1441,6 @@ private fun Galerie(liste: List<Msg>, fermer: () -> Unit, agrandir: (String) -> 
     val pieces = liste.asReversed().flatMap { it.attachments }.distinctBy { it.mediaId }
     val images = pieces.filter { it.estImage }
     val autres = pieces.filter { !it.estImage }
-    LaunchedEffect(images.size) { images.forEach { Depot.telecharger(it) } }
     Dialog(onDismissRequest = fermer, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Scaffold(
             modifier = Modifier.fondFenetre(),
@@ -1466,6 +1467,8 @@ private fun Galerie(liste: List<Msg>, fermer: () -> Unit, agrandir: (String) -> 
             ) {
                 items(images, key = { it.mediaId }) { p ->
                     val chemin = Depot.medias[p.mediaId]
+                    // Seulement les vignettes à l'écran (la grille est paresseuse).
+                    if (chemin == null) LaunchedEffect(p.mediaId) { Depot.telecharger(p) }
                     val cadre = Modifier.aspectRatio(1f).carte(6.dp)
                     if (chemin != null) {
                         ImageFichier(chemin, cadre.clickable { agrandir(chemin) }, cote = 384)

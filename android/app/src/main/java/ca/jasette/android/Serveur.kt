@@ -366,6 +366,8 @@ class ConnexionServeur(
     private val ecrivain: ExecutorService = Executors.newSingleThreadExecutor { Thread(it, "serveur-ecriture") }
     // Les événements : réécriture des chemins (téléchargements) puis remise, dans l'ordre.
     private val traitement: ExecutorService = Executors.newSingleThreadExecutor { Thread(it, "serveur-evenements") }
+    // Les pièces jointes (`media`) à part : un message n'attend jamais derrière des images.
+    private val traitementMedias: ExecutorService = Executors.newSingleThreadExecutor { Thread(it, "serveur-medias") }
 
     init {
         Thread(::boucle, "serveur-connexion").start()
@@ -403,6 +405,7 @@ class ConnexionServeur(
         lienCourant()?.fermer()
         ecrivain.shutdown()
         traitement.shutdown()
+        traitementMedias.shutdown()
     }
 
     private fun vers(svc: String, ev: JSONObject) {
@@ -589,6 +592,14 @@ class ConnexionServeur(
             v.has("svc") -> {
                 val svc = v.chaine("svc")
                 val ev = v.optJSONObject("ev") ?: return
+                if (estMedia(ev)) {
+                    executer(traitementMedias) {
+                        if (!abonnes.containsKey(svc)) return@executer
+                        reecrireMedia(ev)
+                        vers(svc, ev)
+                    }
+                    return
+                }
                 executer(traitement) {
                     if (!abonnes.containsKey(svc)) return@executer
                     reecrire(ev)
@@ -614,6 +625,22 @@ class ConnexionServeur(
                     ?: v.optJSONObject("apercu") ?: return
                 attentes[r.optLong("id", -1)]?.offer(r)
             }
+        }
+    }
+
+    private fun estMedia(ev: JSONObject) = ev.optString("ev") == "media" && ev.optString("path").startsWith("/")
+
+    /**
+     * Un `media` : le fichier copié ici ; s'il n'a pas pu l'être, l'événement
+     * devient un échec (pas de chemin du serveur gardé, pas de nouvelle demande d'elle-même).
+     */
+    private fun reecrireMedia(ev: JSONObject) {
+        val local = telecharger(ev.optString("path"))
+        if (local != null) {
+            ev.put("path", local.path)
+        } else {
+            ev.remove("path")
+            ev.put("error", "fichier du serveur non reçu")
         }
     }
 

@@ -1023,7 +1023,6 @@ object Depot {
                 // Le serveur Jasette répond d'abord depuis son propre cache (`cache:true`),
                 // puis le service répond pour de vrai : les deux se fusionnent pareil.
                 val duCache = v.optBoolean("cache")
-                telechargerImages(items)
                 val liste = messages[conv].orEmpty()
                 if (older) {
                     messages[conv] = items.filter { m -> liste.none { it.id == m.id } } + liste
@@ -1089,7 +1088,6 @@ object Depot {
     }
 
     private fun recevoirMessage(m: Msg) {
-        telechargerImages(listOf(m))
         if (m.tmpId.isNotEmpty()) envois.remove(m.tmpId)
         reactionsAvant.remove(m.id)
         val ouverteIci = ouverte == m.conv && visible
@@ -1543,19 +1541,21 @@ object Depot {
         reactionsAvant.clear()
     }
 
-    private fun telechargerImages(msgs: List<Msg>) {
-        for (m in msgs) for (p in m.attachments) {
-            if (p.estImage) telecharger(p)
-        }
-    }
-
-    fun telecharger(p: Piece) {
-        if (p.mediaId.isEmpty() || medias.containsKey(p.mediaId) || echecs.containsKey(p.mediaId)) return
-        if (!demandes.add(p.mediaId)) return
-        telechargements[p.mediaId] = true
-        commande(
-            JSONObject().put("cmd", "download").put("media_id", p.mediaId).put("key", p.key).put("mime", p.mime),
-        )
+    /**
+     * Demande une pièce au pont. Les images ne sont demandées que quand elles
+     * paraissent à l'écran (PieceImage, Galerie) : rien pour les fils fermés ni
+     * l'historique hors écran. Un échec n'est pas redemandé de lui-même
+     * ([aDemanderMedia]) ; [ouvrirPiece] le réessaie. [original] : la pleine
+     * résolution (Discord ne donne sinon qu'une vignette).
+     */
+    fun telecharger(p: Piece, original: Boolean = false) {
+        val id = p.mediaId
+        if (!aDemanderMedia(id, medias.containsKey(id), id in demandes, echecs.containsKey(id))) return
+        demandes.add(id)
+        telechargements[id] = true
+        val cmd = JSONObject().put("cmd", "download").put("media_id", id).put("key", p.key).put("mime", p.mime)
+        if (original) cmd.put("full", true)
+        commande(cmd)
     }
 
     /**
@@ -1581,7 +1581,7 @@ object Depot {
         echecs.remove(id)
         ouvrirApres.add(id)
         piecesOuvertes[id] = p
-        telecharger(p)
+        telecharger(p, original = true)
     }
 
     /** Les pièces demandées par [ouvrirPiece] (leur type et leur nom, pour l'Intent). */
