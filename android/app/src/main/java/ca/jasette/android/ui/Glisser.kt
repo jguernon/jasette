@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxState
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -107,7 +108,18 @@ fun RangeeGlissable(
     val densite = LocalDensity.current
     var confirmer by remember { mutableStateOf(false) }
     // Le seuil : un bon tiers de la largeur, pour ne rien déclencher par mégarde.
-    val etat = rememberSwipeToDismissBoxState(positionalThreshold = { it * 0.38f })
+    // Pas de rememberSwipeToDismissBoxState : il est « saveable », et la liste
+    // le restaurait en position « glissée » quand la rangée revenait (archivée
+    // puis désarchivée) : le geste se redéclenchait tout seul, en boucle.
+    // Un état neuf à chaque apparition, toujours au repos.
+    val etat = remember(c.id, dansArchives) {
+        SwipeToDismissBoxState(SwipeToDismissBoxValue.Settled, densite, positionalThreshold = { it * 0.38f })
+    }
+    // Vrai seulement pendant un vrai geste du doigt (pas une restauration).
+    var aGlisse by remember(c.id, dansArchives) { mutableStateOf(false) }
+    LaunchedEffect(etat) {
+        snapshotFlow { etat.dismissDirection }.collect { if (it != SwipeToDismissBoxValue.Settled) aGlisse = true }
+    }
 
     // Un petit coup au moment où le seuil est franchi (pas au retour en deçà).
     LaunchedEffect(etat) {
@@ -159,6 +171,8 @@ fun RangeeGlissable(
         enableDismissFromStartToEnd = droite != ActionGeste.RIEN,
         enableDismissFromEndToStart = gauche != ActionGeste.RIEN,
         onDismiss = { v ->
+            if (!aGlisse) { remettre(); return@SwipeToDismissBox }
+            aGlisse = false
             when (v) {
                 SwipeToDismissBoxValue.StartToEnd -> agir(droite)
                 SwipeToDismissBoxValue.EndToStart -> agir(gauche)
