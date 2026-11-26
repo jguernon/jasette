@@ -2,7 +2,8 @@ package main
 
 // « Quoi de neuf ? » : la partie commune à tous les ponts (PROTOCOLE.md, §5.12).
 // Ce fichier est copié tel quel dans chaque pont qui publie une note
-// (pont-ig, pont-meta, pont-wa, pont-telegram, pont-bluesky) : le modifier
+// (pont-ig, pont-meta, pont-wa, pont-telegram, pont-bluesky, pont-discord) :
+// le modifier
 // partout à la fois.
 //
 // Le pont garde ma note actuelle dans <données>/<service>/notes-etat.json
