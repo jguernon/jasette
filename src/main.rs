@@ -17,6 +17,7 @@ mod cache;
 mod pont;
 mod prive;
 mod mood;
+mod nouveau;
 mod maj;
 mod retro;
 mod presence;
@@ -2007,6 +2008,10 @@ struct Jasette {
     banniere_fermee: bool,
     recherche: Entity<InputState>,
     numero: Entity<InputState>,
+    /// « Nouveau message » : la puce de service, le mode groupe, les personnes
+    /// choisies (src/nouveau.rs), et le nom du groupe.
+    choix_nouveau: nouveau::ChoixNouveau,
+    nom_groupe: Entity<InputState>,
     /// Serveur Jasette : une opération en cours, le code pour jumeler un
     /// appareil (code, vérification), les appareils jumelés, la vérification
     /// d'un serveur à confirmer (mode client), et les champs du jumelage.
@@ -2624,6 +2629,7 @@ impl Jasette {
         })
         .detach();
         let numero = cx.new(|cx| InputState::new(window, cx).placeholder(t("Nom ou numéro de téléphone")));
+        let nom_groupe = cx.new(|cx| InputState::new(window, cx).placeholder(t("Nom du groupe (facultatif)")));
         // WhatsApp : « Associer avec un numéro de téléphone » (Entrée envoie).
         let telephone_wa = cx.new(|cx| InputState::new(window, cx).placeholder(t("Numéro, ex. : +1 514 555 1234")));
         cx.subscribe_in(&telephone_wa, window, |this, _state, ev: &InputEvent, _window, cx| {
@@ -2692,25 +2698,16 @@ impl Jasette {
             if let InputEvent::Change = ev {
                 let texte = state.read(cx).value().trim().to_string();
                 if texte != this.nouveau_texte {
-                    this.nouveau_texte = texte.clone();
-                    this.resultats_meta.clear();
-                    // Messenger cherche parmi tes amis et contacts ; Google, dans les contacts du téléphone.
-                    if texte.chars().count() >= 2 && !est_numero(&texte) {
-                        if this.etat == Etat::Pret {
-                            this.commande(json!({"cmd": "search", "text": texte}));
-                        }
-                        for svc in SERVICES_META {
-                            if this.meta(svc).etat == Etat::Pret {
-                                this.commande_svc(svc, json!({"cmd": "search", "text": texte}));
-                            }
-                        }
-                    }
+                    this.nouveau_texte = texte;
+                    // Messenger cherche parmi tes amis et contacts ; Google, dans les
+                    // contacts du téléphone ; seulement le service de la puce choisie.
+                    this.chercher_nouveau();
                     cx.notify();
                 }
             }
             if let InputEvent::PressEnter { .. } = ev {
                 let n = state.read(cx).value().trim().to_string();
-                if !n.is_empty() {
+                if !n.is_empty() && !this.choix_nouveau.groupe {
                     this.commande(json!({"cmd": "new", "number": n}));
                     this.nouveau_ouvert = false;
                     this.numero.update(cx, |s, cx| s.set_value("", window, cx));
@@ -2928,6 +2925,8 @@ impl Jasette {
             banniere_fermee: false,
             recherche,
             numero,
+            choix_nouveau: nouveau::ChoixNouveau::default(),
+            nom_groupe,
             filtre: String::new(),
             saisie,
             defile: ScrollHandle::new(),
@@ -5598,10 +5597,7 @@ impl Jasette {
                     )))
                     .child(Self::bouton_icone("f-nouveau", "square-pen", self.nouveau_ouvert).on_click(cx.listener(
                         |this, _, window, cx| {
-                            this.nouveau_ouvert = !this.nouveau_ouvert;
-                            if this.nouveau_ouvert {
-                                this.numero.update(cx, |s, cx| s.focus(window, cx));
-                            }
+                            this.basculer_nouveau(window, cx);
                             cx.notify();
                         },
                     ))),
@@ -5624,6 +5620,9 @@ impl Jasette {
         if self.nouveau_ouvert {
             col = col.child(champ(&self.numero, "pen-line"));
             haut += 46.;
+            let (entete, h) = self.entete_nouveau(cx);
+            col = col.child(entete);
+            haut += h;
             let (suggestions, n) = self.suggestions(cx);
             if n > 0 {
                 col = col.child(suggestions);
@@ -5823,140 +5822,6 @@ impl Jasette {
                 self.marques_changees();
             }
         }
-    }
-
-    /// Les choix sous « nouveau message » : conversations existantes (tous les
-    /// comptes), personnes trouvées sur Messenger, ou SMS au numéro tapé.
-    fn suggestions(&self, cx: &mut Context<Self>) -> (Div, usize) {
-        let q = plier(&self.nouveau_texte);
-        let mut boite = div().flex().flex_col().px(px(8.)).pb(px(10.));
-        let mut n = 0;
-        if q.is_empty() {
-            return (boite, 0);
-        }
-        let ligne = |id: SharedString, nom: String, detail: String, service: Service, photo: Option<&PathBuf>| {
-            div()
-                .id(id)
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(px(10.))
-                .px(px(8.))
-                .h(px(50.))
-                .rounded(rayon(12.))
-                .cursor_pointer()
-                .hover(|s| s.bg(th().survol))
-                .child(
-                    div()
-                        .relative()
-                        .child(avatar(&nom, "", false, photo, 36.))
-                        .child(div().absolute().right(px(-3.)).bottom(px(-3.)).child(logo(service, 15.))),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .min_w(px(0.))
-                        .child(div().truncate().text_color(th().texte_fort).child(nom))
-                        .child(div().truncate().text_size(px(12.)).text_color(th().texte_pale).child(detail)),
-                )
-        };
-        // Les conversations qui existent déjà.
-        let existantes: Vec<&Conv> = self
-            .convs
-            .iter()
-            .chain(self.archives.iter())
-            .filter(|c| !c.group && !self.privee(&c.id) && (plier(&c.name).contains(&q) || c.members.iter().any(|m| plier(m).contains(&q))))
-            .take(4)
-            .collect();
-        for c in existantes {
-            let id = c.id.clone();
-            let s = service_de(&c.id);
-            boite = boite.child(
-                ligne(SharedString::from(format!("sugg-{}", c.id)), c.name.clone(), s.nom().into(), s, self.photo_conv(c))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.nouveau_ouvert = false;
-                        this.numero.update(cx, |s, cx| s.set_value("", window, cx));
-                        this.vue = Vue::Tout;
-                        this.galerie = None;
-                        this.choisir(id.clone());
-                        cx.notify();
-                    })),
-            );
-            n += 1;
-        }
-        // Les personnes trouvées par Messenger, sans conversation ici.
-        for (id, nom) in self.resultats_meta.iter().take(8) {
-            if self.conv(id).is_some() {
-                continue;
-            }
-            let svc = service_de(id);
-            let fbid = id[svc.prefixe().len()..].to_string();
-            let detail = match svc {
-                Service::Instagram => t("Nouvelle conversation Instagram").to_string(),
-                Service::GoogleMessages => format!("{} · {id}", t("Contact")),
-                Service::WhatsApp => t("Nouvelle conversation WhatsApp").to_string(),
-                Service::Signal => t("Nouvelle conversation Signal").to_string(),
-                Service::X => t("Nouvelle conversation X").to_string(),
-                Service::Telegram => t("Nouvelle conversation Telegram").to_string(),
-                Service::Bluesky => t("Nouvelle conversation Bluesky").to_string(),
-                Service::Messenger => t("Nouvelle conversation Messenger").to_string(),
-            };
-            // Un contact du téléphone : sa photo, s'il en a une.
-            let photo = if svc == Service::GoogleMessages { cle_numero(id).and_then(|k| self.photos_numeros.get(&k)) } else { None };
-            boite = boite.child(
-                ligne(SharedString::from(format!("sugg-{id}")), nom.clone(), detail.into(), svc, photo)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        if svc == Service::GoogleMessages {
-                            this.commande(json!({"cmd": "new", "number": fbid}));
-                        } else {
-                            this.commande_svc(svc, json!({"cmd": "new", "number": fbid}));
-                        }
-                        this.nouveau_ouvert = false;
-                        this.numero.update(cx, |s, cx| s.set_value("", window, cx));
-                        cx.notify();
-                    })),
-            );
-            n += 1;
-        }
-        // Un numéro : un SMS par Google Messages.
-        if est_numero(&self.nouveau_texte) && self.etat.associe() {
-            let numero = self.nouveau_texte.clone();
-            boite = boite.child(
-                ligne("sugg-sms".into(), numero.clone(), t("Nouveau message par Google Messages").into(), Service::GoogleMessages, None)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.commande(json!({"cmd": "new", "number": numero}));
-                        this.nouveau_ouvert = false;
-                        this.numero.update(cx, |s, cx| s.set_value("", window, cx));
-                        cx.notify();
-                    })),
-            );
-            n += 1;
-        }
-        // Un numéro (avec l'indicatif) : WhatsApp et Signal savent aussi l'ouvrir.
-        if est_numero(&self.nouveau_texte) {
-            for svc in [Service::WhatsApp, Service::Signal] {
-                if self.meta(svc).etat != Etat::Pret {
-                    continue;
-                }
-                let numero = self.nouveau_texte.clone();
-                let (id, texte) = if svc == Service::WhatsApp {
-                    ("sugg-wa", t("Nouveau message par WhatsApp"))
-                } else {
-                    ("sugg-signal", t("Nouveau message par Signal"))
-                };
-                boite = boite.child(ligne(id.into(), numero.clone(), texte.into(), svc, None).on_click(cx.listener(
-                    move |this, _, window, cx| {
-                        this.commande_svc(svc, json!({"cmd": "new", "number": numero}));
-                        this.nouveau_ouvert = false;
-                        this.numero.update(cx, |s, cx| s.set_value("", window, cx));
-                        cx.notify();
-                    },
-                )));
-                n += 1;
-            }
-        }
-        (boite, n)
     }
 
     /// Le Head : la grille d'avatars en tête de liste (Inbox, sans recherche
@@ -12313,6 +12178,14 @@ fn t(fr: &'static str) -> &'static str {
         "Nouvelle conversation X" => "New X chat",
         "Nouveau message par WhatsApp" => "New message via WhatsApp",
         "Nouveau message par Signal" => "New message via Signal",
+        "Tout" => "All",
+        "Créer un groupe" => "Create a group",
+        "Créer" => "Create",
+        "Un groupe reste sur un seul service" => "A group stays on a single service",
+        "Pas encore offert pour ce service" => "Not offered yet for this service",
+        "Nom du groupe (facultatif)" => "Group name (optional)",
+        "Choisis au moins deux personnes" => "Pick at least two people",
+        "Choisis les personnes du groupe" => "Pick the people for the group",
         "Supprimer : pas encore pour ce service." => "Delete: not yet for this service.",
         "Connectez-vous dans la fenêtre x.com…" => "Sign in in the x.com window…",
         "Association en cours…" => "Pairing…",
