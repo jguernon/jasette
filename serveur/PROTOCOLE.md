@@ -966,10 +966,10 @@ l'offrent pas ; Signal non plus pour l'instant (signalmeow ne sait pas
 | `whatsapp` | `pont-wa` | « Infos » (`SetStatusMessage`, éphémère 24 h) | 139 caractères | 24 h |
 | `telegram` | `pont-telegram` | bio (`account.updateProfile about`) | 70 caractères | jusqu'à l'effacement |
 | `bluesky` | `pont-bluesky` | description du profil (`app.bsky.actor.profile`) | 256 caractères | jusqu'à l'effacement |
-| `discord` | `pont-discord` | statut personnalisé | 128 caractères | jusqu'à l'effacement |
+| `discord` | `pont-discord` | statut personnalisé (`PATCH /users/@me/settings`, `custom_status`) | 128 caractères | jusqu'à l'effacement |
 
 (caractères = points de code Unicode.) Pour les services où c'est une bio
-(WhatsApp, Telegram, Bluesky), le pont **garde l'ancienne valeur** avant la
+ou un statut durable (WhatsApp, Telegram, Bluesky, Discord), le pont **garde l'ancienne valeur** avant la
 première note et la **remet** à l'effacement.
 
 **Commandes** (à chaque service choisi, une trame par service ; le client
@@ -1041,6 +1041,10 @@ le relaie plus.
 **Le serveur** relaie les commandes au pont du service, garde le dernier
 `note_moi` de chaque service et la dernière liste `notes` (rejoués), et
 relaie `note_result` à tous les clients.
+
+Discord : le pont reste « invisible » (aucune présence envoyée) ; le statut
+personnalisé se voit quand le compte est en ligne ailleurs (téléphone,
+ordinateur).
 
 **Les `doc_id` de Meta** (Instagram, Messenger) : valeurs par défaut dans
 le code, remplaçables **sans recompiler** par

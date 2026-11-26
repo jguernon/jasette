@@ -20,7 +20,7 @@ object Notes {
     )
 
     /** Ceux où la note remplace une bio (le pont remet l'ancienne à l'effacement). */
-    val BIOS = setOf("whatsapp", "telegram", "bluesky")
+    val BIOS = setOf("whatsapp", "telegram", "bluesky", "discord")
 
     /** Ma note sur un service (`note_moi`) ; [mainText] : la note écrite à la main mise de côté par la musique. */
     data class NoteMoi(

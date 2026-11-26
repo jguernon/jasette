@@ -63,6 +63,9 @@ type Pont struct {
 	cdn  throttle // cdn.discordapp.com (images, pièces jointes)
 
 	events chan any
+
+	// « Quoi de neuf ? » (notes.go).
+	notes *notesPont
 }
 
 func newPont(ctx context.Context) *Pont {
@@ -83,6 +86,7 @@ func newPont(ctx context.Context) *Pont {
 		cdn:        throttle{gap: 150 * time.Millisecond},
 		events:     make(chan any, 8192),
 	}
+	p.notes = nouvellesNotesDiscord(p)
 	go p.eventLoop()
 	return p
 }
@@ -459,6 +463,7 @@ func (p *Pont) onReady(r *discordgo.Ready, sf *sessionFile) {
 	}
 	p.emitAccount()
 	emitState("ready")
+	go p.notes.annoncer()
 	go p.myAvatar()
 }
 

@@ -11,8 +11,8 @@ use super::*;
 
 /// Les services qui savent publier une note, dans l'ordre de l'écran.
 /// Discord (statut personnalisé, 128 caractères) s'ajoutera ici avec son pont.
-pub(crate) const SERVICES_NOTES: [Service; 5] =
-    [Service::Instagram, Service::Messenger, Service::WhatsApp, Service::Telegram, Service::Bluesky];
+pub(crate) const SERVICES_NOTES: [Service; 6] =
+    [Service::Instagram, Service::Messenger, Service::WhatsApp, Service::Telegram, Service::Bluesky, Service::Discord];
 
 /// La longueur maximale d'une note sur un service (points de code).
 pub(crate) fn limite(s: Service) -> usize {
@@ -21,6 +21,7 @@ pub(crate) fn limite(s: Service) -> usize {
         Service::WhatsApp => 139,
         Service::Telegram => 70,
         Service::Bluesky => 256,
+        Service::Discord => 128,
         _ => 60,
     }
 }
@@ -33,6 +34,7 @@ fn ce_qui_change(s: Service) -> &'static str {
         Service::WhatsApp => tr("Infos du profil · 24 h", "Profile About · 24 h"),
         Service::Telegram => tr("Bio du profil, jusqu'à l'effacement", "Profile bio, until cleared"),
         Service::Bluesky => tr("Description du profil (bio), jusqu'à l'effacement", "Profile description (bio), until cleared"),
+        Service::Discord => tr("Statut personnalisé, jusqu'à l'effacement", "Custom status, until cleared"),
         _ => "",
     }
 }
