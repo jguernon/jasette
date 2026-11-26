@@ -5679,12 +5679,9 @@ impl Jasette {
         let non_lus = self.non_lus();
         let non_lus_groupes = self.non_lus_groupes();
         let gm_probleme = !matches!(self.etat, Etat::Pret | Etat::Demarrage);
-        // Google garde sa pastille de la boîte ; caché, il montre ses propres non-lues.
-        let non_lus_gm = if self.reglages.service_cache(Service::GoogleMessages) {
-            self.non_lus_service(Service::GoogleMessages)
-        } else {
-            non_lus
-        };
+        // Chaque pastille compte ce qu'elle montre : la tuile Google, ses
+        // conversations seulement (jamais celles des autres services).
+        let non_lus_gm = self.non_lus_service(Service::GoogleMessages);
         let initiale = self
             .reglages
             .email

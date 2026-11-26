@@ -477,6 +477,33 @@ mod essais {
     }
 
     #[test]
+    fn service_de_tous_les_ids() {
+        for (id, svc) in [
+            ("33612345678", Service::GoogleMessages),
+            ("m:123", Service::Messenger),
+            ("i:123", Service::Instagram),
+            ("w:1@g.us", Service::WhatsApp),
+            ("s:abc", Service::Signal),
+            ("x:1-2", Service::X),
+            ("t:c7003", Service::Telegram),
+            ("b:did", Service::Bluesky),
+            ("d:123", Service::Discord),
+            ("d:g1:2", Service::Discord),
+            ("d:g1", Service::Discord),
+        ] {
+            assert!(service_de(id) == svc, "{id}");
+        }
+        // Les ids d'un pont Discord arrivent préfixés, salons et parents compris.
+        let mut l = serde_json::json!({"ev": "conversations", "items": [{"id": "g1:2", "parent": "g1"}, {"id": "123"}]});
+        prefixer_meta(&mut l, Service::Discord);
+        assert_eq!(l["items"][0]["id"], "d:g1:2");
+        assert_eq!(l["items"][1]["id"], "d:123");
+        let mut a = serde_json::json!({"ev": "avatar", "conv": "g1", "path": "/x.png"});
+        prefixer_meta(&mut a, Service::Discord);
+        assert!(service_de(a["conv"].as_str().unwrap()) == Service::Discord);
+    }
+
+    #[test]
     fn boite_et_groupes() {
         let salon = conv(serde_json::json!({"id": "d:g5:11", "name": "général", "large": true, "kind": "server", "parent": "g5"}));
         let groupe = conv(serde_json::json!({"id": "w:1@g.us", "name": "Chalet", "group": true}));

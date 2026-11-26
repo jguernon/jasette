@@ -35,6 +35,17 @@ class GroupesTest {
     )
 
     @Test
+    fun serviceDeTousLesIds() {
+        assertEquals(Service.GOOGLE, Service.de("33612345678"))
+        assertEquals(Service.DISCORD, Service.de("d:123"))
+        assertEquals(Service.DISCORD, Service.de("d:g1:2"))
+        assertEquals(Service.DISCORD, Service.de("d:g1"))
+        assertEquals(Service.TELEGRAM, Service.de("t:c7003"))
+        assertEquals(Service.WHATSAPP, Service.de("w:1@g.us"))
+        assertEquals(Service.MESSENGER, Service.de("m:2101"))
+    }
+
+    @Test
     fun regleDeLaBoite() {
         // Sans `large` : toujours dans la boîte de réception.
         assertTrue(dansBoiteDeReception(conv("w:1", large = false)))
