@@ -216,6 +216,25 @@ object Marques {
     }
 
     /**
+     * L'ordre des services choisi dans Réglages → Comptes → « Dans la boîte de
+     * réception » (leurs clés ; vide : l'ordre par défaut), appliqué partout par
+     * `Depot.services` (voir [Service.ordonnes]). Une marque (`ordre_services`,
+     * §5.5) partagée par le serveur Jasette comme l'ordre des favoris, gardée
+     * ici sinon (mode autonome, serveur d'avant la marque). L'ordre choisi avant
+     * le partage (préférences « affichage ») est repris par [charger] et envoyé
+     * une fois au serveur qui n'en a pas ([recu]).
+     */
+    var ordreServices by mutableStateOf<List<String>>(emptyList())
+        private set
+
+    fun choisirOrdreServices(l: List<String>) {
+        val n = nettoyerOrdreServices(l)
+        if (n == ordreServices) return
+        ordreServices = n
+        changement()
+    }
+
+    /**
      * La fiche de la personne (Personnes.kt) : les conversations reliées à la
      * main (marque `personnes`) et les refus « Pas la même personne » (marque
      * `personnes_refus`), partagés par le serveur Jasette.
@@ -359,6 +378,19 @@ object Marques {
         notesServices = try {
             servicesNotes(JSONArray(p.getString("notes_services", "[\"tout\"]") ?: "[]").chaines())
         } catch (_: Exception) { listOf("tout") }
+        ordreServices = if (p.contains("ordre_services")) {
+            try {
+                nettoyerOrdreServices(JSONArray(p.getString("ordre_services", "[]") ?: "[]").chaines())
+            } catch (_: Exception) { emptyList() }
+        } else {
+            // L'ordre d'avant le partage (ServicesCaches, préférences « affichage »,
+            // clés séparées par des virgules) : repris tel quel, envoyé au serveur
+            // s'il n'en a pas (voir [recu]).
+            nettoyerOrdreServices(
+                ctx.applicationContext.getSharedPreferences("affichage", Context.MODE_PRIVATE)
+                    .getString("ordre_services", "").orEmpty().split(','),
+            )
+        }
         personnes = try {
             Personnes.lire(JSONArray(p.getString("personnes", "[]") ?: "[]"))
         } catch (_: Exception) { emptyList() }
@@ -438,6 +470,7 @@ object Marques {
             ?.putString("notes_musique", notesMusique)
             ?.putString("notes_musique_format", notesMusiqueFormat)
             ?.putString("notes_services", JSONArray(notesServices).toString())
+            ?.putString("ordre_services", JSONArray(ordreServices).toString())
             ?.putString("personnes", Personnes.json(personnes).toString())
             ?.putString("personnes_refus", Personnes.jsonRefus(personnesRefus).toString())
             ?.putString("contacts_perso", ContactsPerso.json(contactsPerso).toString())
@@ -580,11 +613,12 @@ object Marques {
         val personnes: List<Personne> = emptyList(),
         val personnesRefus: List<Refus> = emptyList(),
         val contactsPerso: Map<String, ContactPerso> = emptyMap(),
+        val ordreServices: List<String> = emptyList(),
     ) {
         fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty() && privees.isEmpty() &&
             moods.isEmpty() && emojis.isEmpty() && !garderArchives && cacherApresJours == 0 && presenceEnLigne &&
             sons == "bulle" && notesContacts && notesMusique.isEmpty() && notesMusiqueFormat == "artiste" && notesServices == listOf("tout") &&
-            personnes.isEmpty() && personnesRefus.isEmpty() && contactsPerso.isEmpty()
+            personnes.isEmpty() && personnesRefus.isEmpty() && contactsPerso.isEmpty() && ordreServices.isEmpty()
 
         /** Chaque liste de this, dans son ordre, puis les ids de [b] qui n'y sont pas. */
         fun union(b: Listes) = Listes(
@@ -612,6 +646,8 @@ object Marques {
             Personnes.nettoyerRefus(personnesRefus + b.personnesRefus),
             // Comme les moods : les entrées de this gagnent.
             ContactsPerso.nettoyer(b.contactsPerso + contactsPerso),
+            // L'ordre des services : celui de this ; vide (jamais choisi), celui de [b].
+            ordreServices.ifEmpty { b.ordreServices },
         )
 
         /** Les ids de this absents de [b], liste par liste. */
@@ -631,6 +667,7 @@ object Marques {
             personnes.filter { it !in b.personnes },
             personnesRefus.filter { it !in b.personnesRefus },
             contactsPerso.filter { (k, v) -> b.contactsPerso[k] != v },
+            ordreServices,
         )
     }
 
@@ -639,7 +676,7 @@ object Marques {
             head.toList(), favoris.toList(), epingles.toList(), archives.toList(), privees.toList(), moods.toMap(), emojis.toMap(),
             garderArchives, cacherApresJours, presenceEnLigne, sonsConversation,
             notesContacts, notesMusique, notesMusiqueFormat, notesServices,
-            personnes, personnesRefus, contactsPerso,
+            personnes, personnesRefus, contactsPerso, ordreServices,
         )
 
     private fun poser(l: Listes) {
@@ -671,6 +708,7 @@ object Marques {
         personnes = l.personnes
         personnesRefus = l.personnesRefus
         contactsPerso = l.contactsPerso
+        ordreServices = l.ordreServices
     }
 
     /** Envoie une trame au serveur ; faux si la connexion est coupée. Posé par [Depot] en mode client. */
@@ -720,6 +758,7 @@ object Marques {
             .put("personnes", Personnes.json(l.personnes))
             .put("personnes_refus", Personnes.jsonRefus(l.personnesRefus))
             .put("contacts_perso", ContactsPerso.json(l.contactsPerso))
+            .put("ordre_services", JSONArray(l.ordreServices))
             .put("version", version).put("id", prochain)
         if (!envoi(JSONObject().put("marques", corps))) {
             // La connexion tombe : le rejeu suivant tranchera.
@@ -770,6 +809,8 @@ object Marques {
             m.optJSONArray("personnes_refus")?.let { Personnes.lireRefus(it) } ?: personnesRefus,
             // Et pour les contacts perso (serveur d'avant le crayon de la fiche) : les nôtres restent.
             m.optJSONObject("contacts_perso")?.let { ContactsPerso.lire(it) } ?: contactsPerso,
+            // Et pour l'ordre des services (serveur d'avant `ordre_services`) : le nôtre reste.
+            m.optJSONArray("ordre_services")?.let { nettoyerOrdreServices(it.chaines()) } ?: ordreServices,
         )
         val v = m.optLong("version", -1)
         if (v < 0) return
@@ -806,8 +847,10 @@ object Marques {
                 version = 0
                 aEnvoyer = !listes().vide()
             }
-            // Rien de changé ici : le serveur est la source.
-            !aEnvoyer && version in 1L..v -> {
+            // Rien de changé ici : le serveur est la source. Sauf l'ordre des
+            // services choisi ici avant qu'il soit partagé, quand le serveur n'en
+            // a pas encore : l'union (plus bas) le garde et l'envoie, une fois.
+            !aEnvoyer && version in 1L..v && !(s.ordreServices.isEmpty() && ordreServices.isNotEmpty()) -> {
                 poser(s)
                 version = v
             }
@@ -842,6 +885,13 @@ fun servicesNotes(l: List<String>): List<String> {
     val n = l.filter { it.isNotEmpty() && it.toByteArray().size <= 32 }.distinct().take(32)
     return if (n.isEmpty() || "tout" in n) listOf("tout") else n
 }
+
+/**
+ * `ordre_services` normalisé comme par le serveur (PROTOCOLE.md §5.5) : les
+ * clés, sans doublon ni clé vide, 32 de 32 octets au plus ; vide : l'ordre par défaut.
+ */
+fun nettoyerOrdreServices(l: List<String>): List<String> =
+    l.map { it.trim() }.filter { it.isNotEmpty() && it.toByteArray().size <= 32 }.distinct().take(32)
 
 /** [s] coupé à [max] octets UTF-8, sans couper un caractère. */
 fun bornerOctets(s: String, max: Int): String {

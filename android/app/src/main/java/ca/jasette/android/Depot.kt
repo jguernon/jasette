@@ -145,7 +145,7 @@ object Depot {
      * et Instagram ; en mode client, ceux que le serveur annonce dans `auth ok`
      * (les trois premiers tant qu'il n'a pas répondu). Un service absent d'ici
      * n'apparaît nulle part (réglages, filtres, nouveau message). Rendus dans
-     * l'ordre de l'utilisateur ([ServicesCaches.ordre]) : la barre, la
+     * l'ordre de l'utilisateur ([ServicesCaches.ordre], la marque `ordre_services`) : la barre, la
      * recherche, Nouveau, les réglages et les canaux les montrent ainsi.
      */
     var services: List<Service>

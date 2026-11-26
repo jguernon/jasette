@@ -382,7 +382,8 @@ private fun SectionComptes(connecter: (Service, String) -> Unit) {
 /**
  * Réglages → Comptes → « Dans la boîte de réception » : les services cachés
  * et leur ordre ([ServicesCaches] ; le seul endroit sur Android depuis
- * l'onglet Groupes, et la même section du bureau). Propre à l'appareil.
+ * l'onglet Groupes, et la même section du bureau). Les services cachés sont
+ * propres à l'appareil ; l'ordre est partagé (marque `ordre_services`).
  */
 @Composable
 private fun ServicesDansLaBoite() {
@@ -409,10 +410,10 @@ private fun ServicesDansLaBoite() {
                 // Réorganiser) : l'ordre vaut partout où les services sont en liste.
                 val haut = i > 0
                 val bas = i < liste.size - 1
-                IconButton(onClick = { ServicesCaches.echanger(ctx, s, liste[i - 1]) }, enabled = haut) {
+                IconButton(onClick = { ServicesCaches.echanger(s, liste[i - 1]) }, enabled = haut) {
                     Icon(Icons.Filled.KeyboardArrowUp, t("Monter"), tint = if (haut) P.texteFort else P.choisi)
                 }
-                IconButton(onClick = { ServicesCaches.echanger(ctx, s, liste[i + 1]) }, enabled = bas) {
+                IconButton(onClick = { ServicesCaches.echanger(s, liste[i + 1]) }, enabled = bas) {
                     Icon(Icons.Filled.KeyboardArrowDown, t("Descendre"), tint = if (bas) P.texteFort else P.choisi)
                 }
                 androidx.compose.material3.Checkbox(

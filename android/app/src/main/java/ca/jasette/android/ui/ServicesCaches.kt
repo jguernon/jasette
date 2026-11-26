@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import ca.jasette.android.Marques
 import ca.jasette.android.Service
 
 /**
@@ -24,8 +25,6 @@ object ServicesCaches {
         charge = true
         caches = ctx.getSharedPreferences("affichage", Context.MODE_PRIVATE)
             .getStringSet("services_caches", emptySet())?.toSet() ?: emptySet()
-        ordre = ctx.getSharedPreferences("affichage", Context.MODE_PRIVATE)
-            .getString("ordre_services", "").orEmpty().split(',').filter { it.isNotBlank() }
     }
 
     fun cache(s: Service): Boolean = s.cle in caches
@@ -33,26 +32,24 @@ object ServicesCaches {
     /**
      * L'ordre des services (leurs clés), choisi avec les flèches de la même
      * section ; vide : l'ordre par défaut. Appliqué partout par
-     * `Depot.services` (voir [Service.ordonnes]). Propre à l'appareil, comme
-     * les services cachés (au bureau, `ordre_services` de reglages.json).
+     * `Depot.services` (voir [Service.ordonnes]). Contrairement aux services
+     * cachés, partagé entre les appareils : c'est la marque `ordre_services`
+     * ([Marques.ordreServices], au bureau `ordre_services` de reglages.json).
      */
-    var ordre by mutableStateOf(emptyList<String>())
-        private set
+    val ordre: List<String> get() = Marques.ordreServices
 
     /** Tous les services, dans l'ordre de l'utilisateur. */
     fun ordonnes(): List<Service> = Service.ordonnes(ordre)
 
     /** Échange la place de deux services dans l'ordre de l'utilisateur. */
-    fun echanger(ctx: Context, a: Service, b: Service) {
+    fun echanger(a: Service, b: Service) {
         val l = ordonnes().toMutableList()
         val i = l.indexOf(a)
         val j = l.indexOf(b)
         if (i < 0 || j < 0) return
         l[i] = b
         l[j] = a
-        ordre = l.map { it.cle }
-        ctx.getSharedPreferences("affichage", Context.MODE_PRIVATE).edit()
-            .putString("ordre_services", ordre.joinToString(",")).apply()
+        Marques.choisirOrdreServices(l.map { it.cle })
     }
 
     fun montrer(ctx: Context, s: Service, montre: Boolean) {
