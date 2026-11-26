@@ -1,7 +1,7 @@
 # Jasette
 
 Toutes tes messageries dans une seule app : Google Messages (SMS/RCS), Messenger,
-Instagram, WhatsApp, Signal, X, Telegram, Bluesky, Discord et Reddit. Pour Linux et
+Instagram, WhatsApp, Signal, X, Telegram, Bluesky, Discord, Reddit et LinkedIn. Pour Linux et
 Android.
 
 Page de présentation et téléchargements : https://jonathanguernon.net/jasette/
@@ -19,7 +19,9 @@ Page de présentation et téléchargements : https://jonathanguernon.net/jasette
   [mautrix-discord](https://github.com/mautrix/discord) et son discordgo
   modifié ([beeper/discordgo](https://github.com/beeper/discordgo)). Le pont
   Reddit parle au serveur Matrix du chat de Reddit avec
-  [mautrix-go](https://github.com/mautrix/go).
+  [mautrix-go](https://github.com/mautrix/go). Le pont LinkedIn (messagerie
+  seulement) s'appuie sur linkedingo, la bibliothèque de
+  [mautrix-linkedin](https://github.com/mautrix/linkedin).
 - **Serveur Jasette** (`serveur/`) : facultatif. Il garde les sessions sur une
   machine toujours allumée, et tes autres appareils (bureau, Android) s'y
   branchent, par un lien TLS épinglé et un jumelage à code. Protocole :
@@ -130,6 +132,23 @@ conversation portent le préfixe `r:`. Même prudence que pour Discord : pas
 d'API officielle pour le chat, aucune action automatique, jamais
 « en train d'écrire » envoyé, une page d'historique à l'ouverture ; à tes
 risques.
+
+LinkedIn : la **messagerie** seulement (conversations à deux et de groupe,
+demandes de message, InMail reçus). Connexion dans une fenêtre linkedin.com
+(bureau : `connexion/jasette-connexion-linkedin.py` ; Android : une
+WebView), où captcha et double authentification se font comme d'habitude ;
+Jasette garde ensuite les cookies `li_at` et `JSESSIONID` dans
+`<données>/linkedin/session.json` (0600). Texte, réponses, photos,
+vidéos, fichiers (20 Mo), réactions (une à la fois), « lu », « écrit »
+et « vu » reçus. Pas de modification ni de suppression de message, pas de
+nouvelle conversation ni de groupe (à commencer dans LinkedIn), pas de
+Sales Navigator ni d'InMail envoyé. « Accepter » une demande la range dans
+la boîte (LinkedIn l'accepte à ta première réponse) ; « Ignorer » la cache
+dans Jasette. Les ids de conversation portent le préfixe `l:`. LinkedIn
+surveille l'automatisation : rythme lent (une requête par seconde au plus),
+petites pages, aucune action automatique, jamais « en train d'écrire » ni
+accusé de réception envoyés ; à tes risques. `JASETTE_LINKEDIN_LECTURE_SEULE=1`
+interdit au pont d'envoyer, de réagir et de marquer lu.
 
 **Onglet Groupes** : les grands espaces (serveurs Discord, chats de subreddit, canaux et
 supergroupes Telegram, communautés WhatsApp, discussions de communauté et

@@ -152,9 +152,9 @@ Réponses :
 
 `services` : ceux que ce serveur fait tourner (`--services`), dans l'ordre
 `google`, `messenger`, `instagram`, `whatsapp`, `signal`, `x`, `telegram`,
-`bluesky`, `discord`, `reddit`. Les sept derniers sont **facultatifs** : le serveur ne les lance que si leur
+`bluesky`, `discord`, `reddit`, `linkedin`. Les huit derniers sont **facultatifs** : le serveur ne les lance que si leur
 binaire est présent (`jasette-wa`, `jasette-signal`, `jasette-x`,
-`jasette-telegram`, `jasette-bluesky`, `jasette-discord`, `jasette-reddit`, voir §5.4) ; sinon
+`jasette-telegram`, `jasette-bluesky`, `jasette-discord`, `jasette-reddit`, `jasette-linkedin`, voir §5.4) ; sinon
 ils sont simplement absents de la liste. Le client n'affiche que les
 services de cette liste. Après `ok`, la connexion passe au régime du §5,
 sans limite de durée.
@@ -171,11 +171,11 @@ Révocation : `jasette-serveur --appareils` liste les appareils,
 {"svc":"google","cmd":{"cmd":"messages","conv":"123","count":30}}
 ```
 
-`svc` : `google`, `messenger`, `instagram`, `whatsapp`, `signal`, `x`, `telegram`, `bluesky`, `discord` ou `reddit`.
+`svc` : `google`, `messenger`, `instagram`, `whatsapp`, `signal`, `x`, `telegram`, `bluesky`, `discord`, `reddit` ou `linkedin`.
 `cmd` : exactement la commande qu'on écrirait sur l'entrée standard du pont
 (voir l'en-tête de `pont/main.go`, `pont-meta/main.go`, `pont-wa/main.go`,
 `pont-signal/main.go`, `pont-x/main.go`, `pont-telegram/main.go`,
-`pont-bluesky/main.go`, `pont-discord/main.go` et `pont-reddit/main.go`). Particularités :
+`pont-bluesky/main.go`, `pont-discord/main.go`, `pont-reddit/main.go` et `pont-linkedin/main.go`). Particularités :
 
 - `{"cmd":"quit"}` est **ignoré** : le pont appartient au serveur.
 - `{"cmd":"delete","conv":"<id>"}` : supprime la conversation (§5.6).
@@ -242,9 +242,9 @@ envoie ensuite `hello` puis son état. Le client ne voit jamais `pont_ferme`.
 - Un client trop lent (8192 événements en attente) est coupé ; il se
   reconnecte et reçoit le rejeu.
 
-### 5.4 Connexion des services WhatsApp, Signal, X, Telegram, Bluesky, Discord et Reddit
+### 5.4 Connexion des services WhatsApp, Signal, X, Telegram, Bluesky, Discord, Reddit et LinkedIn
 
-Ces sept ponts parlent le même protocole que les autres (mêmes commandes
+Ces huit ponts parlent le même protocole que les autres (mêmes commandes
 `conversations`, `messages`, `send`, `send_media`, `react`, `read`,
 `download`, `new`, `search`, `search_messages`, `unpair`…, mêmes
 événements `hello`, `state`, `account`, `avatar`, `avatar_moi`,
@@ -261,6 +261,7 @@ l'association diffère. États : `connecting`, `pairing`, `ready`,
 | `bluesky` | `jasette-bluesky` (ou `JASETTE_BLUESKY`) | `<données>/bluesky/` | identifiant + mot de passe d'app |
 | `discord` | `jasette-discord` (ou `JASETTE_DISCORD`) | `<données>/discord/` | QR (app Discord), ou jeton |
 | `reddit` | `jasette-reddit` (ou `JASETTE_REDDIT`) | `<données>/reddit/` | cookies de reddit.com (fenêtre de connexion) |
+| `linkedin` | `jasette-linkedin` (ou `JASETTE_LINKEDIN`) | `<données>/linkedin/` | cookies de linkedin.com (fenêtre de connexion) |
 
 Les binaires sont cherchés comme les autres : variable d'environnement,
 `--bin`, à côté de `jasette-serveur`, puis le `PATH`. Le serveur crée le
@@ -522,19 +523,93 @@ que le pont parle avec mautrix-go comme le client web) :
   d'historique** (une page à l'ouverture), aucune action automatique. Pas
   d'archives chez Reddit (celles de Jasette, §5.5).
 
+**LinkedIn** (la messagerie seulement ; le pont parle l'API web
+`voyagerMessagingGraphQL` et le flux `realtime` de linkedin.com avec
+linkedingo, la bibliothèque de mautrix-linkedin ; pur Go, sans CGO) :
+
+```json
+{"svc":"linkedin","cmd":{"cmd":"login","cookies":{"li_at":"…","JSESSIONID":"\"ajax:…\"","bcookie":"…","jasette_user_agent":"Mozilla/5.0 …"},"platform":"linkedin"}}
+```
+
+- `login` : les cookies de linkedin.com, tels que les rend la fenêtre de
+  connexion (`connexion/jasette-connexion-linkedin.py` au bureau, une
+  WebView sur Android : `https://www.linkedin.com/login`, jusqu'à ce que
+  `li_at` et `JSESSIONID` existent hors des pages `/login`, `/checkpoint`
+  et `/uas/`). `li_at` et `JSESSIONID` sont requis ; les autres cookies de
+  linkedin.com sont gardés tels quels. `jasette_user_agent` (facultatif)
+  n'est pas un cookie : l'agent du navigateur de la fenêtre, que le pont
+  reprend (avec les `Sec-Ch-Ua*` d'un Chrome) pour ressembler à la même
+  session. Le pont vérifie le compte (`/voyager/api/me`) : refus →
+  `error` (`where` : `login`) et `state: unpaired`.
+- Réussite : `paired`, `account` (`id` : l'id du profil `ACoAA…`),
+  `state: ready`. Session fermée par LinkedIn (cookies effacés, 401) :
+  `error` (`where` : `login`) et `state: unpaired`.
+- Le pont garde les cookies (renouvelés par LinkedIn), le profil, l'agent
+  et le jeton de synchronisation dans `<données>/linkedin/session.json`
+  (0600 ; dossier 0700), et la liste connue dans
+  `<données>/linkedin/convs.json`. Rien de cela n'est écrit dans les
+  journaux. `unpair` oublie la session sur cette machine sans appeler
+  `/uas/logout` (la session web de linkedin.com reste la même).
+- Les ids : la partie propre de l'URN (`urn:li:msg_conversation:(urn:li:fsd_profile:<moi>,<id>)`
+  → `<id>`, donc `l:2-…` chez les clients ; un message : de même avec
+  `msg_message`). Un URN d'une autre forme garde l'URN entier. Pièces
+  jointes : `media_id` = `<id du message>#<rang>`, `key` = un objet JSON
+  (adresse, vignette, conversation, message, heure, rang), jamais `null`.
+- Liste : au lancement, ce qui a changé depuis le dernier jeton de
+  synchronisation (une requête) ; au premier, deux pages de 20 de plus,
+  espacées. Une page plus vieille se lit quand `conversations` demande plus
+  que ce qui est connu, au plus une fois toutes les deux minutes. Les
+  catégories de LinkedIn : `ARCHIVE` → `archived` (dossier `archive`),
+  `SPAM` → absente, `INMAIL` : l'objet de l'InMail précède son texte.
+- **Demandes de message** (état `PENDING`, sans message de moi) :
+  `request: true`, aperçu « Demande de message · … ». LinkedIn n'a pas de
+  geste « accepter » à part : `accept` la range dans la boîte de Jasette,
+  et `send` l'accepte chez LinkedIn (`ACCEPTED`, comme le site) ; `ignore`
+  la cache dans Jasette seulement (`deleted`), sans rien dire à LinkedIn ni
+  à l'expéditeur ; un nouveau message la fait revenir.
+- Commandes : `conversations`, `messages` (une page de 20 au plus ; plus
+  anciens par `before`, par le curseur de LinkedIn), `send` (8 000
+  caractères ; `reply_to` : réponse citée comme le site), `send_media`
+  (photo, vidéo, fichier ; 20 Mo ; le texte part avec), `react`, `read`
+  (seulement sur action, et seulement si non lu), `download` (`full` :
+  l'original ; sinon la vignette d'environ 1024 px pour une image ; une
+  adresse expirée est renouvelée en relisant le message), `new` (ouvre une
+  conversation connue ; une nouvelle se commence dans LinkedIn), `search`
+  (conversations connues), `search_messages` (messages vus depuis le
+  lancement).
+- **Réactions** : une à la fois, comme ailleurs dans Jasette (la nouvelle
+  remplace la mienne ; `emoji` vide la retire). L'historique ne dit que le
+  compte par émoji (réactions anonymes, sauf la mienne) ; le direct nomme
+  qui réagit.
+- Direct : `message` (nouveau, modifié, retiré → `system: "deleted"`),
+  `typing` (sans fin : le client l'oublie après quelques secondes), « vu »
+  (conversation à deux : mes messages passent à `OUTGOING_READ` ; groupe :
+  `read_by`), réactions, conversations changées ou supprimées.
+- Refusés clairement (`error`) : `edit`, `delete`, `archive`,
+  `create_group`, `pair`, les notes (`note_set` → `note_result` en échec).
+  `typing` et `presence` sont ignorés : le pont **n'envoie jamais** « en
+  train d'écrire », présence ni accusé de réception.
+- Prudence : 1,1 s au moins (plus un peu de hasard) entre deux requêtes de
+  l'API, 300 ms entre deux fichiers, 3 téléchargements à la fois au plus,
+  aucun rattrapage d'historique, aucune action automatique. Fichiers
+  téléchargés seulement depuis linkedin.com et `*.licdn.com` (et les GIF
+  de Giphy et Tenor). `JASETTE_LINKEDIN_LECTURE_SEULE=1` : `send`,
+  `send_media`, `react` et `read` ne partent pas (`error` / ignoré). Pas
+  de Sales Navigator, pas d'InMail envoyé, pas de pages d'entreprise.
+
 ### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, personnes, contacts perso, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
 conversations, tels que l'interface les voit (« m: » pour Messenger,
 « i: » pour Instagram, « w: » pour WhatsApp, « s: » pour Signal, « x: »
-pour X, « t: » pour Telegram, « b: » pour Bluesky, « d: » pour Discord, « r: » pour Reddit, sans préfixe pour Google) :
+pour X, « t: » pour Telegram, « b: » pour Bluesky, « d: » pour Discord, « r: » pour Reddit, « l: » pour LinkedIn, sans préfixe pour Google) :
 
 - `head` : la grille en tête de la boîte de réception ;
 - `favoris` : la vue de l'étoile (`etoiles` dans les réglages du bureau) ;
 - `epingles` : les conversations épinglées en haut de la liste ;
 - `archives` : l'**archivage propre à Jasette**, pour les services qui ne
-  savent pas archiver (Messenger, Instagram, Signal, X, Bluesky, Discord, Reddit). Google, WhatsApp et
+  savent pas archiver (Messenger, Instagram, Signal, X, Bluesky, Discord, Reddit, LinkedIn). Google, WhatsApp et
   Telegram archivent pour de vrai (commande `archive` de leur pont) et n'y
   vont pas ;
 - `privees` : la **Liste privée** (voir « Règle des privées » plus bas).
@@ -759,7 +834,7 @@ ce champ : le client garde les siens pour lui).
     `<numéro>@s.whatsapp.net` ; un `@lid` n'en a pas), Signal et Telegram
     (champ `number` de la conversation à deux, quand le pont le connaît :
     contact Signal avec son E.164, contact Telegram dont le numéro est
-    visible). Messenger, Instagram, X, Bluesky, Discord et Reddit n'en donnent
+    visible). Messenger, Instagram, X, Bluesky, Discord, Reddit et LinkedIn n'en donnent
     aucun ;
   - **suggérée** seulement, jamais sûre : un nom très proche (sans accents,
     ni casse, ni ponctuation, quel que soit l'ordre prénom/nom ; une faute
@@ -1031,7 +1106,9 @@ n'a pas le dernier message annoncé par la liste (`time`). Jamais une
 conversation `large` (§5.13), même marquée. **Discord** :
 8 conversations récentes, 30 messages chacune, 15 conversations au plus
 (marquées comprises), 4 s de pause. **Reddit** : la même mesure (8 conversations, 30 messages,
-15 au plus, 4 s de pause), jamais un chat de subreddit. Ces réponses (et
+15 au plus, 4 s de pause), jamais un chat de subreddit. **LinkedIn**, qui
+surveille l'automatisation : 5 conversations, 20 messages, 10 au plus, 6 s
+de pause. Ces réponses (et
 leurs erreurs `where: "messages"`) ne vont **qu'au cache** : aucun client ne
 les reçoit. Aucun pont ne marque une conversation comme lue sur `messages`
 (seulement sur `read`, que le serveur n'envoie jamais de lui-même).
@@ -1772,7 +1849,7 @@ Le serveur ne sert que des fichiers réguliers :
 `<données>` = `JASETTE_DATA`, sinon `$XDG_DATA_HOME/jasette`, sinon
 `~/.local/share/jasette` (le même dossier que les ponts).
 Chaque pont a son dossier, en 0700 : `<données>/whatsapp/`,
-`<données>/signal/`, `<données>/x/`, `<données>/telegram/`, `<données>/bluesky/`, `<données>/discord/`, `<données>/reddit/` (bases SQLite et session : jamais
+`<données>/signal/`, `<données>/x/`, `<données>/telegram/`, `<données>/bluesky/`, `<données>/discord/`, `<données>/reddit/`, `<données>/linkedin/` (bases SQLite et session : jamais
 servis par `get`, §6.1).
 `<données>/serveur/` (0700) contient `cert.pem`, `cle.pem`,
 `appareils.json` (noms, SHA-256 des jetons, dates), `jumelage.json` (code en
