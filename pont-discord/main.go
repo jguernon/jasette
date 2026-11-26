@@ -117,6 +117,10 @@ type Message struct {
 	// Le message me mentionne, ou répond à un des miens (§5.13).
 	MentionsMe bool `json:"mentions_me,omitempty"`
 	ReplyToMe  bool `json:"reply_to_me,omitempty"`
+
+	// L'id Discord de l'auteur (groupes et salons) : sa photo arrive par
+	// « sender_avatar » (avatars_auteurs.go).
+	SenderID string `json:"sender_id,omitempty"`
 }
 
 type Attachment struct {

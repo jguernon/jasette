@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gotd/td/tg"
@@ -563,11 +564,21 @@ func (p *Pont) markRead(cmd Cmd) {
 	top := max(c.TopID, c.ReadInbox)
 	wasUnread := c.Unread > 0 || c.UnreadMark
 	mentions := c.Mentions > 0
+	if !wasUnread && !mentions {
+		// Rien de non lu ni de mention : aucune requête (« Tout marquer comme
+		// lu » n'envoie que celles qui servent).
+		p.mu.Unlock()
+		return
+	}
 	c.Unread, c.UnreadMark, c.Mentions = 0, false, 0
 	c.ReadInbox = top
 	p.saveConv(cmd.Conv, c)
 	p.listDirty = true
 	p.mu.Unlock()
+	// Plusieurs « lu » d'un coup (Tout marquer comme lu) : étalés.
+	if attendreLu(p.ctx) != nil {
+		return
+	}
 	api := p.tgAPI()
 	if api == nil {
 		return
@@ -768,4 +779,28 @@ func (p *Pont) search(q string) {
 		items = items[:50]
 	}
 	emit("search", map[string]any{"query": q, "items": items})
+}
+
+// Les « lu » partent un à la fois, au moins rythmeLuEcart l'un après l'autre.
+const rythmeLuEcart = 400 * time.Millisecond
+
+var rythmeLu struct {
+	sync.Mutex
+	next time.Time
+}
+
+func attendreLu(ctx context.Context) error {
+	rythmeLu.Lock()
+	at := rythmeLu.next
+	if now := time.Now(); at.Before(now) {
+		at = now
+	}
+	rythmeLu.next = at.Add(rythmeLuEcart)
+	rythmeLu.Unlock()
+	select {
+	case <-time.After(time.Until(at)):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

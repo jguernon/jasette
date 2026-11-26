@@ -33,6 +33,7 @@ const (
 type guildState struct {
 	id      string
 	name    string
+	icon    string
 	ownerID string
 	roles   []*discordgo.Role
 	myRoles []string
@@ -148,6 +149,13 @@ func (p *Pont) addGuild(g *discordgo.Guild, member *discordgo.Member) {
 	}
 	if owner != "" {
 		gs.ownerID = owner
+	}
+	icon := g.Icon
+	if g.Properties != nil && g.Properties.Icon != "" {
+		icon = g.Properties.Icon
+	}
+	if icon != "" || name != "" {
+		gs.icon = icon
 	}
 	if g.Roles != nil {
 		gs.roles = g.Roles
@@ -316,6 +324,9 @@ func (p *Pont) onGuildCreate(g *discordgo.Guild) {
 	after := p.guildConvs(g.ID)
 	p.mu.Unlock()
 	p.announceGuildDiff(before, after)
+	if p.isReady() {
+		go p.fetchGuildIcons() // nouvelle icône, ou serveur rejoint
+	}
 }
 
 func (p *Pont) onGuildDelete(g *discordgo.Guild) {

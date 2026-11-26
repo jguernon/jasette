@@ -63,7 +63,9 @@ func (p *Pont) messages(cmd Cmd) {
 		return
 	}
 	items := make([]Message, 0, len(page))
+	connues := map[string]string{} // photos d'auteurs déjà sur le disque
 	p.mu.Lock()
+	cs := p.chans[conv]
 	for i := len(page) - 1; i >= 0; i-- { // Discord rend du plus récent au plus vieux
 		dm := page[i]
 		if dm == nil {
@@ -79,6 +81,9 @@ func (p *Pont) messages(cmd Cmd) {
 		m := convertMessage(dm, p)
 		m.Conv = conv
 		m.MentionsMe, m.ReplyToMe = p.mentionsMe(dm), p.replyToMe(dm, conv)
+		if path := p.noteAuteur(&m, dm, cs); path != "" {
+			connues[m.SenderID] = path
+		}
 		if old := p.recalled(conv, m.ID); old != nil {
 			m.TmpID = old.TmpID
 			if len(old.Reactions) == len(m.Reactions) {
@@ -94,6 +99,7 @@ func (p *Pont) messages(cmd Cmd) {
 	}
 	p.mu.Unlock()
 	emit("messages", map[string]any{"conv": conv, "items": items, "older": older, "more": len(page) >= count})
+	emitAuteurs(connues)
 	if changed {
 		p.emitConv(conv, false)
 	}

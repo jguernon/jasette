@@ -61,8 +61,11 @@ type Pont struct {
 	pending   map[string]string    // nonce → tmp_id des envois en cours
 	typing    map[string]*time.Timer
 	typed     map[string]time.Time // dernier « typing » envoyé, par conversation
-	avatars   map[string]string    // conversation → avatar déjà annoncé (chemin)
-	pairing   context.CancelFunc
+	avatars   map[string]string    // conversation → avatar déjà annoncé (adresse)
+	// Les photos d'auteurs demandées (id → adresse) et leur file.
+	auteurs     map[string]string
+	fileAuteurs chan demandeAuteur
+	pairing     context.CancelFunc
 
 	presenceOn bool
 	presence   map[string]presenceState
@@ -78,26 +81,29 @@ type Pont struct {
 
 func newPont(ctx context.Context) *Pont {
 	p := &Pont{
-		ctx:        ctx,
-		users:      map[string]*discordgo.User{},
-		nicks:      map[string]string{},
-		friends:    map[string]bool{},
-		chans:      map[string]*chanState{},
-		guilds:     map[string]*guildState{},
-		guildChan:  map[string]string{},
-		msgs:       map[string][]Message{},
-		pending:    map[string]string{},
-		typing:     map[string]*time.Timer{},
-		typed:      map[string]time.Time{},
-		avatars:    map[string]string{},
-		presenceOn: presenceEnv(),
-		presence:   map[string]presenceState{},
-		rest:       throttle{gap: 400 * time.Millisecond},
-		cdn:        throttle{gap: 150 * time.Millisecond},
-		events:     make(chan any, 8192),
+		ctx:         ctx,
+		users:       map[string]*discordgo.User{},
+		nicks:       map[string]string{},
+		friends:     map[string]bool{},
+		chans:       map[string]*chanState{},
+		guilds:      map[string]*guildState{},
+		guildChan:   map[string]string{},
+		msgs:        map[string][]Message{},
+		pending:     map[string]string{},
+		typing:      map[string]*time.Timer{},
+		typed:       map[string]time.Time{},
+		avatars:     map[string]string{},
+		auteurs:     map[string]string{},
+		fileAuteurs: make(chan demandeAuteur, 512),
+		presenceOn:  presenceEnv(),
+		presence:    map[string]presenceState{},
+		rest:        throttle{gap: 400 * time.Millisecond},
+		cdn:         throttle{gap: 150 * time.Millisecond},
+		events:      make(chan any, 8192),
 	}
 	p.notes = nouvellesNotesDiscord(p)
 	go p.eventLoop()
+	go p.boucleAuteurs()
 	return p
 }
 
@@ -583,6 +589,7 @@ func (p *Pont) forget() {
 	p.users = map[string]*discordgo.User{}
 	p.nicks, p.friends = map[string]string{}, map[string]bool{}
 	p.avatars = map[string]string{}
+	p.auteurs = map[string]string{}
 	p.presence = map[string]presenceState{}
 	p.mu.Unlock()
 }
@@ -809,7 +816,10 @@ func (p *Pont) listConversations(archive bool) {
 	if len(ids) > 60 {
 		ids = ids[:60]
 	}
-	go p.fetchAvatars(ids)
+	go func() {
+		p.fetchAvatars(ids)
+		p.fetchGuildIcons()
+	}()
 }
 
 func (p *Pont) emitConv(id string, open bool) {
@@ -924,6 +934,7 @@ func (p *Pont) onMessage(dm *discordgo.Message, update bool) {
 		m = convertMessage(dm, p)
 		m.Conv = conv
 		m.MentionsMe, m.ReplyToMe = p.mentionsMe(dm), p.replyToMe(dm, conv)
+		p.noteAuteur(&m, dm, c)
 		if old != nil {
 			m.TmpID = old.TmpID
 			if len(old.Reactions) == len(m.Reactions) {
