@@ -77,7 +77,9 @@ type Pont struct {
 	// La présence des contacts (presence.go).
 	presenceOn   bool
 	presenceSeen bool
-	presence     map[int64]presenceRow
+	presence     map[int64]presenceRow // les contacts en ligne
+	presenceHors map[int64]int64       // dernière activité émise pour un contact hors ligne
+	flux         *fluxPresence
 
 	// « En train d'écrire » des fils chiffrés (ecrit.go).
 	e2eeDispo      bool      // l'appareil chiffré s'est déclaré disponible
@@ -92,22 +94,24 @@ type Pont struct {
 
 func newPont(ctx context.Context) *Pont {
 	p := &Pont{
-		presenceOn: presenceEnv(),
-		presence:   map[int64]presenceRow{},
-		ctx:        ctx,
-		convs:      map[string]*convState{},
-		contacts:   map[int64]*contact{},
-		threadMap:  map[int64]int64{},
-		openThread: map[int64]int64{},
-		waiters:    map[string][]chan struct{}{},
-		pending:    map[string]string{},
-		loaded:     map[string]int64{},
-		fetching:   map[string]bool{},
-		listCount:  50,
-		e2eeReady:  exsync.NewEvent(),
+		presenceOn:   presenceEnv(),
+		presence:     map[int64]presenceRow{},
+		presenceHors: map[int64]int64{},
+		ctx:          ctx,
+		convs:        map[string]*convState{},
+		contacts:     map[int64]*contact{},
+		threadMap:    map[int64]int64{},
+		openThread:   map[int64]int64{},
+		waiters:      map[string][]chan struct{}{},
+		pending:      map[string]string{},
+		loaded:       map[string]int64{},
+		fetching:     map[string]bool{},
+		listCount:    50,
+		e2eeReady:    exsync.NewEvent(),
 	}
 	mediadl.SetHTTP(exhttp.SensibleClientSettings)
 	p.notes = nouvellesNotesFB(p)
+	p.flux = p.newFluxPresence()
 	go p.listLoop()
 	return p
 }
@@ -376,6 +380,7 @@ func (p *Pont) disconnect() {
 		p.connCancel = nil
 	}
 	p.mu.Unlock()
+	p.flux.arreter()
 	p.e2eeReady.Clear()
 	if wa != nil {
 		wa.Disconnect()
@@ -415,6 +420,7 @@ func (p *Pont) onMetaEvent(ctx context.Context, raw any) {
 		p.mu.Unlock()
 		emitState("ready")
 		p.emitList()
+		p.setPresence(p.presenceWanted())
 		go p.notes.annoncer()
 		go p.connectE2EE()
 		go p.threadBackfill()
@@ -424,6 +430,7 @@ func (p *Pont) onMetaEvent(ctx context.Context, raw any) {
 		p.ready = true
 		p.mu.Unlock()
 		emitState("ready")
+		p.setPresence(p.presenceWanted())
 		if p.waClient() == nil {
 			go p.connectE2EE()
 		}

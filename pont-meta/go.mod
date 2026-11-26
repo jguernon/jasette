@@ -14,6 +14,8 @@ require (
 	modernc.org/sqlite v1.63.0
 )
 
+require github.com/apache/thrift v0.25.0 // indirect
+
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/andybalholm/brotli v1.2.4 // indirect
@@ -24,7 +26,7 @@ require (
 	github.com/bytemare/cryptotools v0.0.0-20210309005813-f9985b05742f // indirect
 	github.com/bytemare/opaque v0.0.0-20210310201842-16a10d180656 // indirect
 	github.com/bytemare/voprf v0.0.0-20210221170502-f0af88d24d16 // indirect
-	github.com/coder/websocket v1.8.15 // indirect
+	github.com/coder/websocket v1.8.15
 	github.com/coreos/go-systemd/v22 v22.7.0 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/elliotchance/orderedmap/v3 v3.1.0 // indirect

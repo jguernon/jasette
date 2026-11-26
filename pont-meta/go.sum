@@ -8,6 +8,8 @@ github.com/andreyvit/diff v0.0.0-20170406064948-c7f18ee00883 h1:bvNMNQO63//z+xNg
 github.com/andreyvit/diff v0.0.0-20170406064948-c7f18ee00883/go.mod h1:rCTlJbsFo29Kk6CurOXKm700vrz8f0KW0JNfpkRJY/8=
 github.com/andybalholm/brotli v1.2.4 h1:649LN6qF+/7JJYNN3Wdu4Dt5PS6eC/yP/Go3Bb0/AHI=
 github.com/andybalholm/brotli v1.2.4/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
+github.com/apache/thrift v0.25.0 h1:6LLlvoPjy8Cc/0b5TYRcTR3RZa2W0at3WQRcOkDwVGs=
+github.com/apache/thrift v0.25.0/go.mod h1:4lwyToijD9T70w7GlevFk7FnpY60Wv8I8krMkF6FkAo=
 github.com/armfazh/h2c-go-ref v0.0.0-20201127170158-0b2291cd2684/go.mod h1:8fwPDRbWg9lh+s+iVv/7yAthCGHoGLTpeXnHf/J5EXs=
 github.com/armfazh/h2c-go-ref v0.0.0-20210215173008-07e12a6f8e0d h1:0YBiQ+rXap26i6apP7AldB+h50fAP7XSzpbio4ElXQo=
 github.com/armfazh/h2c-go-ref v0.0.0-20210215173008-07e12a6f8e0d/go.mod h1:8fwPDRbWg9lh+s+iVv/7yAthCGHoGLTpeXnHf/J5EXs=
