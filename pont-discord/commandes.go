@@ -17,9 +17,10 @@ import (
 )
 
 // referer : chaque requête porte l'adresse de la conversation ouverte, comme
-// le client web.
+// le client web (/channels/@me/<salon> ou /channels/<guilde>/<salon>).
 func referer(conv string) discordgo.RequestOption {
-	return discordgo.WithChannelReferer("", conv)
+	guild, channel := splitConv(conv)
+	return discordgo.WithChannelReferer(guild, channel)
 }
 
 func (p *Pont) knownConv(conv string) bool {
@@ -49,7 +50,7 @@ func (p *Pont) messages(cmd Cmd) {
 	if err == nil {
 		ctx, annule := context.WithTimeout(p.ctx, 45*time.Second)
 		if err = p.rest.wait(ctx); err == nil {
-			page, err = sess.ChannelMessages(conv, count, cmd.Before, "", "", referer(conv), discordgo.WithContext(ctx))
+			page, err = sess.ChannelMessages(rawChannel(conv), count, cmd.Before, "", "", referer(conv), discordgo.WithContext(ctx))
 		}
 		annule()
 		if err != nil {
@@ -68,11 +69,16 @@ func (p *Pont) messages(cmd Cmd) {
 		if dm == nil {
 			continue
 		}
-		dm.ChannelID = conv
+		dm.ChannelID = rawChannel(conv)
+		if guild, _ := splitConv(conv); guild != "" {
+			dm.GuildID = guild
+		}
 		if dm.Author != nil && dm.Author.Username != "" {
 			p.users[dm.Author.ID] = dm.Author
 		}
 		m := convertMessage(dm, p)
+		m.Conv = conv
+		m.MentionsMe, m.ReplyToMe = p.mentionsMe(dm), p.replyToMe(dm, conv)
 		if old := p.recalled(conv, m.ID); old != nil {
 			m.TmpID = old.TmpID
 			if len(old.Reactions) == len(m.Reactions) {
@@ -116,6 +122,8 @@ func explainSend(err error) error {
 	if errors.As(err, &re) {
 		if re.Message != nil {
 			switch re.Message.Code {
+			case 50001, 50013:
+				return errors.New("Discord refuse : vous n'avez pas le droit d'écrire dans ce salon")
 			case 50007:
 				return errors.New("Discord refuse : cette personne n'accepte pas vos messages privés")
 			case 40002, 40003:
@@ -177,7 +185,8 @@ func (p *Pont) sendCommon(cmd Cmd, text, path, mime string) {
 	defer annule()
 	req := &discordgo.MessageSend{Content: text, Nonce: generateNonce()}
 	if cmd.ReplyTo != "" {
-		req.Reference = &discordgo.MessageReference{MessageID: cmd.ReplyTo, ChannelID: cmd.Conv}
+		guild, channel := splitConv(cmd.Conv)
+		req.Reference = &discordgo.MessageReference{MessageID: cmd.ReplyTo, ChannelID: channel, GuildID: guild}
 	}
 	var local []Attachment
 	if path != "" {
@@ -196,7 +205,7 @@ func (p *Pont) sendCommon(cmd Cmd, text, path, mime string) {
 		fail(err)
 		return
 	}
-	dm, err := sess.ChannelMessageSendComplex(cmd.Conv, req, referer(cmd.Conv), discordgo.WithContext(ctx))
+	dm, err := sess.ChannelMessageSendComplex(rawChannel(cmd.Conv), req, referer(cmd.Conv), discordgo.WithContext(ctx))
 	if err != nil {
 		p.mu.Lock()
 		delete(p.pending, req.Nonce)
@@ -205,9 +214,10 @@ func (p *Pont) sendCommon(cmd Cmd, text, path, mime string) {
 		return
 	}
 	emit("sent", map[string]any{"conv": cmd.Conv, "tmp_id": tmp, "ok": true})
-	dm.ChannelID = cmd.Conv
+	dm.ChannelID = rawChannel(cmd.Conv)
 	p.mu.Lock()
 	m := convertMessage(dm, p)
+	m.Conv = cmd.Conv
 	m.TmpID = tmp
 	if len(local) > 0 && len(m.Attachments) == len(local) {
 		// La copie locale : l'interface l'a sans téléchargement.
@@ -263,7 +273,7 @@ func (p *Pont) react(cmd Cmd) {
 			fail(err)
 			return
 		}
-		if err := sess.MessageReactionRemoveUser("", cmd.Conv, cmd.ID, e, "@me", discordgo.WithContext(ctx)); err != nil {
+		if err := sess.MessageReactionRemoveUser("", rawChannel(cmd.Conv), cmd.ID, e, "@me", discordgo.WithContext(ctx)); err != nil {
 			log.Warn().Str("err", errorText(err)).Msg("retrait de réaction")
 		}
 	}
@@ -274,7 +284,7 @@ func (p *Pont) react(cmd Cmd) {
 		fail(err)
 		return
 	}
-	if err := sess.MessageReactionAddUser("", cmd.Conv, cmd.ID, emoji, discordgo.WithContext(ctx)); err != nil {
+	if err := sess.MessageReactionAddUser("", rawChannel(cmd.Conv), cmd.ID, emoji, discordgo.WithContext(ctx)); err != nil {
 		fail(explainSend(err))
 	}
 	// La passerelle renvoie MESSAGE_REACTION_ADD : l'interface se met à jour par là.
@@ -293,6 +303,7 @@ func (p *Pont) markRead(cmd Cmd) {
 	}
 	last := c.lastID
 	c.readID = last
+	c.mentions = 0
 	p.mu.Unlock()
 	p.emitConv(cmd.Conv, false)
 	sess, err := p.api()
@@ -304,7 +315,7 @@ func (p *Pont) markRead(cmd Cmd) {
 	if p.rest.wait(ctx) != nil {
 		return
 	}
-	if _, err := sess.ChannelMessageAckNoToken(cmd.Conv, last, referer(cmd.Conv), discordgo.WithContext(ctx)); err != nil {
+	if _, err := sess.ChannelMessageAckNoToken(rawChannel(cmd.Conv), last, referer(cmd.Conv), discordgo.WithContext(ctx)); err != nil {
 		log.Warn().Str("err", errorText(err)).Str("fil", cmd.Conv).Msg("lu")
 	}
 }
@@ -333,7 +344,7 @@ func (p *Pont) sendTyping(cmd Cmd) {
 	if p.rest.wait(ctx) != nil {
 		return
 	}
-	_ = sess.ChannelTyping(cmd.Conv, referer(cmd.Conv), discordgo.WithContext(ctx))
+	_ = sess.ChannelTyping(rawChannel(cmd.Conv), referer(cmd.Conv), discordgo.WithContext(ctx))
 }
 
 // ---- Nouvelle conversation ----

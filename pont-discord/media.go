@@ -134,7 +134,10 @@ func (p *Pont) freshURL(ctx context.Context, k mediaKey) string {
 	if err != nil || p.rest.wait(ctx) != nil {
 		return ""
 	}
-	dm, err := sess.ChannelMessage(k.Channel, k.Message, referer(k.Channel), discordgo.WithContext(ctx))
+	p.mu.Lock()
+	conv := p.convFor(k.Channel)
+	p.mu.Unlock()
+	dm, err := sess.ChannelMessage(k.Channel, k.Message, referer(conv), discordgo.WithContext(ctx))
 	if err != nil {
 		return ""
 	}
@@ -186,7 +189,7 @@ func (p *Pont) upload(ctx context.Context, sess *discordgo.Session, conv, path, 
 		return nil, nil, err
 	}
 	isClip := false
-	prep, err := sess.ChannelAttachmentCreate(conv, &discordgo.ReqPrepareAttachments{
+	prep, err := sess.ChannelAttachmentCreate(rawChannel(conv), &discordgo.ReqPrepareAttachments{
 		Files: []*discordgo.FilePrepare{{
 			Size: len(data), Name: name, ID: strconv.FormatInt(uploadID.Add(2), 10),
 			IsClip: &isClip, OriginalContentType: mime,

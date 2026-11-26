@@ -33,28 +33,36 @@ type chanState struct {
 	preview string
 	fromMe  bool
 	known   bool // preview et fromMe viennent d'un vrai message
+
+	// Salon de serveur (serveurs.go) : la guilde, si j'y écris, et les
+	// mentions non lues (read_state, puis les messages reçus).
+	guild    string
+	canSend  bool
+	mentions int
 }
 
 type Pont struct {
 	ctx context.Context
 
-	mu      sync.Mutex
-	sess    *discordgo.Session
-	gen     int // la session en cours ; les événements d'une ancienne sont ignorés
-	sf      *sessionFile
-	me      *discordgo.User
-	ready   bool
-	login   bool // connexion en cours depuis « pair » ou « login » : émettre paired
-	users   map[string]*discordgo.User
-	nicks   map[string]string // surnoms d'amis
-	friends map[string]bool
-	chans   map[string]*chanState
-	msgs    map[string][]Message // par conversation, du plus vieux au plus récent
-	pending map[string]string    // nonce → tmp_id des envois en cours
-	typing  map[string]*time.Timer
-	typed   map[string]time.Time // dernier « typing » envoyé, par conversation
-	avatars map[string]string    // conversation → avatar déjà annoncé (chemin)
-	pairing context.CancelFunc
+	mu        sync.Mutex
+	sess      *discordgo.Session
+	gen       int // la session en cours ; les événements d'une ancienne sont ignorés
+	sf        *sessionFile
+	me        *discordgo.User
+	ready     bool
+	login     bool // connexion en cours depuis « pair » ou « login » : émettre paired
+	users     map[string]*discordgo.User
+	nicks     map[string]string // surnoms d'amis
+	friends   map[string]bool
+	chans     map[string]*chanState // par id de conversation (« g<guilde>:<salon> » pour un salon de serveur)
+	guilds    map[string]*guildState
+	guildChan map[string]string    // salon nu → conversation, pour les salons de serveurs
+	msgs      map[string][]Message // par conversation, du plus vieux au plus récent
+	pending   map[string]string    // nonce → tmp_id des envois en cours
+	typing    map[string]*time.Timer
+	typed     map[string]time.Time // dernier « typing » envoyé, par conversation
+	avatars   map[string]string    // conversation → avatar déjà annoncé (chemin)
+	pairing   context.CancelFunc
 
 	presenceOn bool
 	presence   map[string]presenceState
@@ -75,6 +83,8 @@ func newPont(ctx context.Context) *Pont {
 		nicks:      map[string]string{},
 		friends:    map[string]bool{},
 		chans:      map[string]*chanState{},
+		guilds:     map[string]*guildState{},
+		guildChan:  map[string]string{},
 		msgs:       map[string][]Message{},
 		pending:    map[string]string{},
 		typing:     map[string]*time.Timer{},
@@ -104,7 +114,7 @@ func (p *Pont) userName(id string) string { // à appeler avec p.mu
 }
 
 func (p *Pont) channelName(id string) string { // à appeler avec p.mu
-	if c := p.chans[id]; c != nil {
+	if c := p.chans[p.convFor(id)]; c != nil {
 		return p.convName(c)
 	}
 	return ""
@@ -300,7 +310,41 @@ func (p *Pont) handle(ge genEvent) {
 		for _, ch := range evt.LazyPrivateChannels {
 			p.addChannel(ch)
 		}
+		// Mes rôles dans chaque serveur, s'ils n'étaient pas dans READY.
+		changed := false
+		if len(evt.MergedMembers) == len(evt.Guilds) {
+			for i, mg := range evt.Guilds {
+				gs := p.guilds[mg.ID]
+				if gs == nil || gs.member {
+					continue
+				}
+				for _, m := range evt.MergedMembers[i] {
+					if m != nil && m.UserID == p.meID() {
+						gs.myRoles, gs.member = m.Roles, true
+						p.refreshGuild(gs)
+						changed = true
+					}
+				}
+			}
+		}
 		p.mu.Unlock()
+		if changed {
+			emit("conversations", map[string]any{"items": p.sortedConvs()})
+		}
+	case *discordgo.GuildCreate:
+		if evt.Guild != nil {
+			p.onGuildCreate(evt.Guild)
+		}
+	case *discordgo.GuildUpdate:
+		if evt.Guild != nil {
+			p.onGuildCreate(evt.Guild)
+		}
+	case *discordgo.GuildDelete:
+		if evt.Guild != nil {
+			p.onGuildDelete(evt.Guild)
+		}
+	case *discordgo.GuildMemberUpdate:
+		p.onMyRoles(evt.Member)
 	case *discordgo.Resumed:
 		p.mu.Lock()
 		ok := p.me != nil
@@ -320,11 +364,21 @@ func (p *Pont) handle(ge genEvent) {
 	case *discordgo.InvalidAuth:
 		p.onInvalidAuth()
 	case *discordgo.ChannelCreate:
+		if evt.Channel != nil && evt.GuildID != "" {
+			p.onGuildChannel(evt.Channel, false)
+			break
+		}
 		p.onChannel(evt.Channel)
 	case *discordgo.ChannelUpdate:
+		if evt.Channel != nil && evt.GuildID != "" {
+			p.onGuildChannel(evt.Channel, false)
+			break
+		}
 		p.onChannel(evt.Channel)
 	case *discordgo.ChannelDelete:
-		if evt.Channel != nil && evt.GuildID == "" {
+		if evt.Channel != nil && evt.GuildID != "" {
+			p.onGuildChannel(evt.Channel, true)
+		} else if evt.Channel != nil {
 			p.mu.Lock()
 			_, ok := p.chans[evt.ID]
 			delete(p.chans, evt.ID)
@@ -422,6 +476,7 @@ func (p *Pont) onReady(r *discordgo.Ready, sf *sessionFile) {
 		p.avatars = map[string]string{}
 	}
 	p.me = r.User
+
 	p.users[r.User.ID] = r.User
 	for _, u := range r.Users {
 		if u != nil {
@@ -435,10 +490,38 @@ func (p *Pont) onReady(r *discordgo.Ready, sf *sessionFile) {
 	for _, ch := range r.PrivateChannels {
 		p.addChannel(ch)
 	}
+	// Les serveurs et leurs salons, tels que READY les donne (aucune requête).
+	present := map[string]bool{}
+	for i, g := range r.Guilds {
+		var mine *discordgo.Member
+		if len(r.MergedMembers) == len(r.Guilds) {
+			for _, m := range r.MergedMembers[i] {
+				if m != nil && m.UserID == r.User.ID {
+					mine = m
+				}
+			}
+		}
+		if mine == nil && g != nil {
+			mine = p.myMember(g)
+		}
+		p.addGuild(g, mine)
+		if g != nil {
+			present[g.ID] = true
+		}
+	}
+	// Les serveurs quittés pendant une coupure.
+	for id := range p.guilds {
+		if !present[id] {
+			p.removeGuild(id)
+		}
+	}
 	if r.ReadState != nil {
 		for _, e := range r.ReadState.Entries {
-			if c := p.chans[e.ID]; c != nil {
+			if c := p.chans[p.convFor(e.ID)]; c != nil {
 				c.readID = string(e.LastMessageID)
+				if c.guild != "" {
+					c.mentions = e.MentionCount
+				}
 			}
 		}
 	}
@@ -494,6 +577,8 @@ func (p *Pont) forget() {
 	p.mu.Lock()
 	p.sf, p.me = nil, nil
 	p.chans = map[string]*chanState{}
+	p.guilds = map[string]*guildState{}
+	p.guildChan = map[string]string{}
 	p.msgs = map[string][]Message{}
 	p.users = map[string]*discordgo.User{}
 	p.nicks, p.friends = map[string]string{}, map[string]bool{}
@@ -665,7 +750,14 @@ func (p *Pont) convOut(id string, c *chanState) Conversation { // à appeler ave
 		Members: []string{},
 	}
 	if out.Time == 0 {
-		out.Time = snowflakeTime(id)
+		out.Time = snowflakeTime(rawChannel(id))
+	}
+	if c.guild != "" {
+		p.guildFields(&out, c)
+		if !out.Unread {
+			out.Mentions = 0
+		}
+		return out
 	}
 	if out.Group {
 		for _, u := range p.recipients(c) {
@@ -678,15 +770,27 @@ func (p *Pont) convOut(id string, c *chanState) Conversation { // à appeler ave
 func (p *Pont) sortedConvs() []Conversation {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	list := make([]Conversation, 0, len(p.chans))
+	var list, salons []Conversation
 	for id, c := range p.chans {
-		list = append(list, p.convOut(id, c))
+		if c.guild != "" {
+			salons = append(salons, p.convOut(id, c))
+		} else {
+			list = append(list, p.convOut(id, c))
+		}
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Time > list[j].Time })
 	if len(list) > maxConvs {
 		list = list[:maxConvs]
 	}
-	return list
+	// Les salons de serveurs ont leur propre plafond (onglet Groupes).
+	sort.Slice(salons, func(i, j int) bool { return salons[i].Time > salons[j].Time })
+	if len(salons) > maxSalons {
+		salons = salons[:maxSalons]
+	}
+	if list == nil {
+		list = []Conversation{}
+	}
+	return append(list, salons...)
 }
 
 func (p *Pont) listConversations(archive bool) {
@@ -698,7 +802,9 @@ func (p *Pont) listConversations(archive bool) {
 	emit("conversations", map[string]any{"items": list})
 	ids := make([]string, 0, len(list))
 	for _, c := range list {
-		ids = append(ids, c.ID)
+		if !c.Large { // pas d'image pour les salons de serveurs
+			ids = append(ids, c.ID)
+		}
 	}
 	if len(ids) > 60 {
 		ids = ids[:60]
@@ -771,14 +877,17 @@ func (p *Pont) noteLast(c *chanState, m Message) bool {
 // ---- Les événements de messages ----
 
 func (p *Pont) onMessage(dm *discordgo.Message, update bool) {
-	if dm == nil || dm.GuildID != "" {
+	if dm == nil {
 		return
 	}
 	p.mu.Lock()
-	c := p.chans[dm.ChannelID]
+	conv := p.convFor(dm.ChannelID)
+	c := p.chans[conv]
 	p.mu.Unlock()
 	if c == nil {
-		if update {
+		// Un salon de serveur inconnu (invisible, ou au-delà du plafond) :
+		// ignoré, sans requête.
+		if update || dm.GuildID != "" {
 			return
 		}
 		// Un message privé d'un fil encore inconnu : on le demande une fois.
@@ -800,7 +909,7 @@ func (p *Pont) onMessage(dm *discordgo.Message, update bool) {
 		p.users[dm.Author.ID] = dm.Author
 	}
 	var m Message
-	old := p.recalled(dm.ChannelID, dm.ID)
+	old := p.recalled(conv, dm.ID)
 	if update && (dm.Author == nil || dm.Timestamp.IsZero()) {
 		// Mise à jour partielle (l'aperçu d'un lien, en général).
 		if old == nil {
@@ -813,6 +922,8 @@ func (p *Pont) onMessage(dm *discordgo.Message, update bool) {
 		}
 	} else {
 		m = convertMessage(dm, p)
+		m.Conv = conv
+		m.MentionsMe, m.ReplyToMe = p.mentionsMe(dm), p.replyToMe(dm, conv)
 		if old != nil {
 			m.TmpID = old.TmpID
 			if len(old.Reactions) == len(m.Reactions) {
@@ -828,6 +939,10 @@ func (p *Pont) onMessage(dm *discordgo.Message, update bool) {
 	changed := false
 	if !update {
 		changed = p.noteLast(c, m)
+		if c.guild != "" && m.MentionsMe && !m.FromMe {
+			c.mentions++
+			changed = true
+		}
 	} else if c.lastID == m.ID {
 		changed = p.noteLast(c, m)
 	}
@@ -841,16 +956,17 @@ func (p *Pont) onMessage(dm *discordgo.Message, update bool) {
 	}
 	p.mu.Unlock()
 	if stopTyping != "" {
-		emit("typing", map[string]any{"conv": dm.ChannelID, "on": false})
+		emit("typing", map[string]any{"conv": conv, "on": false})
 	}
 	emit("message", map[string]any{"item": m})
 	if changed {
-		p.emitConv(dm.ChannelID, false)
+		p.emitConv(conv, false)
 	}
 }
 
-func (p *Pont) onDelete(conv, id string) {
+func (p *Pont) onDelete(channel, id string) {
 	p.mu.Lock()
+	conv := p.convFor(channel)
 	if p.chans[conv] == nil {
 		p.mu.Unlock()
 		return
@@ -867,11 +983,8 @@ func (p *Pont) onDelete(conv, id string) {
 }
 
 func (p *Pont) onReaction(r *discordgo.MessageReaction, add bool) {
-	if r.GuildID != "" {
-		return
-	}
 	p.mu.Lock()
-	old := p.recalled(r.ChannelID, r.MessageID)
+	old := p.recalled(p.convFor(r.ChannelID), r.MessageID)
 	if old == nil {
 		// Un message qu'on n'a pas en mémoire : rien à mettre à jour (pas de
 		// requête pour aller le chercher).
@@ -920,14 +1033,19 @@ func (p *Pont) onReaction(r *discordgo.MessageReaction, add bool) {
 	emit("message", map[string]any{"item": m})
 }
 
-func (p *Pont) onAck(conv, id string) {
+func (p *Pont) onAck(channel, id string) {
 	p.mu.Lock()
+	conv := p.convFor(channel)
 	c := p.chans[conv]
 	changed := false
 	if c != nil && compareIDs(id, c.readID) > 0 {
 		was := c.unread()
 		c.readID = id
 		changed = was != c.unread()
+		if !c.unread() && c.mentions > 0 {
+			c.mentions = 0
+			changed = true
+		}
 	}
 	p.mu.Unlock()
 	if changed {
@@ -937,6 +1055,8 @@ func (p *Pont) onAck(conv, id string) {
 
 func (p *Pont) onTyping(t *discordgo.TypingStart) {
 	if t.GuildID != "" {
+		// Les serveurs : pas de « … » (trop de bruit, et l'interface ne le
+		// montre que pour le fil ouvert).
 		return
 	}
 	p.mu.Lock()

@@ -31,8 +31,10 @@
 //     {"cmd":"login","token":"…"} → le jeton du compte, collé à la main.
 //     Réussite : paired, account, state ready. Échec : error (where : pair ou
 //     login) et state unpaired.
-//   - seulement les messages privés et les groupes privés (pas les salons des
-//     serveurs Discord) : voir le README.
+//   - les messages privés et les groupes privés, et les salons texte et
+//     d'annonces des serveurs que je peux voir (serveurs.go), avec l'id
+//     « g<guilde>:<salon> » ; pour ceux-ci, aucun historique tant qu'on
+//     ne les ouvre pas, et aucun abonnement aux serveurs (op 14).
 //   - pas d'archives chez Discord : Jasette les garde elle-même (marques).
 //
 // Aucune commande ne marque un message comme lu, sauf « read ».
@@ -78,6 +80,17 @@ type Conversation struct {
 	ReadOnly bool     `json:"read_only"`
 	Archived bool     `json:"archived"`
 	E2EE     bool     `json:"e2ee"`
+
+	// Salon de serveur (PROTOCOLE.md, §5.13) : grand espace de l'onglet Groupes.
+	Large        bool   `json:"large,omitempty"`
+	Kind         string `json:"kind,omitempty"`
+	Announce     bool   `json:"announce,omitempty"`
+	Parent       string `json:"parent,omitempty"`
+	ParentName   string `json:"parent_name,omitempty"`
+	Section      string `json:"section,omitempty"`
+	SectionOrder int    `json:"section_order,omitempty"`
+	Order        int    `json:"order,omitempty"`
+	Mentions     int    `json:"mentions,omitempty"`
 }
 
 type Message struct {
@@ -100,6 +113,10 @@ type Message struct {
 	ReplyText string `json:"reply_text,omitempty"`
 
 	LinkPreview *LinkPreview `json:"link_preview,omitempty"`
+
+	// Le message me mentionne, ou répond à un des miens (§5.13).
+	MentionsMe bool `json:"mentions_me,omitempty"`
+	ReplyToMe  bool `json:"reply_to_me,omitempty"`
 }
 
 type Attachment struct {
