@@ -24,6 +24,7 @@ type trameEssai struct {
 		Emojis   map[string]string `json:"emojis"`
 		Archives []string          `json:"archives"`
 		Garder   *bool             `json:"garder_archives"`
+		Cacher   *int              `json:"cacher_apres_jours"`
 		Version  int64             `json:"version"`
 		Refus    string            `json:"refus"`
 	} `json:"marques"`
@@ -223,6 +224,60 @@ func TestGarderArchives(t *testing.T) {
 		t.Fatal(err)
 	}
 	if m := chargerMarques(); m.GarderArchives {
+		t.Fatalf("ancien fichier : %+v", m)
+	}
+}
+
+// cacher_apres_jours : 0 par défaut (et pour un ancien fichier) ; partagé ;
+// un ancien client (sans le champ) ne le remet pas à 0 ; borné ; gardé sur
+// disque. Le serveur ne filtre rien lui-même.
+func TestCacherApresJours(t *testing.T) {
+	s, c := serveurEssai(t)
+
+	s.recevoirMarques(c, json.RawMessage(`{"head":["a"],"version":0}`))
+	tr := lireTrame(t, c)
+	if tr.Marques.Cacher == nil || *tr.Marques.Cacher != 0 {
+		t.Fatalf("défaut : %+v", tr.Marques)
+	}
+
+	s.recevoirMarques(c, json.RawMessage(`{"head":["a"],"cacher_apres_jours":30,"version":1}`))
+	tr = lireTrame(t, c)
+	if tr.Marques.Version != 2 || tr.Marques.Cacher == nil || *tr.Marques.Cacher != 30 {
+		t.Fatalf("30 jours : %+v", tr.Marques)
+	}
+
+	// Un ancien client (sans le champ) ne le remet pas à 0.
+	s.recevoirMarques(c, json.RawMessage(`{"head":["a","b"],"version":2}`))
+	tr = lireTrame(t, c)
+	if tr.Marques.Version != 3 || *tr.Marques.Cacher != 30 {
+		t.Fatalf("ancien client : %+v", tr.Marques)
+	}
+
+	// Relu sur disque.
+	if m := chargerMarques(); m.CacherApresJours != 30 || m.Version != 3 {
+		t.Fatalf("relu : %+v", m)
+	}
+
+	// Seul le réglage change : c'est un changement (nouvelle version).
+	s.recevoirMarques(c, json.RawMessage(`{"head":["a","b"],"cacher_apres_jours":365,"version":3}`))
+	tr = lireTrame(t, c)
+	if tr.Marques.Version != 4 || *tr.Marques.Cacher != 365 {
+		t.Fatalf("1 an : %+v", tr.Marques)
+	}
+
+	// Une valeur absurde : 0 (tout afficher).
+	s.recevoirMarques(c, json.RawMessage(`{"head":["a","b"],"cacher_apres_jours":-5,"version":4}`))
+	tr = lireTrame(t, c)
+	if tr.Marques.Version != 5 || *tr.Marques.Cacher != 0 {
+		t.Fatalf("négatif : %+v", tr.Marques)
+	}
+
+	// Un fichier d'avant ce réglage : 0.
+	t.Setenv("JASETTE_DATA", t.TempDir())
+	if err := ecrireAtomique(marquesPath(), []byte(`{"head":["a"],"garder_archives":true,"version":3}`)); err != nil {
+		t.Fatal(err)
+	}
+	if m := chargerMarques(); m.CacherApresJours != 0 || !m.GarderArchives {
 		t.Fatalf("ancien fichier : %+v", m)
 	}
 }

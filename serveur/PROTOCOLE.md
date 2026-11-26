@@ -353,7 +353,7 @@ compte et le relais `did:web:api.bsky.chat`) :
   conversation Bluesky ; un message : `<conversation>/<id>`. Les résultats de
   `search` ont le DID de la personne pour id (à passer à `new`).
 
-### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, garder_archives)
+### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, garder_archives, cacher_apres_jours)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
@@ -377,12 +377,21 @@ S'y ajoutent deux objets (facultatifs) :
 - `emojis` : l'**emoji rapide** de chaque conversation, `{id: "👍"}` (voir
   « Règle des emojis rapides » plus bas).
 
-Et un réglage (facultatif) :
+Et deux réglages (facultatifs) :
 
 - `garder_archives` (booléen, **faux** par défaut) : « Garder les
   conversations archivées hors de la boîte de réception ». Vrai : un message
   reçu ne ramène plus une conversation de `archives` dans l'Inbox (voir
   « Règle des archives » plus bas).
+- `cacher_apres_jours` (entier, **0** par défaut = tout afficher) : « Cacher
+  les conversations plus anciennes de la boîte de réception », en jours
+  (crans des clients : 0, 7, 15, 30, 60, 90, 182, 365). Seuls les clients
+  filtrent, à l'affichage : la vue Inbox (« Tout ») ne montre plus une
+  conversation dont le dernier message est plus vieux que cette durée, sauf
+  si elle est épinglée ou a des non-lus. Elle reste dans Favoris, Archives,
+  les vues par service, Privées, la recherche et le Head ; un nouveau
+  message la ramène d'elle-même. Le serveur ne filtre rien, le MCP non plus
+  (`lister_conversations` a ses propres filtres et sa `limite`).
 
 C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 
@@ -390,7 +399,7 @@ C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 changement, à **tous** les clients) :
 
 ```json
-{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"version":7}}
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"version":7}}
 ```
 
 `version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
@@ -399,7 +408,7 @@ encore rien reçu (listes vides).
 **Client → serveur** :
 
 ```json
-{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"version":7,"id":12}}
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"version":7,"id":12}}
 ```
 
 - `version` : la dernière version reçue du serveur (0 si aucune).
@@ -418,6 +427,9 @@ encore rien reçu (listes vides).
   ne le remet jamais à faux) ; présent, il est pris tel quel, même d'un
   client en retard (un oui/non : rien à unir, pas de garde-fou). Le serveur
   l'envoie toujours ; absent de `marques.json` (fichier d'avant) : faux.
+- `cacher_apres_jours` : même règle (absent, rien ne change ; présent, pris
+  tel quel). Négatif ou au-delà de 3650 : ramené à 0. Toujours envoyé ;
+  absent de `marques.json` : 0.
 
 Règles du serveur :
 
@@ -456,7 +468,8 @@ donne l'état du serveur et la règle ci-dessus s'applique. Un serveur d'avant
 archives (ou ses privées) pour lui seul, sans les vider. De même pour
 `garder_archives` : un serveur d'avant ce réglage ne l'envoie pas, et le
 client garde le sien pour lui (il l'applique alors lui-même). Union de deux
-copies : `garder_archives` de celle qui passe d'abord.
+copies : `garder_archives` de celle qui passe d'abord. Idem pour
+`cacher_apres_jours`.
 
 **Règle des moods.**
 
@@ -832,8 +845,8 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"svc":…,"ev":{"ev":"messages",…,"cache":true}}` | copie du cache, avant la réponse du pont (§5.8) |
 | C→S | `{"rejouer":"<svc>"}` | redemander l'état d'un service |
 | ↔ | `{"ping":n}` / `{"pong":n}` | signes de vie |
-| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","version"[,"id","refus"]}}` | rejeu, changement |
-| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","version"[,"id"]}}` | changement local |
+| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","version"[,"id","refus"]}}` | rejeu, changement |
+| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","version"[,"id"]}}` | changement local |
 | C→S | `{"get":{"id","chemin","sha256"}}` | télécharger |
 | S→C | `{"fichier":{"id",…}}` | morceaux ou erreur |
 | C→S | `{"put":{"id","nom","donnees","fin"}}` | téléverser |

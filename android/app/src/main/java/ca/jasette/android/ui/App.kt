@@ -124,6 +124,12 @@ fun App(activite: Activity, prive: Boolean = false) {
         Contacts.auPremierPlan(activite)
     }
 
+    // « Afficher » sous la boîte de réception : les conversations plus anciennes
+    // que Marques.cacherApresJours sont montrées jusqu'à ce qu'on quitte la vue
+    // (gardé ici : ouvrir une conversation sur téléphone ne les recache pas).
+    var anciennesMontrees by remember { mutableStateOf(false) }
+    LaunchedEffect(vue) { if (vue != Vue.Tout) anciennesMontrees = false }
+
     fun choisirVue(v: Vue) {
         vue = v
         pile = listOf(Ecran.Liste)
@@ -156,6 +162,8 @@ fun App(activite: Activity, prive: Boolean = false) {
             verrouiller = if (prive) ({ ca.jasette.android.Prive.verrouiller() }) else null,
             serveur = { aller(Ecran.Serveur) },
             connecter = { s, p -> aller(Ecran.Connexion(s, p)) },
+            anciennesMontrees = anciennesMontrees,
+            montrerAnciennes = { anciennesMontrees = true },
         )
     }
 
@@ -228,6 +236,23 @@ fun App(activite: Activity, prive: Boolean = false) {
     }
 }
 
+/** Sous la boîte de réception : « N conversations plus anciennes cachées · Afficher ». */
+@Composable
+private fun LigneAnciennes(n: Int, afficher: () -> Unit) {
+    val texte = if (n == 1) t("1 conversation plus ancienne cachée") else "$n ${t("conversations plus anciennes cachées")}"
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("$texte · ", color = P.textePale, fontSize = 13.sp)
+        Text(
+            t("Afficher"), color = P.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.clickable(onClick = afficher).padding(vertical = 4.dp),
+        )
+    }
+}
+
 /** Le volet de droite sans conversation ouverte. */
 @Composable
 private fun VoletVide() {
@@ -258,6 +283,8 @@ private fun Liste(
     verrouiller: (() -> Unit)?,
     serveur: () -> Unit,
     connecter: (Service, String) -> Unit,
+    anciennesMontrees: Boolean,
+    montrerAnciennes: () -> Unit,
 ) {
     var reorganiser by remember { mutableStateOf(false) }
     var filtre by remember { mutableStateOf("") }
@@ -388,11 +415,22 @@ private fun Liste(
                 ca.jasette.android.plier(c.preview).contains(f) ||
                 c.members.any { ca.jasette.android.plier(it).contains(f) })
         }
+        // « Cacher les conversations plus anciennes de la boîte de réception » :
+        // seulement l'Inbox, sans recherche (Favoris, Archives, services, Privées et
+        // le Head les montrent toujours). Les épinglées et les non lues restent.
+        val jours = Marques.cacherApresJours
+        val recentes = if (vue == Vue.Tout && f.isEmpty() && !anciennesMontrees && jours > 0) {
+            val maintenant = System.currentTimeMillis()
+            filtrees.filter { !ca.jasette.android.tropAncienne(it.time, it.unread, Marques.estEpinglee(it.id), jours, maintenant) }
+        } else {
+            filtrees
+        }
+        val cachees = filtrees.size - recentes.size
         // Les épinglées d'abord, dans l'ordre d'épinglage ; les favoris dans leur ordre.
         val visibles = if (vue == Vue.Favoris) {
             filtrees.sortedBy { Marques.favoris.indexOf(it.id) }
         } else {
-            filtrees.sortedBy(rang)
+            recentes.sortedBy(rang)
         }
         val nbEpingles = if (vue == Vue.Favoris) 0 else visibles.count { rang(it) != Int.MAX_VALUE }
         // Le Head : la grille en haut de la boîte de réception, tous ses ids (chargés ou du cache).
@@ -443,7 +481,7 @@ private fun Liste(
             item { Bannieres(reglages) }
             if (vue == Vue.Tout && accueilVisible()) item { Accueil(serveur, connecter) }
             val vide = when {
-                visibles.isNotEmpty() -> null
+                visibles.isNotEmpty() || cachees > 0 -> null
                 f.isNotEmpty() -> t("Aucun résultat")
                 vue == Vue.Archives && Depot.archivesEnAttente -> t("Chargement des archives…")
                 vue == Vue.Archives -> t("Aucune conversation archivée")
@@ -488,6 +526,8 @@ private fun Liste(
                     }
                 }
             }
+            // « N conversations plus anciennes cachées · Afficher » (jusqu'à ce qu'on quitte la vue).
+            if (cachees > 0) item(key = "anciennes") { LigneAnciennes(cachees, montrerAnciennes) }
             // La recherche : aussi les personnes trouvées par Messenger, Instagram, WhatsApp et Signal
             // (la liste ne contient que les conversations récentes).
             if (f.length >= 2 && vue != Vue.Privees) {

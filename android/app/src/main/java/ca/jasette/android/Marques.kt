@@ -17,6 +17,24 @@ import org.json.JSONObject
 const val EMOJI_RAPIDE_MAX = 32
 
 /**
+ * Les crans du curseur « Cacher les conversations plus anciennes de la boîte de
+ * réception », en jours : tout afficher, 7, 15, 30, 60, 90 jours, 6 mois, 1 an
+ * (comme `CACHER_APRES_JOURS` du bureau).
+ */
+val CACHER_APRES_JOURS = intArrayOf(0, 7, 15, 30, 60, 90, 182, 365)
+
+/** Au-delà de dix ans, autant tout afficher (comme le serveur) ; négatif : 0. */
+fun bornerJours(j: Int): Int = if (j < 0 || j > 3650) 0 else j
+
+/**
+ * Vrai si une conversation est trop vieille pour la boîte de réception : son
+ * dernier message ([tempsMs]) date de plus de [jours] (0 : tout afficher). Une
+ * épinglée ou une non lue reste toujours visible ; une heure inconnue (0) aussi.
+ */
+fun tropAncienne(tempsMs: Long, nonLue: Boolean, epinglee: Boolean, jours: Int, maintenantMs: Long): Boolean =
+    jours > 0 && !epinglee && !nonLue && tempsMs > 0 && maintenantMs - tempsMs > jours * 86_400_000L
+
+/**
  * Les favoris et les épingles (`etoiles`/`head` et `epingles` des réglages du
  * bureau) : des listes d'ids de conversations, dans leur ordre, gardées dans
  * les SharedPreferences privées de l'app.
@@ -90,6 +108,22 @@ object Marques {
     fun choisirGarderArchives(oui: Boolean) {
         if (oui == garderArchives) return
         garderArchives = oui
+        changement()
+    }
+
+    /**
+     * « Cacher les conversations plus anciennes de la boîte de réception », en
+     * jours (0 : tout afficher ; crans dans [CACHER_APRES_JOURS]). Seul
+     * l'affichage filtre ([tropAncienne]). Une marque (`cacher_apres_jours`,
+     * §5.5) : partagée par le serveur Jasette s'il y en a un, gardée ici sinon.
+     */
+    var cacherApresJours by mutableStateOf(0)
+        private set
+
+    fun choisirCacherApresJours(jours: Int) {
+        val j = bornerJours(jours)
+        if (j == cacherApresJours) return
+        cacherApresJours = j
         changement()
     }
 
@@ -188,6 +222,7 @@ object Marques {
         emojis.clear()
         emojis.putAll(lireObjet("emojis", p.getString("emojis", "{}") ?: "{}", EMOJI_RAPIDE_MAX))
         garderArchives = p.getBoolean("garder_archives", false)
+        cacherApresJours = bornerJours(p.getInt("cacher_apres_jours", 0))
         archivesDepuis.clear()
         try {
             val o = JSONObject(p.getString("archives_depuis", "{}") ?: "{}")
@@ -251,6 +286,7 @@ object Marques {
             ?.putString("moods", JSONObject(moods.toMap()).toString())
             ?.putString("emojis", JSONObject(emojis.toMap()).toString())
             ?.putBoolean("garder_archives", garderArchives)
+            ?.putInt("cacher_apres_jours", cacherApresJours)
             ?.putString("archives_depuis", JSONObject(archivesDepuis.toMap()).toString())
             ?.putLong("version", version)
             ?.putBoolean("a_envoyer", aEnvoyer)
@@ -380,9 +416,10 @@ object Marques {
         val moods: Map<String, String>,
         val emojis: Map<String, String>,
         val garderArchives: Boolean,
+        val cacherApresJours: Int,
     ) {
         fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty() && privees.isEmpty() &&
-            moods.isEmpty() && emojis.isEmpty() && !garderArchives
+            moods.isEmpty() && emojis.isEmpty() && !garderArchives && cacherApresJours == 0
 
         /** Chaque liste de this, dans son ordre, puis les ids de [b] qui n'y sont pas. */
         fun union(b: Listes) = Listes(
@@ -397,6 +434,8 @@ object Marques {
             b.emojis + emojis,
             // Un oui/non : celui de this.
             garderArchives,
+            // De même pour la durée.
+            cacherApresJours,
         )
 
         /** Les ids de this absents de [b], liste par liste. */
@@ -406,13 +445,14 @@ object Marques {
             moods.filter { (k, v) -> b.moods[k] != v },
             emojis.filter { (k, v) -> b.emojis[k] != v },
             garderArchives,
+            cacherApresJours,
         )
     }
 
     private fun listes() =
         Listes(
             head.toList(), favoris.toList(), epingles.toList(), archives.toList(), privees.toList(), moods.toMap(), emojis.toMap(),
-            garderArchives,
+            garderArchives, cacherApresJours,
         )
 
     private fun poser(l: Listes) {
@@ -428,6 +468,7 @@ object Marques {
         if (moods.toMap() != l.moods) { moods.clear(); moods.putAll(l.moods) }
         if (emojis.toMap() != l.emojis) { emojis.clear(); emojis.putAll(l.emojis) }
         garderArchives = l.garderArchives
+        cacherApresJours = l.cacherApresJours
     }
 
     /** Envoie une trame au serveur ; faux si la connexion est coupée. Posé par [Depot] en mode client. */
@@ -467,6 +508,7 @@ object Marques {
             .put("moods", JSONObject(l.moods))
             .put("emojis", JSONObject(l.emojis))
             .put("garder_archives", l.garderArchives)
+            .put("cacher_apres_jours", l.cacherApresJours)
             .put("version", version).put("id", prochain)
         if (!envoi(JSONObject().put("marques", corps))) {
             // La connexion tombe : le rejeu suivant tranchera.
@@ -497,6 +539,8 @@ object Marques {
             if (m.optJSONObject("emojis") != null) objetMoods(m.optJSONObject("emojis"), EMOJI_RAPIDE_MAX) else emojis.toMap(),
             // Et pour `garder_archives` (serveur d'avant ce réglage) : le nôtre reste.
             if (m.opt("garder_archives") is Boolean) m.optBoolean("garder_archives") else garderArchives,
+            // Et pour `cacher_apres_jours` (serveur d'avant ce réglage) : le nôtre reste.
+            if (m.opt("cacher_apres_jours") is Number) bornerJours(m.optInt("cacher_apres_jours")) else cacherApresJours,
         )
         val v = m.optLong("version", -1)
         if (v < 0) return

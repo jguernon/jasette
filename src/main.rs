@@ -1442,6 +1442,12 @@ struct Reglages {
     /// serveur Jasette s'il y en a un (marque `garder_archives`). Faux par défaut.
     #[serde(default)]
     garder_archives: bool,
+    /// « Cacher les conversations plus anciennes de la boîte de réception »,
+    /// en jours (0 : tout afficher ; crans dans `CACHER_APRES_JOURS`). Gardé
+    /// ici, et partagé par le serveur Jasette s'il y en a un (marque
+    /// `cacher_apres_jours`). Seul l'affichage filtre ([`trop_ancienne`]).
+    #[serde(default)]
+    cacher_apres_jours: u32,
     /// La grille du Head : son nombre de colonnes, de 3 à 6 (« 5 ») ; vide = 4.
     /// Une ancienne valeur « colonnes x rangées » (« 8x3 ») donne ses colonnes,
     /// ramenées entre 3 et 6. Propre à cet appareil.
@@ -1545,6 +1551,27 @@ fn un() -> f32 {
     1.
 }
 
+/// Les crans du curseur « Cacher les conversations plus anciennes de la boîte
+/// de réception », en jours : tout afficher, 7, 15, 30, 60, 90 jours, 6 mois, 1 an.
+const CACHER_APRES_JOURS: [u32; 8] = [0, 7, 15, 30, 60, 90, 182, 365];
+
+/// Le nom d'un cran de `CACHER_APRES_JOURS` (« Tout afficher », « 7 jours », « 6 mois »…).
+fn nom_cacher_apres(jours: u32) -> String {
+    match jours {
+        0 => t("Tout afficher").into(),
+        182 => t("6 mois").into(),
+        365 => t("1 an").into(),
+        j => format!("{j} {}", t("jours")),
+    }
+}
+
+/// Vrai si une conversation est trop vieille pour la boîte de réception :
+/// son dernier message date de plus de `jours` (0 : tout afficher). Une
+/// épinglée ou une non lue reste toujours visible ; une heure inconnue (0) aussi.
+fn trop_ancienne(conv: &Conv, jours: u32, epinglee: bool, maintenant_ms: i64) -> bool {
+    jours > 0 && !epinglee && !conv.unread && conv.time > 0 && maintenant_ms - conv.time > i64::from(jours) * 86_400_000
+}
+
 /// Les crans du gradateur « Grosseur du texte des messages ».
 const TAILLES_MESSAGES: [f32; 8] = [0.85, 0.92, 1.0, 1.1, 1.2, 1.32, 1.45, 1.6];
 
@@ -1572,6 +1599,7 @@ impl Default for Reglages {
             moods: Default::default(),
             emojis: Default::default(),
             garder_archives: false,
+            cacher_apres_jours: 0,
             head_grille: String::new(),
             marques_cache: HashMap::new(),
             heures_messages: true,
@@ -1683,6 +1711,7 @@ impl Reglages {
                     moods: self.moods.clone(),
                     emojis: self.emojis.clone(),
                     garder_archives: self.garder_archives,
+                    cacher_apres_jours: self.cacher_apres_jours,
                 },
                 version: self.marques_version,
                 a_envoyer: self.marques_a_envoyer,
@@ -1700,6 +1729,7 @@ impl Reglages {
         self.moods = b.copie.listes.moods;
         self.emojis = b.copie.listes.emojis;
         self.garder_archives = b.copie.listes.garder_archives;
+        self.cacher_apres_jours = b.copie.listes.cacher_apres_jours;
         self.marques_version = b.copie.version;
         self.marques_a_envoyer = b.copie.a_envoyer;
         self.marques_serveur = b.serveur;
@@ -1945,6 +1975,10 @@ struct Jasette {
     // La liste
     vue: Vue,
     non_lus_seulement: bool,
+    /// « Afficher » sous la boîte de réception : les conversations plus
+    /// anciennes que `cacher_apres_jours` sont montrées jusqu'à ce qu'on
+    /// quitte la vue (le réglage, lui, ne change pas).
+    anciennes_montrees: bool,
     recherche_ouverte: bool,
     nouveau_ouvert: bool,
     banniere_fermee: bool,
@@ -2857,6 +2891,7 @@ impl Jasette {
             erreur,
             vue: Vue::Tout,
             non_lus_seulement: false,
+            anciennes_montrees: false,
             recherche_ouverte: false,
             nouveau_ouvert: false,
             banniere_fermee: false,
@@ -5969,6 +6004,17 @@ impl Jasette {
         let mut col =
             div().id("convs").flex().flex_col().size_full().overflow_y_scroll().track_scroll(&self.defil_liste).px(px(8.)).pt(px(haut)).pb(px(18.));
         let mut visibles: Vec<&Conv> = source.iter().copied().filter(|c| self.correspond(c)).collect();
+        // « Cacher les conversations plus anciennes de la boîte de réception » :
+        // seulement l'Inbox, sans recherche (Favoris, Archives, services,
+        // Privées et le Head les montrent toujours).
+        let mut cachees = 0;
+        if self.vue == Vue::Tout && self.filtre.is_empty() && !self.anciennes_montrees && self.reglages.cacher_apres_jours > 0 {
+            let maintenant = chrono::Utc::now().timestamp_millis();
+            let jours = self.reglages.cacher_apres_jours;
+            let avant = visibles.len();
+            visibles.retain(|c| !trop_ancienne(c, jours, self.reglages.epingles.contains(&c.id), maintenant));
+            cachees = avant - visibles.len();
+        }
         // Les épinglées d'abord, dans l'ordre où elles ont été épinglées.
         let rang = |c: &Conv| self.reglages.epingles.iter().position(|x| x == &c.id).unwrap_or(usize::MAX);
         visibles.sort_by_key(|c| rang(c));
@@ -5993,11 +6039,14 @@ impl Jasette {
             col = col.child(
                 div().p(px(16.)).text_color(th().texte_pale).child(t("Aucun favori : ajoutez-en par le menu « … » d'une conversation.")),
             );
-        } else if visibles.is_empty() && self.resultats_msgs.is_empty() {
+        } else if visibles.is_empty() && self.resultats_msgs.is_empty() && cachees == 0 {
             col = col.child(div().p(px(16.)).text_color(th().texte_pale).child(t("Aucun résultat")));
         }
         if retro::retro() && !reorganiser {
             col = self.lignes_retro(col.pt(px(4.)).px(px(6.)), visibles, badge, cx);
+            if cachees > 0 {
+                col = col.child(Self::ligne_anciennes(cachees, cx));
+            }
             if !self.filtre.is_empty() {
                 col = self.resultats_messages(col, cx);
             }
@@ -6138,10 +6187,48 @@ impl Jasette {
                     ),
             );
         }
+        if cachees > 0 {
+            col = col.child(Self::ligne_anciennes(cachees, cx));
+        }
         if !self.filtre.is_empty() {
             col = self.resultats_messages(col, cx);
         }
         col
+    }
+
+    /// Sous la boîte de réception : « N conversations plus anciennes cachées ·
+    /// Afficher ». « Afficher » les montre jusqu'à ce qu'on quitte la vue.
+    fn ligne_anciennes(n: usize, cx: &mut Context<Self>) -> impl IntoElement {
+        let texte = if n == 1 {
+            t("1 conversation plus ancienne cachée").to_string()
+        } else {
+            format!("{n} {}", t("conversations plus anciennes cachées"))
+        };
+        div()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .justify_center()
+            .gap(px(4.))
+            .px(px(12.))
+            .pt(px(14.))
+            .pb(px(6.))
+            .text_size(px(12.))
+            .text_color(th().texte_pale)
+            .child(format!("{texte} ·"))
+            .child(
+                div()
+                    .id("afficher-anciennes")
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(th().accent)
+                    .cursor_pointer()
+                    .hover(|s| s.opacity(0.7))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.anciennes_montrees = true;
+                        cx.notify();
+                    }))
+                    .child(t("Afficher")),
+            )
     }
 
     /// La section « Messages » de la recherche : les messages qui contiennent
@@ -8223,18 +8310,20 @@ impl Jasette {
         if self.reglages.liste_grosse { 1.5 } else { 0. }
     }
 
-    /// Le gradateur de la grosseur du texte des messages, avec un aperçu en direct.
-    fn choix_taille_messages(&self, cx: &mut Context<Self>) -> Div {
-        let actuelle = self.reglages.taille_messages;
-        let choisi = TAILLES_MESSAGES
-            .iter()
-            .enumerate()
-            .min_by(|a, b| (a.1 - actuelle).abs().total_cmp(&(b.1 - actuelle).abs()))
-            .map(|(i, _)| i)
-            .unwrap_or(2);
-        let n = TAILLES_MESSAGES.len();
+    /// Une piste à crans (le gradateur de la taille du texte, le curseur des
+    /// conversations plus anciennes) : un trait, un point par cran, un bouton
+    /// sur le cran `choisi`. Un clic, ou glisser le bouton : chaque cran
+    /// survolé, bouton gauche enfoncé, devient la valeur (`poser` : vrai si
+    /// elle a changé).
+    fn piste_crans(
+        id: &'static str,
+        n: usize,
+        choisi: usize,
+        poser: fn(&mut Self, usize) -> bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let mut piste = div().flex_1().flex().flex_row().h(px(32.));
-        for (i, &e) in TAILLES_MESSAGES.iter().enumerate() {
+        for i in 0..n {
             let rempli = i <= choisi;
             let couleur = if rempli { th().accent } else { th().trait_fin };
             // Chaque cran : une moitié de trait de chaque côté (rien au-delà des bouts).
@@ -8242,7 +8331,7 @@ impl Jasette {
             let droite = if i + 1 == n { hsla(0., 0., 0., 0.) } else if i < choisi { th().accent } else { th().trait_fin };
             piste = piste.child(
                 div()
-                    .id(("taille-msg", i))
+                    .id((id, i))
                     .flex_1()
                     .h_full()
                     .relative()
@@ -8250,19 +8339,13 @@ impl Jasette {
                     .items_center()
                     .justify_center()
                     .cursor_pointer()
-                    // Un clic, ou glisser le bouton : chaque cran survolé, bouton gauche
-                    // enfoncé, devient la valeur.
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                        if this.reglages.taille_messages != e {
-                            this.reglages.taille_messages = e;
-                            this.reglages.garder();
+                        if poser(this, i) {
                             cx.notify();
                         }
                     }))
                     .on_mouse_move(cx.listener(move |this, ev: &gpui::MouseMoveEvent, _, cx| {
-                        if ev.pressed_button == Some(MouseButton::Left) && this.reglages.taille_messages != e {
-                            this.reglages.taille_messages = e;
-                            this.reglages.garder();
+                        if ev.pressed_button == Some(MouseButton::Left) && poser(this, i) {
                             cx.notify();
                         }
                     }))
@@ -8281,6 +8364,89 @@ impl Jasette {
                     }),
             );
         }
+        piste
+    }
+
+    /// Le curseur « Cacher les conversations plus anciennes de la boîte de
+    /// réception » : la valeur à droite du titre, la piste à crans dessous.
+    fn choix_cacher_apres(&self, cx: &mut Context<Self>) -> Div {
+        let jours = self.reglages.cacher_apres_jours;
+        // Une valeur hors crans (venue d'ailleurs) : le cran le plus proche.
+        let choisi = CACHER_APRES_JOURS
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, j)| j.abs_diff(jours))
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        let piste = Self::piste_crans("cacher-apres", CACHER_APRES_JOURS.len(), choisi, |this, i| {
+            let j = CACHER_APRES_JOURS[i];
+            if this.reglages.cacher_apres_jours == j {
+                return false;
+            }
+            this.reglages.cacher_apres_jours = j;
+            // Une marque : gardée, et partagée par le serveur Jasette s'il y en a un.
+            this.marques_changees();
+            true
+        }, cx);
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .px(px(16.))
+            .pt(px(13.))
+            .pb(px(8.))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_start()
+                    .gap(px(14.))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.))
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(th().texte_fort)
+                                    .child(t("Cacher les conversations plus anciennes de la boîte de réception")),
+                            )
+                            .child(div().text_size(px(12.)).text_color(th().texte_pale).child(t(
+                                "Selon leur dernier message. Les épinglées et les non lues restent ; Favoris, Archives et la recherche les montrent toujours.",
+                            ))),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(if jours > 0 { th().accent } else { th().texte_pale })
+                            .child(nom_cacher_apres(CACHER_APRES_JOURS[choisi])),
+                    ),
+            )
+            .child(piste)
+    }
+
+    /// Le gradateur de la grosseur du texte des messages, avec un aperçu en direct.
+    fn choix_taille_messages(&self, cx: &mut Context<Self>) -> Div {
+        let actuelle = self.reglages.taille_messages;
+        let choisi = TAILLES_MESSAGES
+            .iter()
+            .enumerate()
+            .min_by(|a, b| (a.1 - actuelle).abs().total_cmp(&(b.1 - actuelle).abs()))
+            .map(|(i, _)| i)
+            .unwrap_or(2);
+        let piste = Self::piste_crans("taille-msg", TAILLES_MESSAGES.len(), choisi, |this, i| {
+            let e = TAILLES_MESSAGES[i];
+            if this.reglages.taille_messages == e {
+                return false;
+            }
+            this.reglages.taille_messages = e;
+            this.reglages.garder();
+            true
+        }, cx);
         let curseur = div()
             .flex()
             .flex_row()
@@ -8858,6 +9024,8 @@ impl Jasette {
                             cx.notify();
                         }),
                     )))
+                    .child(div().h(px(14.)))
+                    .child(groupe().child(self.choix_cacher_apres(cx)))
                     .child(div().h(px(14.)))
                     .child(groupe().child(ligne_interrupteur(
                         "a-apercus-liens",
@@ -10608,6 +10776,10 @@ impl Render for Jasette {
     /// La fenêtre dessine sa propre barre de titre (GNOME ne la dessine pas
     /// pour une app qui demande des décorations côté client) et son bord.
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Quitter la boîte de réception recache les conversations plus anciennes.
+        if self.vue != Vue::Tout || self.section.is_some() {
+            self.anciennes_montrees = false;
+        }
         let contenu = self.rendu(window, cx);
         // Sans ombre : son bord était peint en blanc autour de la fenêtre.
         gpui_component::window_border().shadow_size(px(0.)).child(
@@ -11732,6 +11904,15 @@ fn t(fr: &'static str) -> &'static str {
         "Lilas" => "Lilac",
         "Les emojis que vous utilisez apparaîtront ici." => "Emojis you use will show up here.",
         "Garder les conversations archivées hors de la boîte de réception" => "Keep archived conversations out of the inbox",
+        "Cacher les conversations plus anciennes de la boîte de réception" => "Hide older conversations from the inbox",
+        "Selon leur dernier message. Les épinglées et les non lues restent ; Favoris, Archives et la recherche les montrent toujours." => "Based on their last message. Pinned and unread ones stay; Favorites, Archives and search always show them.",
+        "Tout afficher" => "Show all",
+        "jours" => "days",
+        "Afficher" => "Show",
+        "6 mois" => "6 months",
+        "1 an" => "1 year",
+        "1 conversation plus ancienne cachée" => "1 older conversation hidden",
+        "conversations plus anciennes cachées" => "older conversations hidden",
         "Un nouveau message ne les ramène plus dans la boîte de réception." => "A new message no longer brings them back to the inbox.",
         "Lu" => "Read",
         "Médias" => "Media",
@@ -12181,6 +12362,39 @@ fn main() {
 #[cfg(test)]
 mod essais_reglages {
     use super::*;
+
+    /// Le filtre « Cacher les conversations plus anciennes » : l'âge du dernier
+    /// message, les épinglées, les non lues, la valeur 0 (tout afficher).
+    #[test]
+    fn cacher_conversations_anciennes() {
+        let jour = 86_400_000_i64;
+        let maintenant = 1_000 * jour;
+        let conv = |age_jours: i64, unread: bool| -> Conv {
+            serde_json::from_value(serde_json::json!({
+                "id": "m:1", "name": "Essai", "time": maintenant - age_jours * jour, "unread": unread,
+            }))
+            .unwrap()
+        };
+        // Plus vieille que la durée : cachée ; plus récente : visible.
+        assert!(trop_ancienne(&conv(31, false), 30, false, maintenant));
+        assert!(!trop_ancienne(&conv(29, false), 30, false, maintenant));
+        assert!(trop_ancienne(&conv(8, false), 7, false, maintenant));
+        assert!(!trop_ancienne(&conv(200, false), 365, false, maintenant));
+        // Épinglée : visible.
+        assert!(!trop_ancienne(&conv(400, false), 30, true, maintenant));
+        // Non lue : visible (jamais un message pas encore lu de caché).
+        assert!(!trop_ancienne(&conv(400, true), 30, false, maintenant));
+        // 0 : tout afficher.
+        assert!(!trop_ancienne(&conv(4000, false), 0, false, maintenant));
+        // Heure inconnue : visible.
+        let mut inconnue = conv(0, false);
+        inconnue.time = 0;
+        assert!(!trop_ancienne(&inconnue, 7, false, maintenant));
+        // Les crans et leurs noms.
+        assert_eq!(CACHER_APRES_JOURS[0], 0);
+        assert_eq!(nom_cacher_apres(182), "6 mois");
+        assert_eq!(nom_cacher_apres(15), "15 jours");
+    }
 
     /// charger/garder dans un dossier de .cache (JASETTE_DATA), jamais dans les vraies données.
     #[test]

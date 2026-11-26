@@ -181,6 +181,7 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
             Spacer(Modifier.height(12.dp))
             Text(t("Conversations"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             ChoixGarderArchives()
+            ChoixCacherApres()
 
             Spacer(Modifier.height(12.dp))
             Text(t("Gestes"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -808,6 +809,58 @@ private fun ChoixGarderArchives() {
             }
             Spacer(Modifier.width(12.dp))
             Interrupteur(oui) { ca.jasette.android.Marques.choisirGarderArchives(it) }
+        }
+    }
+}
+
+/** Le nom d'un cran de [CACHER_APRES_JOURS] : « Tout afficher », « 7 jours », « 6 mois »… */
+private fun nomCacherApres(jours: Int): String = when (jours) {
+    0 -> t("Tout afficher")
+    182 -> t("6 mois")
+    365 -> t("1 an")
+    else -> "$jours ${t("jours")}"
+}
+
+/**
+ * Réglages → Conversations : « Cacher les conversations plus anciennes de la
+ * boîte de réception », un curseur à crans (tout afficher par défaut ; marque
+ * `cacher_apres_jours`, partagée par le serveur Jasette s'il y en a un).
+ */
+@Composable
+private fun ChoixCacherApres() {
+    val crans = ca.jasette.android.CACHER_APRES_JOURS
+    val jours = ca.jasette.android.Marques.cacherApresJours
+    // Une valeur hors crans (venue d'ailleurs) : le cran le plus proche.
+    val indice = crans.indices.minByOrNull { kotlin.math.abs(crans[it] - jours) } ?: 0
+    Groupe {
+        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        t("Cacher les conversations plus anciennes de la boîte de réception"),
+                        color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
+                    )
+                    Text(
+                        t("Selon leur dernier message. Les épinglées et les non lues restent ; Favoris, Archives et la recherche les montrent toujours."),
+                        color = P.textePale, fontSize = 13.sp,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    nomCacherApres(crans[indice]), color = if (jours > 0) P.accent else P.textePale,
+                    fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
+                )
+            }
+            androidx.compose.material3.Slider(
+                value = indice.toFloat(),
+                onValueChange = { ca.jasette.android.Marques.choisirCacherApresJours(crans[it.roundToInt().coerceIn(0, crans.lastIndex)]) },
+                valueRange = 0f..crans.lastIndex.toFloat(),
+                steps = crans.size - 2,
+                colors = androidx.compose.material3.SliderDefaults.colors(
+                    thumbColor = P.accent, activeTrackColor = P.accent, inactiveTrackColor = P.filet,
+                    activeTickColor = P.surAccent.copy(alpha = 0.6f), inactiveTickColor = P.textePale.copy(alpha = 0.5f),
+                ),
+            )
         }
     }
 }

@@ -1060,6 +1060,9 @@ impl Drop for PontDistant {
 // Les marques (Head, favoris, épinglées, archives), gardées par le serveur
 // ---------------------------------------------------------------------------
 
+/// Au-delà de dix ans, autant tout afficher (`cacher_apres_jours`, comme le serveur).
+pub const CACHER_APRES_JOURS_MAX: u32 = 3650;
+
 /// Les quatre listes ordonnées d'ids de conversations (PROTOCOLE.md, §5.5).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Marques {
@@ -1079,6 +1082,9 @@ pub struct Marques {
     /// « Garder les conversations archivées hors de la boîte de réception » :
     /// un message reçu ne désarchive plus (PROTOCOLE.md §5.5). Faux par défaut.
     pub garder_archives: bool,
+    /// « Cacher les conversations plus anciennes de la boîte de réception »,
+    /// en jours (0 : tout afficher), PROTOCOLE.md §5.5. Filtré à l'affichage.
+    pub cacher_apres_jours: u32,
 }
 
 impl Marques {
@@ -1091,6 +1097,7 @@ impl Marques {
             && self.moods.is_empty()
             && self.emojis.is_empty()
             && !self.garder_archives
+            && self.cacher_apres_jours == 0
     }
 
     /// Chaque liste de `dabord`, dans son ordre, puis les ids de `ensuite` qui n'y sont pas.
@@ -1116,6 +1123,7 @@ impl Marques {
             emojis: ensuite.emojis.iter().chain(dabord.emojis.iter()).map(|(k, v)| (k.clone(), v.clone())).collect(),
             // Un oui/non : celui de `dabord`.
             garder_archives: dabord.garder_archives,
+            cacher_apres_jours: dabord.cacher_apres_jours,
         }
     }
 
@@ -1131,6 +1139,7 @@ impl Marques {
             moods: self.moods.iter().filter(|(k, v)| autre.moods.get(*k) != Some(*v)).map(|(k, v)| (k.clone(), v.clone())).collect(),
             emojis: self.emojis.iter().filter(|(k, v)| autre.emojis.get(*k) != Some(*v)).map(|(k, v)| (k.clone(), v.clone())).collect(),
             garder_archives: self.garder_archives,
+            cacher_apres_jours: self.cacher_apres_jours,
         }
     }
 }
@@ -1145,6 +1154,7 @@ pub enum NouvelleMarques {
     /// `avec_moods` : de même pour un serveur d'avant `moods`.
     /// `avec_emojis` : de même pour un serveur d'avant `emojis`.
     /// `avec_garder` : de même pour un serveur d'avant `garder_archives`.
+    /// `avec_cacher` : de même pour un serveur d'avant `cacher_apres_jours`.
     Recues {
         marques: Marques,
         version: u64,
@@ -1155,6 +1165,7 @@ pub enum NouvelleMarques {
         avec_moods: bool,
         avec_emojis: bool,
         avec_garder: bool,
+        avec_cacher: bool,
     },
     /// La connexion est tombée : rien n'est plus en vol.
     Coupure,
@@ -1190,6 +1201,12 @@ impl NouvelleMarques {
                 moods: objet("moods", 64),
                 emojis: objet("emojis", EMOJI_RAPIDE_MAX),
                 garder_archives: v.get("garder_archives").and_then(Value::as_bool).unwrap_or(false),
+                // Négatif ou démesuré : 0 (tout afficher), comme le serveur.
+                cacher_apres_jours: v
+                    .get("cacher_apres_jours")
+                    .and_then(Value::as_u64)
+                    .filter(|j| *j <= CACHER_APRES_JOURS_MAX as u64)
+                    .unwrap_or(0) as u32,
             },
             version: v.get("version")?.as_u64()?,
             id: v.get("id").and_then(Value::as_u64),
@@ -1199,6 +1216,7 @@ impl NouvelleMarques {
             avec_moods: v.get("moods").is_some_and(Value::is_object),
             avec_emojis: v.get("emojis").is_some_and(Value::is_object),
             avec_garder: v.get("garder_archives").is_some_and(Value::is_boolean),
+            avec_cacher: v.get("cacher_apres_jours").is_some_and(Value::is_number),
         })
     }
 }
@@ -1262,6 +1280,7 @@ impl SuiviMarques {
             "moods": c.listes.moods,
             "emojis": c.listes.emojis,
             "garder_archives": c.listes.garder_archives,
+            "cacher_apres_jours": c.listes.cacher_apres_jours,
             "version": c.version,
             "id": id,
         }}))
@@ -1285,6 +1304,7 @@ impl SuiviMarques {
                 avec_moods,
                 avec_emojis,
                 avec_garder,
+                avec_cacher,
             } => {
                 // Un serveur d'avant `archives` : nos archives restent les nôtres, jamais vidées.
                 let mut marques = marques;
@@ -1306,6 +1326,10 @@ impl SuiviMarques {
                 // Et pour `garder_archives` (serveur d'avant ce réglage).
                 if !avec_garder {
                     marques.garder_archives = c.listes.garder_archives;
+                }
+                // Et pour `cacher_apres_jours`.
+                if !avec_cacher {
+                    marques.cacher_apres_jours = c.listes.cacher_apres_jours;
                 }
                 (marques, version, id, refus)
             }
@@ -1557,6 +1581,7 @@ mod essais {
             avec_moods: true,
             avec_emojis: true,
             avec_garder: true,
+            avec_cacher: true,
         }
     }
 
@@ -1729,6 +1754,35 @@ mod essais {
     }
 
     #[test]
+    fn marques_cacher_apres_jours() {
+        // Reçu du serveur.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 4, ..Default::default() };
+        let n = NouvelleMarques::lire(&json!({"head": [], "favoris": ["b"], "epingles": [], "archives": [], "privees": [],
+            "moods": {}, "emojis": {}, "garder_archives": false, "cacher_apres_jours": 30, "version": 5}));
+        assert!(s.recu(n.unwrap(), &mut c).is_none());
+        assert_eq!(c.listes.cacher_apres_jours, 30);
+        // Changé ici : envoyé.
+        c.listes.cacher_apres_jours = 365;
+        let t = s.changement(&mut c).expect("envoi");
+        assert_eq!(t["marques"]["cacher_apres_jours"], json!(365));
+        // Un serveur d'avant ce réglage : le nôtre reste.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 4, ..Default::default() };
+        c.listes.cacher_apres_jours = 7;
+        let vieux = NouvelleMarques::lire(&json!({"head": [], "favoris": ["b"], "epingles": [], "archives": [], "privees": [],
+            "moods": {}, "emojis": {}, "garder_archives": false, "version": 5})).unwrap();
+        assert!(s.recu(vieux, &mut c).is_none());
+        assert_eq!(c.listes.cacher_apres_jours, 7);
+        assert!(!c.listes.vide());
+        // Une valeur absurde : 0.
+        let n = NouvelleMarques::lire(&json!({"head": [], "favoris": [], "epingles": [], "archives": [], "privees": [],
+            "cacher_apres_jours": -3, "version": 5})).unwrap();
+        let NouvelleMarques::Recues { marques, .. } = n else { panic!() };
+        assert_eq!(marques.cacher_apres_jours, 0);
+    }
+
+    #[test]
     fn marques_moods() {
         // Les moods vont et viennent ; un objet, jamais null.
         let n = NouvelleMarques::lire(&json!({"head": [], "favoris": [], "epingles": [], "archives": [], "privees": [],
@@ -1786,6 +1840,7 @@ mod essais {
             avec_moods: true,
             avec_emojis: true,
             avec_garder: true,
+            avec_cacher: true,
         };
         let t = s.recu(r, &mut c).expect("renvoi");
         assert_eq!(t["marques"]["favoris"], json!(["z", "a", "y", "x"]));
