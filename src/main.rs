@@ -5699,7 +5699,9 @@ impl Jasette {
                         this.section = Some(Section::Moi);
                         cx.notify();
                     }))
-                    .child(self.mon_avatar(&initiale, 36.)),
+                    .child(self.mon_avatar(&initiale, 36.))
+                    // Ma note « Quoi de neuf ? » : une bulle de pensée sur l'avatar.
+                    .children(self.bulle_note_avatar()),
             )
     }
 

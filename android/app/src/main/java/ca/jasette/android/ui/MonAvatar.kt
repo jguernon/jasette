@@ -48,6 +48,12 @@ import ca.jasette.android.Marques
 import ca.jasette.android.Service
 import ca.jasette.android.t
 import java.io.File
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.ui.graphics.RectangleShape
+import ca.jasette.android.premierEmoji
+import kotlinx.coroutines.delay
 
 /** La photo de mon avatar selon le choix (comme `menu_avatar_vue` du bureau), ou null. */
 private fun photoMoi(): String? = when (Marques.avatarSource) {
@@ -90,11 +96,50 @@ fun AvatarMoi(taille: Dp, source: String = Marques.avatarSource) {
     }
 }
 
+/**
+ * Mon avatar avec, si j'ai une note « Quoi de neuf ? » active, une petite
+ * bulle de pensée en haut à droite, comme les Notes d'Instagram : le premier
+ * émoji de la note, ou « ! ». Ronde, carrée en EGA, Live et Sirène.
+ */
+@Composable
+fun AvatarMoiAvecNote(taille: Dp) {
+    // L'heure avance seule : la note échue s'en va sans nouvel événement.
+    var maintenant by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val note = Notes.actuelle(maintenant)
+    LaunchedEffect(note?.text, note?.expires) {
+        while (true) {
+            val reste = note?.expires?.takeIf { it > 0 }?.minus(System.currentTimeMillis())
+            delay((reste?.plus(500) ?: 30_000L).coerceIn(1_000L, 30_000L))
+            maintenant = System.currentTimeMillis()
+        }
+    }
+    Box {
+        AvatarMoi(taille)
+        if (note != null) {
+            val forme = if (P.carre || P.retro) RectangleShape else CircleShape
+            Box(
+                Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-6).dp).size(18.dp)
+                    // Le liseré de la couleur du fond ; en EGA, un trait plein gris clair.
+                    .background(if (P.ega) P.textePale else P.fond, forme)
+                    .padding(1.5.dp)
+                    .background(if (P.ega) Color.Black else if (P.clair) Color.White else Color(0xFFE5E5EA), forme),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    premierEmoji(note.text) ?: "!",
+                    fontSize = 9.sp, lineHeight = 10.sp, maxLines = 1, fontWeight = FontWeight.Bold,
+                    color = if (P.ega) P.accent else Color(0xFF1C1C1E),
+                )
+            }
+        }
+    }
+}
+
 /** Mon avatar, qui ouvre le menu des choix d'avatar. */
 @Composable
 fun BoutonAvatarMoi(taille: Dp) {
     var menu by remember { mutableStateOf(false) }
-    Box(Modifier.clip(formeRonde).clickable { menu = true }.padding(4.dp)) { AvatarMoi(taille) }
+    Box(Modifier.clickable { menu = true }.padding(4.dp)) { AvatarMoiAvecNote(taille) }
     if (menu) MenuAvatar { menu = false }
 }
 

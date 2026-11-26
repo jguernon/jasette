@@ -280,7 +280,7 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
         NavigationBarItem(
             selected = false,
             onClick = { menuAvatar = true },
-            icon = { AvatarMoi(26.dp) },
+            icon = { AvatarMoiAvecNote(26.dp) },
             label = { Text(t("Moi"), maxLines = 1) },
             colors = couleurs,
         )

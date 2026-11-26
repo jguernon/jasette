@@ -85,8 +85,92 @@ pub(crate) struct Notes {
     pub selecteur_reglages: bool,
     dernier_liste: Option<Instant>,
     dernier_tic: Option<Instant>,
+    /// Ce que montrait la bulle de l'avatar au dernier tic (texte, temps restant) :
+    /// redessiner quand la note échoit ou que le décompte change.
+    dernier_titre: Option<(String, String)>,
     moteur: musique::Moteur,
     pub lecteur: Arc<musique::Lecteur>,
+}
+
+/// Une note est active : non vide et non échue (`expires` 0 : sans échéance).
+pub(crate) fn note_active(n: &NoteMoi, maintenant: i64) -> bool {
+    !n.text.is_empty() && (n.expires == 0 || n.expires > maintenant)
+}
+
+/// L'échéance commune de notes actives : la plus tardive, ou None si l'une
+/// n'en a pas.
+fn echeance<'a>(notes: impl Iterator<Item = &'a NoteMoi>) -> Option<i64> {
+    let mut max = None;
+    for n in notes {
+        if n.expires == 0 {
+            return None;
+        }
+        max = max.max(Some(n.expires));
+    }
+    max
+}
+
+/// Le temps restant, court : « 23 h », « 45 min » (au moins 1 min).
+pub(crate) fn restant_court(ms: i64) -> String {
+    let min = (ms.max(0) + 59_999) / 60_000;
+    if min >= 60 { format!("{} h", min / 60) } else { format!("{} min", min.max(1)) }
+}
+
+/// Un caractère qui commence un émoji (Extended_Pictographic, à peu près,
+/// et les indicateurs régionaux des drapeaux).
+fn debut_emoji(c: char) -> bool {
+    matches!(c as u32,
+        0x1F000..=0x1FAFF | 0x2600..=0x27BF | 0x2300..=0x23FF | 0x2B05..=0x2B55 | 0x2190..=0x21FF
+        | 0x2934 | 0x2935 | 0x25AA..=0x25FE | 0x203C | 0x2049 | 0x2122 | 0x2139 | 0x3030 | 0x303D
+        | 0x3297 | 0x3299 | 0x00A9 | 0x00AE)
+        && !(0x1F3FB..=0x1F3FF).contains(&(c as u32))
+}
+
+fn regional(c: char) -> bool {
+    (0x1F1E6..=0x1F1FF).contains(&(c as u32))
+}
+
+/// Ce qui prolonge un émoji : sélecteur de variante, teinte de peau, touche,
+/// étiquettes (drapeaux d'Écosse, etc.).
+fn modificateur(c: char) -> bool {
+    matches!(c as u32, 0xFE0F | 0xFE0E | 0x1F3FB..=0x1F3FF | 0x20E3 | 0xE0020..=0xE007F)
+}
+
+/// Le premier émoji du texte, avec ses séquences (ZWJ, variante, peau,
+/// drapeaux, touches « 1️⃣ ») ; None s'il n'y en a pas.
+pub(crate) fn premier_emoji(texte: &str) -> Option<String> {
+    let v: Vec<char> = texte.chars().collect();
+    let mut i = 0;
+    while i < v.len() {
+        let c = v[i];
+        // Une touche : chiffre, # ou *, (FE0F), 20E3.
+        let touche = (c.is_ascii_digit() || c == '#' || c == '*')
+            && (v.get(i + 1) == Some(&'\u{20E3}') || (v.get(i + 1) == Some(&'\u{FE0F}') && v.get(i + 2) == Some(&'\u{20E3}')));
+        if !touche && !debut_emoji(c) {
+            i += 1;
+            continue;
+        }
+        let mut fin = i + 1;
+        if regional(c) {
+            if v.get(fin).copied().is_some_and(regional) {
+                fin += 1;
+            }
+            return Some(v[i..fin].iter().collect());
+        }
+        loop {
+            while v.get(fin).copied().is_some_and(modificateur) {
+                fin += 1;
+            }
+            // ZWJ suivi d'un autre émoji : la séquence continue.
+            if v.get(fin) == Some(&'\u{200D}') && v.get(fin + 1).copied().is_some_and(debut_emoji) {
+                fin += 2;
+                continue;
+            }
+            break;
+        }
+        return Some(v[i..fin].iter().collect());
+    }
+    None
 }
 
 impl Jasette {
@@ -174,7 +258,23 @@ impl Jasette {
     /// Ma note actuelle : la plus récente des notes non vides et non échues.
     pub(crate) fn note_actuelle(&self) -> Option<&NoteMoi> {
         let m = maintenant_ms();
-        self.notes.moi.values().filter(|n| !n.text.is_empty() && (n.expires == 0 || n.expires > m)).max_by_key(|n| n.time)
+        self.notes.moi.values().filter(|n| note_active(n, m)).max_by_key(|n| n.time)
+    }
+
+    /// L'échéance (ms) de ma note actuelle : la plus tardive des services qui
+    /// la portent ; None si l'un d'eux la garde sans échéance (une bio).
+    pub(crate) fn echeance_note(&self) -> Option<i64> {
+        let m = maintenant_ms();
+        let a = self.note_actuelle()?;
+        echeance(self.notes.moi.values().filter(|n| note_active(n, m) && n.text == a.text))
+    }
+
+    /// Ce que montre la bulle de l'avatar : (texte, temps restant).
+    fn etat_bulle_avatar(&self) -> (String, String) {
+        match self.note_actuelle() {
+            Some(a) => (a.text.clone(), self.echeance_note().map(|e| restant_court(e - maintenant_ms())).unwrap_or_default()),
+            None => (String::new(), String::new()),
+        }
     }
 
     fn basculer_service_note(&mut self, s: Service, cx: &mut Context<Self>) {
@@ -254,6 +354,10 @@ impl Jasette {
             return false;
         }
         self.notes.dernier_tic = Some(Instant::now());
+        // La bulle de l'avatar : la note échue s'en va, le décompte avance.
+        let titre = self.etat_bulle_avatar();
+        let redessiner = self.notes.dernier_titre.as_ref() != Some(&titre);
+        self.notes.dernier_titre = Some(titre);
         // Les notes des contacts : au plus toutes les 15 minutes, si le Head en montre.
         if self.reglages.notes_contacts
             && self.instagram.etat == Etat::Pret
@@ -266,7 +370,7 @@ impl Jasette {
             }
             self.notes.dernier_liste = Some(Instant::now());
         }
-        self.musique_tic()
+        self.musique_tic() | redessiner
     }
 
     /// Cet appareil publie-t-il la musique ?
@@ -344,6 +448,57 @@ impl Jasette {
                 .flex_row()
                 .justify_center()
                 .child(bulle),
+        )
+    }
+
+    /// La bulle de pensée sur mon avatar (bouton « Moi » du rail) quand j'ai
+    /// une note active : son premier émoji, ou « ! ». En haut à droite, en
+    /// débordant un peu, comme les Notes d'Instagram ; le survol montre la note
+    /// et le temps restant (« En vacances ! · 23 h »).
+    pub(crate) fn bulle_note_avatar(&self) -> Option<gpui::Stateful<Div>> {
+        let a = self.note_actuelle()?;
+        let carre = th().ega || retro::retro();
+        let signe = premier_emoji(&a.text).unwrap_or_else(|| "!".into());
+        let infobulle: SharedString = match self.echeance_note() {
+            Some(e) => format!("{} · {}", a.text, restant_court(e - maintenant_ms())).into(),
+            None => a.text.clone().into(),
+        };
+        Some(
+            div()
+                .id("note-avatar")
+                .absolute()
+                .top(px(-3.))
+                .right(px(-3.))
+                .size(px(18.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .when(!carre, |d| d.rounded(px(9.)))
+                .overflow_hidden()
+                .bg(if th().ega { c(0x000000) } else { ton(blanc(1.), c(0xe5e5ea)) })
+                // Le liseré de la couleur du fond détache la bulle de l'avatar ;
+                // en EGA, un trait plein gris clair.
+                .border_2()
+                .border_color(if th().ega {
+                    th().texte_pale
+                } else if th().sombre || retro::retro() {
+                    alpha(th().rail, 1.)
+                } else {
+                    c(FOND)
+                })
+                .when(!carre, |d| d.shadow(ombre_flottante()))
+                .text_size(px(10.))
+                .line_height(px(12.))
+                .font_weight(FontWeight::BOLD)
+                .text_color(if th().ega {
+                    th().accent
+                } else if th().sombre {
+                    c(0x1c1c1e)
+                } else {
+                    th().texte_fort
+                })
+                .child(signe)
+                .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(infobulle.clone()).build(w, cx)),
         )
     }
 
@@ -798,5 +953,55 @@ impl Jasette {
             .child(div().h(px(14.)))
             .child(self.selecteur_services(true, cx))
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod essais_bulle_note {
+    use super::*;
+
+    fn note(text: &str, time: i64, expires: i64, source: &str) -> NoteMoi {
+        NoteMoi { text: text.into(), time, expires, source: source.into(), main_text: String::new() }
+    }
+
+    #[test]
+    fn restant() {
+        assert_eq!(restant_court(23 * 3_600_000 + 59 * 60_000), "23 h");
+        assert_eq!(restant_court(24 * 3_600_000), "24 h");
+        assert_eq!(restant_court(45 * 60_000), "45 min");
+        assert_eq!(restant_court(10_000), "1 min");
+        assert_eq!(restant_court(-5), "1 min");
+    }
+
+    #[test]
+    fn active_et_echue() {
+        assert!(note_active(&note("Salut", 1, 1000, "main"), 999));
+        assert!(!note_active(&note("Salut", 1, 1000, "main"), 1000));
+        assert!(note_active(&note("Bio", 1, 0, "main"), i64::MAX));
+        assert!(!note_active(&note("", 1, 0, "main"), 0));
+    }
+
+    #[test]
+    fn echeance_commune() {
+        let a = note("x", 1, 500, "main");
+        let b = note("x", 2, 900, "main");
+        let bio = note("x", 3, 0, "main");
+        assert_eq!(echeance([&a, &b].into_iter()), Some(900));
+        assert_eq!(echeance([&a, &bio].into_iter()), None);
+    }
+
+    #[test]
+    fn emoji() {
+        assert_eq!(premier_emoji("🌴 En vacances").as_deref(), Some("🌴"));
+        assert_eq!(premier_emoji("🎵 Écoute Daft Punk").as_deref(), Some("🎵"));
+        assert_eq!(premier_emoji("En vacances !"), None);
+        assert_eq!(premier_emoji("Go 🇨🇦 !").as_deref(), Some("🇨🇦"));
+        assert_eq!(premier_emoji("👩‍💻 au boulot").as_deref(), Some("👩‍💻"));
+        assert_eq!(premier_emoji("Famille 👨‍👩‍👧‍👦").as_deref(), Some("👨‍👩‍👧‍👦"));
+        assert_eq!(premier_emoji("❤️ toi").as_deref(), Some("❤️"));
+        assert_eq!(premier_emoji("👍🏽 ok").as_deref(), Some("👍🏽"));
+        assert_eq!(premier_emoji("Top 1️⃣").as_deref(), Some("1️⃣"));
+        assert_eq!(premier_emoji("🏴󠁧󠁢󠁳󠁣󠁴󠁿 Écosse").as_deref(), Some("🏴󠁧󠁢󠁳󠁣󠁴󠁿"));
+        assert_eq!(premier_emoji("Prix 12 $"), None);
     }
 }
