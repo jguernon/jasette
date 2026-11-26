@@ -5676,16 +5676,6 @@ impl Jasette {
                     })
                     .children(self.menu_rail_vue(svc, cx))
             }))
-            // Les services non connectés n'ont pas d'icône : « ••• » mène à l'ajout de compte.
-            .child(
-                Self::bouton_rail("r-plus-services", false)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.section = Some(Section::Comptes);
-                        this.ajout_compte = true;
-                        cx.notify();
-                    }))
-                    .child(icone("ellipsis", 22., ton(th().texte_fort, th().icone))),
-            )
             .child(div().flex_1())
             // L'engrenage : les Réglages ; mon avatar, en dessous : mon profil
             // (« Quoi de neuf ? », l'avatar), comme « Moi » sur Android.
