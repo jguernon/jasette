@@ -25,6 +25,7 @@ mod ecrit;
 mod sons;
 mod notes;
 mod musique;
+mod groupes;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -1254,6 +1255,32 @@ struct Conv {
     /// Messenger : conversation chiffrée de bout en bout.
     #[serde(default)]
     e2ee: bool,
+    /// Un grand espace (salon de serveur Discord, canal ou supergroupe
+    /// Telegram, communauté WhatsApp…) : il vit dans l'onglet Groupes
+    /// (PROTOCOLE.md §5.13).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    large: bool,
+    /// Sa sorte : "server", "channel", "supergroup", "community"…
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    kind: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    announce: bool,
+    /// L'espace qui le contient (serveur Discord « g<guilde> », communauté
+    /// WhatsApp), sans préfixe de service, et son nom.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    parent: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    parent_name: String,
+    /// La catégorie d'un salon Discord, sa position, et celle du salon.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    section: String,
+    #[serde(default)]
+    section_order: i64,
+    #[serde(default)]
+    order: i64,
+    /// Les non-lus qui me mentionnent (compte du service).
+    #[serde(default)]
+    mentions: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1323,6 +1350,12 @@ struct Msg {
     /// L'aperçu du lien fourni par le service (PROTOCOLE.md, §5.9).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     link_preview: Option<apercu::Apercu>,
+    /// Me mentionne, ou répond à un de mes messages (§5.13) : un grand
+    /// espace revient alors dans la boîte de réception.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    mentions_me: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    reply_to_me: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1427,6 +1460,8 @@ impl Souci {
 enum Vue {
     Tout,
     Favoris,
+    /// L'onglet Groupes : les grands espaces (PROTOCOLE.md §5.13).
+    Groupes,
     Archives,
     /// La Liste privée (src/prive.rs), ouverte par le code.
     Privees,
@@ -1502,6 +1537,14 @@ struct Reglages {
     /// `privees`, partagée par le serveur). Le code est dans prive.json.
     #[serde(default)]
     privees: Vec<String>,
+    /// Les grands espaces (onglet Groupes) montrés aussi dans la boîte de
+    /// réception (marque `groupes_inbox`, partagée par le serveur).
+    #[serde(default)]
+    groupes_inbox: Vec<String>,
+    /// Les sections de l'onglet Groupes repliées (noms de services), sur cet
+    /// appareil seulement.
+    #[serde(default)]
+    groupes_replies: Vec<String>,
     /// Le Mood de chaque conversation (id → nom dans `mood::MOODS`) : gardé
     /// ici, et partagé par le serveur Jasette s'il y en a un (marque `moods`).
     #[serde(default)]
@@ -1701,6 +1744,8 @@ impl Default for Reglages {
             archives: Vec::new(),
             archives_depuis: HashMap::new(),
             privees: Vec::new(),
+            groupes_inbox: Vec::new(),
+            groupes_replies: Vec::new(),
             moods: Default::default(),
             emojis: Default::default(),
             garder_archives: false,
@@ -1820,6 +1865,7 @@ impl Reglages {
                     epingles: self.epingles.clone(),
                     archives: self.archives.clone(),
                     privees: self.privees.clone(),
+                    groupes_inbox: self.groupes_inbox.clone(),
                     moods: self.moods.clone(),
                     emojis: self.emojis.clone(),
                     garder_archives: self.garder_archives,
@@ -1844,6 +1890,7 @@ impl Reglages {
         self.epingles = b.copie.listes.epingles;
         self.archives = b.copie.listes.archives;
         self.privees = b.copie.listes.privees;
+        self.groupes_inbox = b.copie.listes.groupes_inbox;
         self.moods = b.copie.listes.moods;
         self.emojis = b.copie.listes.emojis;
         self.garder_archives = b.copie.listes.garder_archives;
@@ -2215,6 +2262,12 @@ struct Jasette {
     /// Les conversations marquées absentes (service déconnecté, pas prêt ou
     /// absent), refaites depuis `marques_cache` : montrées grisées.
     fantomes: Vec<Conv>,
+    /// Les grands espaces qui demandent mon attention (mention ou réponse à
+    /// moi depuis la dernière lecture) : ils reviennent dans la boîte.
+    attention: HashSet<String>,
+    /// L'onglet Groupes : le serveur Discord ouvert (id de conversation de
+    /// son parent, préfixé : « d:g<guilde> »).
+    serveur_ouvert: Option<String>,
     /// Les fantômes ont été faits une première fois (au démarrage, sans attendre un pont).
     fantomes_faits: bool,
     /// Les photos des contacts du téléphone (pont Google), en mémoire seulement :
@@ -2393,6 +2446,17 @@ fn installer_icone(blanche: bool) -> Result<(), String> {
 fn est_numero(s: &str) -> bool {
     let chiffres = s.chars().filter(char::is_ascii_digit).count();
     chiffres >= 3 && s.chars().all(|c| c.is_ascii_digit() || " +-().".contains(c))
+}
+
+/// Un grand espace qui reste dans l'onglet Groupes (PROTOCOLE.md §5.13) :
+/// `large`, pas dans `groupes_inbox`, pas épinglé, sans mention non lue ni
+/// attention en cours. Toute autre conversation va dans la boîte.
+fn hors_boite(c: &Conv, groupes_inbox: &[String], epingles: &[String], attention: &HashSet<String>) -> bool {
+    c.large
+        && !(c.unread && c.mentions > 0)
+        && !groupes_inbox.contains(&c.id)
+        && !epingles.contains(&c.id)
+        && !attention.contains(&c.id)
 }
 
 fn service_de(id: &str) -> Service {
@@ -3120,6 +3184,8 @@ impl Jasette {
             ouvrir_apres: HashSet::new(),
             avatars: cache.avatars,
             fantomes: Vec::new(),
+            attention: HashSet::new(),
+            serveur_ouvert: None,
             fantomes_faits: false,
             photos_numeros: HashMap::new(),
             photos_noms: HashMap::new(),
@@ -3881,15 +3947,45 @@ impl Jasette {
                     && !self.reglages.archivee_jasette(&c.id)
                     && !self.privee(&c.id)
                     && !self.reglages.service_cache(service_de(&c.id))
+                    && !self.hors_boite(c)
             })
             .count()
+    }
+
+    /// Un grand espace (§5.13) qui reste dans l'onglet Groupes : ni montré
+    /// dans la boîte (`groupes_inbox`), ni épinglé, ni en attente de mon
+    /// attention (mention ou réponse à moi depuis la dernière lecture).
+    fn hors_boite(&self, c: &Conv) -> bool {
+        hors_boite(c, &self.reglages.groupes_inbox, &self.reglages.epingles, &self.attention)
+    }
+
+    /// Les grands espaces non lus (la pastille de l'onglet Groupes).
+    fn non_lus_groupes(&self) -> usize {
+        self.convs.iter().filter(|c| c.large && c.unread && !self.privee(&c.id)).count()
+    }
+
+    /// « Montrer dans la boîte de réception » (oui) ou « Garder dans Groupes
+    /// seulement » (non) : la marque `groupes_inbox`.
+    fn montrer_dans_boite(&mut self, id: &str, oui: bool) {
+        let l = &mut self.reglages.groupes_inbox;
+        if oui == l.iter().any(|x| x == id) {
+            return;
+        }
+        if oui {
+            l.push(id.to_string());
+        } else {
+            l.retain(|x| x != id);
+        }
+        self.marques_changees();
     }
 
     /// Les non-lues d'un service (son icône du rail, quand il est caché de la boîte).
     fn non_lus_service(&self, s: Service) -> usize {
         self.convs
             .iter()
-            .filter(|c| c.unread && service_de(&c.id) == s && !self.reglages.archivee_jasette(&c.id) && !self.privee(&c.id))
+            .filter(|c| {
+                c.unread && service_de(&c.id) == s && !self.reglages.archivee_jasette(&c.id) && !self.privee(&c.id) && !self.hors_boite(c)
+            })
             .count()
     }
 
@@ -3990,6 +4086,7 @@ impl Jasette {
         r.epingles.retain(|x| x != id);
         r.archives.retain(|x| x != id);
         r.privees.retain(|x| x != id);
+        r.groupes_inbox.retain(|x| x != id);
         let mood = r.moods.remove(id).is_some() | r.emojis.remove(id).is_some();
         if mood || r.head.len() + r.etoiles.len() + r.epingles.len() + r.archives.len() + r.privees.len() != avant {
             self.marques_changees();
@@ -4030,6 +4127,8 @@ impl Jasette {
     }
 
     fn marquer_lu(&mut self, id: &str) {
+        // Lue : un grand espace ne demande plus mon attention.
+        self.attention.remove(id);
         let mut lu = false;
         if let Some(conv) = self.convs.iter_mut().find(|c| c.id == id) {
             lu = conv.unread;
@@ -4082,6 +4181,11 @@ impl Jasette {
             return;
         }
         let conv = self.conv(&m.conv);
+        // Un grand espace hors de la boîte : seulement une mention ou une
+        // réponse à moi (pas tout le bavardage d'un serveur Discord).
+        if conv.is_some_and(|c| self.hors_boite(c)) && !(m.mentions_me || m.reply_to_me) {
+            return;
+        }
         let nom = conv.map(|c| c.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| "Jasette".into());
         let titre = match conv {
             Some(c) if c.group && !m.sender.is_empty() => format!("{} · {nom}", m.sender),
@@ -4388,6 +4492,11 @@ impl Jasette {
                         conv.time = conv.time.max(m.time);
                         if nouveau && !m.from_me && !(ouverte && actif) {
                             conv.unread = true;
+                            // Une mention ou une réponse à moi : le grand
+                            // espace revient dans la boîte (§5.13).
+                            if conv.large && (m.mentions_me || m.reply_to_me) {
+                                self.attention.insert(m.conv.clone());
+                            }
                         }
                     }
                     self.convs.sort_by(|a, b| b.time.cmp(&a.time));
@@ -4761,6 +4870,8 @@ impl Jasette {
             reactions: Vec::new(),
             read_by: Vec::new(),
             link_preview: None,
+            mentions_me: false,
+            reply_to_me: false,
         });
         self.descendre = true;
         tmp
@@ -5579,6 +5690,7 @@ impl Jasette {
     fn rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let en_reglages = self.section.is_some();
         let non_lus = self.non_lus();
+        let non_lus_groupes = self.non_lus_groupes();
         let gm_probleme = !matches!(self.etat, Etat::Pret | Etat::Demarrage);
         // Google garde sa pastille de la boîte ; caché, il montre ses propres non-lues.
         let non_lus_gm = if self.reglages.service_cache(Service::GoogleMessages) {
@@ -5628,6 +5740,23 @@ impl Jasette {
                         cx.notify();
                     }))
                     .child(icone("star", 22., ton(th().texte_fort, th().icone))),
+            )
+            // L'onglet Groupes : serveurs Discord, canaux Telegram, communautés
+            // WhatsApp… (PROTOCOLE.md §5.13).
+            .child(
+                Self::bouton_rail("r-groupes", !en_reglages && self.galerie.is_none() && self.vue == Vue::Groupes)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.section = None;
+                        this.galerie = None;
+                        if this.vue == Vue::Groupes {
+                            // Un second clic revient à la liste des services.
+                            this.serveur_ouvert = None;
+                        }
+                        this.vue = Vue::Groupes;
+                        cx.notify();
+                    }))
+                    .child(icone("users", 22., ton(th().texte_fort, th().icone)))
+                    .when(non_lus_groupes > 0, |d| d.child(pastille_nombre(non_lus_groupes, ton(th().texte_pale, th().accent)))),
             )
             .child(
                 Self::bouton_rail("r-archives", !en_reglages && self.vue == Vue::Archives)
@@ -5814,6 +5943,10 @@ impl Jasette {
         {
             return false;
         }
+        // Les grands espaces vivent dans l'onglet Groupes (§5.13).
+        if matches!(self.vue, Vue::Tout | Vue::Service(_)) && self.hors_boite(conv) {
+            return false;
+        }
         if self.vue == Vue::Favoris && !self.reglages.etoiles.contains(&conv.id) {
             return false;
         }
@@ -5844,6 +5977,7 @@ impl Jasette {
         let titre = t(match self.vue {
             Vue::Tout => "Boîte de réception",
             Vue::Favoris => "Favoris",
+            Vue::Groupes => "Groupes",
             Vue::Archives => "Archives",
             Vue::Privees => "Privées",
             Vue::Service(s) => s.nom(),
@@ -6234,6 +6368,9 @@ impl Jasette {
     }
 
     fn liste(&self, haut: f32, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.vue == Vue::Groupes {
+            return self.liste_groupes(haut, cx);
+        }
         // Les archives de Jasette quittent la boîte et rejoignent celles des services.
         let source = match self.vue {
             Vue::Archives => self.toutes_archives(),
@@ -8077,7 +8214,8 @@ impl Jasette {
             .child(icone("info", 17., if details { th().accent } else { th().texte_pale }));
         let service = self.choisie.as_deref().map(service_de).unwrap_or(Service::GoogleMessages);
         // Appel et vidéo : par l'app « normale » du service.
-        let appel = self.choisie.as_deref().and_then(|id| self.conv(id)).and_then(adresse_appel);
+        // (Pas pour un grand espace : salon de serveur, canal…)
+        let appel = self.choisie.as_deref().and_then(|id| self.conv(id)).filter(|c| !c.large).and_then(adresse_appel);
         let bouton_appel = |cle: &'static str, ic: &'static str, adresse: String| {
             div()
                 .id(cle)
@@ -8226,7 +8364,11 @@ impl Jasette {
                     choisie.clone(),
                     |d, conv| {
                         let nom = if conv.name.is_empty() { t("Sans nom").to_string() } else { conv.name.clone() };
-                        let detail = if conv.group {
+                        let detail = if conv.large {
+                            // Un grand espace : où il vit (serveur, communauté) plutôt
+                            // qu'un nombre de participants inconnu.
+                            groupes::detail_espace(&conv, service)
+                        } else if conv.group {
                             format!("{} participants · {}", conv.members.len() + 1, service.nom())
                         } else {
                             let qui = conv.members.first().filter(|m| **m != nom).cloned();
@@ -8519,6 +8661,7 @@ impl Jasette {
                     cx.notify();
                 })),
             )
+            .children(self.item_menu_groupes(&id, cx))
             .children(self.item_menu_prive(&id, cx))
             .children(self.item_menu_mood(&id, cx))
             .child(item("menu-rechercher", "search", t("Rechercher").into(), th().texte_fort, true).on_click(cx.listener(
@@ -12559,6 +12702,7 @@ fn t(fr: &'static str) -> &'static str {
         "Ajouter au Head" => "Add to Head",
         "Retirer du Head" => "Remove from Head",
         "Favoris" => "Favorites",
+        "Groupes" => "Groups",
         "Aucun favori : ajoutez-en par le menu « … » d'une conversation." => "No favorites yet: add some from a conversation's “…” menu.",
         "Retirer des favoris" => "Remove from favorites",
         "Désarchiver" => "Unarchive",

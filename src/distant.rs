@@ -1080,6 +1080,9 @@ pub struct Marques {
     /// La Liste privée : cachées partout sauf dans la vue Privées. Le code
     /// qui ouvre cette vue n'est jamais synchronisé.
     pub privees: Vec<String>,
+    /// Les grands espaces (`large` : salons de serveurs Discord, canaux
+    /// Telegram…) montrés aussi dans la boîte de réception (PROTOCOLE.md §5.13).
+    pub groupes_inbox: Vec<String>,
     /// Le Mood de chaque conversation (id → nom), PROTOCOLE.md §5.5.
     pub moods: BTreeMap<String, String>,
     /// L'emoji rapide de chaque conversation (id → emoji), PROTOCOLE.md §5.5.
@@ -1159,6 +1162,7 @@ impl Marques {
             && self.epingles.is_empty()
             && self.archives.is_empty()
             && self.privees.is_empty()
+            && self.groupes_inbox.is_empty()
             && self.moods.is_empty()
             && self.emojis.is_empty()
             && !self.garder_archives
@@ -1188,6 +1192,7 @@ impl Marques {
             epingles: unir(&dabord.epingles, &ensuite.epingles),
             archives: unir(&dabord.archives, &ensuite.archives),
             privees: unir(&dabord.privees, &ensuite.privees),
+            groupes_inbox: unir(&dabord.groupes_inbox, &ensuite.groupes_inbox),
             // Les moods de `dabord` gagnent, `ensuite` ajoute les ids qui manquent.
             moods: ensuite.moods.iter().chain(dabord.moods.iter()).map(|(k, v)| (k.clone(), v.clone())).collect(),
             // De même pour les emojis rapides.
@@ -1213,6 +1218,7 @@ impl Marques {
             epingles: garder(&self.epingles, &autre.epingles),
             archives: garder(&self.archives, &autre.archives),
             privees: garder(&self.privees, &autre.privees),
+            groupes_inbox: garder(&self.groupes_inbox, &autre.groupes_inbox),
             moods: self.moods.iter().filter(|(k, v)| autre.moods.get(*k) != Some(*v)).map(|(k, v)| (k.clone(), v.clone())).collect(),
             emojis: self.emojis.iter().filter(|(k, v)| autre.emojis.get(*k) != Some(*v)).map(|(k, v)| (k.clone(), v.clone())).collect(),
             garder_archives: self.garder_archives,
@@ -1234,6 +1240,7 @@ pub enum NouvelleMarques {
     /// `avec_archives` : faux pour un serveur d'avant `archives` (champ absent) ;
     /// le client garde alors ses archives pour lui seul.
     /// `avec_privees` : de même pour un serveur d'avant `privees`.
+    /// `avec_groupes` : de même pour un serveur d'avant `groupes_inbox`.
     /// `avec_moods` : de même pour un serveur d'avant `moods`.
     /// `avec_emojis` : de même pour un serveur d'avant `emojis`.
     /// `avec_garder` : de même pour un serveur d'avant `garder_archives`.
@@ -1248,6 +1255,7 @@ pub enum NouvelleMarques {
         refus: Option<String>,
         avec_archives: bool,
         avec_privees: bool,
+        avec_groupes: bool,
         avec_moods: bool,
         avec_emojis: bool,
         avec_garder: bool,
@@ -1287,6 +1295,7 @@ impl NouvelleMarques {
                 epingles: liste("epingles")?,
                 archives: liste("archives")?,
                 privees: liste("privees")?,
+                groupes_inbox: liste("groupes_inbox")?,
                 moods: objet("moods", 64),
                 emojis: objet("emojis", EMOJI_RAPIDE_MAX),
                 garder_archives: v.get("garder_archives").and_then(Value::as_bool).unwrap_or(false),
@@ -1315,6 +1324,7 @@ impl NouvelleMarques {
             refus: v.get("refus").and_then(Value::as_str).map(str::to_string),
             avec_archives: v.get("archives").is_some_and(Value::is_array),
             avec_privees: v.get("privees").is_some_and(Value::is_array),
+            avec_groupes: v.get("groupes_inbox").is_some_and(Value::is_array),
             avec_moods: v.get("moods").is_some_and(Value::is_object),
             avec_emojis: v.get("emojis").is_some_and(Value::is_object),
             avec_garder: v.get("garder_archives").is_some_and(Value::is_boolean),
@@ -1382,6 +1392,7 @@ impl SuiviMarques {
             "epingles": c.listes.epingles,
             "archives": c.listes.archives,
             "privees": c.listes.privees,
+            "groupes_inbox": c.listes.groupes_inbox,
             "moods": c.listes.moods,
             "emojis": c.listes.emojis,
             "garder_archives": c.listes.garder_archives,
@@ -1412,6 +1423,7 @@ impl SuiviMarques {
                 refus,
                 avec_archives,
                 avec_privees,
+                avec_groupes,
                 avec_moods,
                 avec_emojis,
                 avec_garder,
@@ -1428,6 +1440,10 @@ impl SuiviMarques {
                 // De même pour les privées (serveur d'avant `privees`).
                 if !avec_privees {
                     marques.privees = c.listes.privees.clone();
+                }
+                // Et pour `groupes_inbox` (serveur d'avant l'onglet Groupes).
+                if !avec_groupes {
+                    marques.groupes_inbox = c.listes.groupes_inbox.clone();
                 }
                 // Et pour les moods (serveur d'avant `moods`).
                 if !avec_moods {
@@ -1707,6 +1723,7 @@ mod essais {
         NouvelleMarques::Recues { marques, version, id, refus: None,
             avec_archives: true,
             avec_privees: true,
+            avec_groupes: true,
             avec_moods: true,
             avec_emojis: true,
             avec_garder: true,
@@ -1819,6 +1836,28 @@ mod essais {
         .unwrap();
         assert!(s.recu(vieux, &mut c).is_none());
         assert_eq!(c.listes.privees, ["s:1"]);
+    }
+
+    #[test]
+    fn marques_groupes_inbox() {
+        // `groupes_inbox` va et vient comme les autres listes (§5.13).
+        let n = NouvelleMarques::lire(&json!({"head": [], "favoris": [], "epingles": [], "archives": [], "privees": [],
+            "groupes_inbox": ["d:g5:11"], "version": 3}));
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques::default();
+        s.recu(n.unwrap(), &mut c);
+        assert_eq!(c.listes.groupes_inbox, ["d:g5:11"]);
+        c.listes.groupes_inbox.push("t:c9".into());
+        let t = s.changement(&mut c).expect("envoi");
+        assert_eq!(t["marques"]["groupes_inbox"], json!(["d:g5:11", "t:c9"]));
+        // Un serveur d'avant l'onglet Groupes : les nôtres restent.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 4, ..Default::default() };
+        c.listes.groupes_inbox = vec!["d:g5:11".into()];
+        let vieux = NouvelleMarques::lire(&json!({"head": [], "favoris": ["b"], "epingles": [], "archives": [], "privees": [], "version": 4}))
+            .unwrap();
+        assert!(s.recu(vieux, &mut c).is_none());
+        assert_eq!(c.listes.groupes_inbox, ["d:g5:11"]);
     }
 
     #[test]
@@ -2054,6 +2093,7 @@ mod essais {
             refus: Some("non".into()),
             avec_archives: true,
             avec_privees: true,
+            avec_groupes: true,
             avec_moods: true,
             avec_emojis: true,
             avec_garder: true,
