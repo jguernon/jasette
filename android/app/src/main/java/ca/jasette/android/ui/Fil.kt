@@ -663,6 +663,10 @@ private fun Message(
                         )
                     }
                     apercuLien?.let { (a, image) -> CarteApercu(a, image, appuiLong) }
+                } else {
+                    // Il ne restait que l'adresse (un partage Instagram, par exemple) :
+                    // la carte seule, sans bulle vide.
+                    apercuLien?.let { (a, image) -> CarteApercu(a, image, appuiLong) }
                 }
             }
             if (aReactions) {
