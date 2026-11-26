@@ -160,7 +160,7 @@ fn lignes_puces(filtre: Option<Service>, services: &[Service], largeur: f32) -> 
 }
 
 /// Une puce : service (avec son logo), « Tout » ou personne choisie.
-fn puce(id: impl Into<gpui::ElementId>, actif: bool, permise: bool) -> gpui::Stateful<Div> {
+pub(super) fn puce(id: impl Into<gpui::ElementId>, actif: bool, permise: bool) -> gpui::Stateful<Div> {
     div()
         .id(id)
         .flex_none()

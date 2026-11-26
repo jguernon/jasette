@@ -734,14 +734,34 @@ impl Jasette {
             let video = if service == Service::GoogleMessages { None } else { appel.clone() };
             let conv_medias = self.choisie.clone();
             let conv_mood = conv.id.clone();
+            // À deux : toucher le nom ou l'avatar ouvre la fiche de la personne.
+            let a_fiche = !conv.group && !conv.large;
+            let (id_a, id_b) = (conv.id.clone(), conv.id.clone());
             entete = entete
                 .when(!live, |d| {
-                    d.child(div().relative().child(self.avatar_conv(&conv, &nom, 40.)).when(self.en_ligne(&conv), |d| {
-                        d.child(presence::point_presence(40., c(0xe4e8df)))
-                    }))
+                    d.child(
+                        div()
+                            .id("entete-personne-avatar")
+                            .relative()
+                            .when(a_fiche, |d| {
+                                d.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
+                                    this.ouvrir_fiche(&id_a);
+                                    cx.notify();
+                                }))
+                            })
+                            .child(self.avatar_conv(&conv, &nom, 40.))
+                            .when(self.en_ligne(&conv), |d| d.child(presence::point_presence(40., c(0xe4e8df)))),
+                    )
                 })
                 .child(
                     div()
+                        .id("entete-personne")
+                        .when(a_fiche, |d| {
+                            d.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
+                                this.ouvrir_fiche(&id_b);
+                                cx.notify();
+                            }))
+                        })
                         .flex_1()
                         .min_w(px(0.))
                         .flex()
@@ -832,9 +852,23 @@ impl Jasette {
                         .bg(linear_gradient(180., linear_color_stop(c(0xf2f8ff), 0.), linear_color_stop(c(0xe4effc), 1.)))
                 })
                 .when(!live, |d| d.ml(px(6.)))
-                .child(div().relative().child(self.avatar_conv(conv, &nom, 112.)).when(self.en_ligne(conv), |d| {
-                    d.child(presence::point_presence(112., if live { c(0xeef5fe) } else { c(GRIS_2000) }))
-                }))
+                .child({
+                    // La grande photo de l'autre ouvre aussi sa fiche.
+                    let id = conv.id.clone();
+                    div()
+                        .id("photo-personne")
+                        .relative()
+                        .when(!conv.group && !conv.large, |d| {
+                            d.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
+                                this.ouvrir_fiche(&id);
+                                cx.notify();
+                            }))
+                        })
+                        .child(self.avatar_conv(conv, &nom, 112.))
+                        .when(self.en_ligne(conv), |d| {
+                            d.child(presence::point_presence(112., if live { c(0xeef5fe) } else { c(GRIS_2000) }))
+                        })
+                })
                 .child(self.mon_avatar(&self.initiale_moi(), 112.))
         });
         let corps = div()

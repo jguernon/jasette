@@ -63,6 +63,8 @@ pub(crate) struct NoteMoi {
 #[derive(Clone, Debug)]
 pub(crate) struct NoteContact {
     pub text: String,
+    /// Sa date (ms) ; 0 : inconnue. Une note vit 24 h.
+    pub time: i64,
 }
 
 /// Où en est une publication, par service.
@@ -213,7 +215,10 @@ impl Jasette {
                 continue;
             };
             if !conv.is_empty() && !text.trim().is_empty() {
-                self.notes.contacts.insert(conv.to_string(), NoteContact { text: text.trim().to_string() });
+                self.notes.contacts.insert(conv.to_string(), NoteContact {
+                    text: text.trim().to_string(),
+                    time: it.get("time").and_then(Value::as_i64).unwrap_or(0),
+                });
             }
         }
     }

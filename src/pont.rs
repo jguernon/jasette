@@ -22,7 +22,7 @@ pub mod distant;
 
 #[allow(unused_imports)] // utilisés par l'interface (réglages « serveur Jasette »)
 pub use distant::{ConfigServeur, PORT_PAR_DEFAUT, Verification, code_verification, jumeler, verifier_serveur};
-pub use distant::{CopieMarques, Marques, NouvelleMarques, SuiviMarques};
+pub use distant::{CopieMarques, Marques, NouvelleMarques, Personne, SuiviMarques, nettoyer_personnes, nettoyer_refus};
 pub use distant::{EtatMcp, commande_mcp, hote_de};
 pub use distant::apercu_lien;
 

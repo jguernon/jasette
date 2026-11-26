@@ -1068,6 +1068,85 @@ impl Drop for PontDistant {
 /// Au-delà de dix ans, autant tout afficher (`cacher_apres_jours`, comme le serveur).
 pub const CACHER_APRES_JOURS_MAX: u32 = 3650;
 
+/// Une personne de la fiche de la personne (marque `personnes`,
+/// PROTOCOLE.md §5.5, « Règle des personnes ») : des conversations à deux,
+/// reliées à la main, qui sont la même personne. `principal` : la
+/// conversation dont le nom est celui de la personne (vide : aucune).
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Personne {
+    pub id: String,
+    #[serde(default)]
+    pub convs: Vec<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub principal: String,
+}
+
+/// Comme le serveur : ids de personne uniques (64 octets au plus), chaque
+/// conversation à une seule personne, 32 conversations au plus par personne,
+/// au moins deux, `principal` parmi elles ; 2000 personnes au plus.
+pub fn nettoyer_personnes(l: Vec<Personne>) -> Vec<Personne> {
+    let mut r: Vec<Personne> = Vec::new();
+    let mut vues: std::collections::HashSet<String> = Default::default();
+    for p in l {
+        if p.id.is_empty() || p.id.len() > 64 || r.iter().any(|x| x.id == p.id) {
+            continue;
+        }
+        let mut convs: Vec<String> = Vec::new();
+        for c in p.convs {
+            if c.is_empty() || c.len() > 512 || vues.contains(&c) || convs.contains(&c) {
+                continue;
+            }
+            if convs.len() >= 32 {
+                break;
+            }
+            convs.push(c);
+        }
+        if convs.len() < 2 {
+            continue;
+        }
+        vues.extend(convs.iter().cloned());
+        let principal = if convs.contains(&p.principal) { p.principal } else { String::new() };
+        r.push(Personne { id: p.id, convs, principal });
+        if r.len() >= 2000 {
+            break;
+        }
+    }
+    r
+}
+
+/// Comme le serveur : paires de deux ids différents, rangées, sans doublon, 5000 au plus.
+pub fn nettoyer_refus(l: Vec<(String, String)>) -> Vec<(String, String)> {
+    let mut r: Vec<(String, String)> = Vec::new();
+    for (a, b) in l {
+        if a.is_empty() || b.is_empty() || a == b || a.len() > 512 || b.len() > 512 {
+            continue;
+        }
+        let p = if b < a { (b, a) } else { (a, b) };
+        if !r.contains(&p) {
+            r.push(p);
+        }
+        if r.len() >= 5000 {
+            break;
+        }
+    }
+    r
+}
+
+/// Union des personnes : celles de `dabord` (même id : la sienne, entière),
+/// puis celles de `ensuite` qu'il n'a pas, moins les conversations déjà
+/// reliées par `dabord`.
+pub fn unir_personnes(dabord: &[Personne], ensuite: &[Personne]) -> Vec<Personne> {
+    let mut r: Vec<Personne> = dabord.to_vec();
+    for p in ensuite {
+        if dabord.iter().any(|d| d.id == p.id) {
+            continue;
+        }
+        let convs = p.convs.iter().filter(|c| !dabord.iter().any(|d| d.convs.contains(c))).cloned().collect();
+        r.push(Personne { id: p.id.clone(), convs, principal: p.principal.clone() });
+    }
+    nettoyer_personnes(r)
+}
+
 /// Les quatre listes ordonnées d'ids de conversations (PROTOCOLE.md, §5.5).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Marques {
@@ -1111,6 +1190,10 @@ pub struct Marques {
     /// Les services où « Quoi de neuf ? » publie (marque `notes_services`) ;
     /// vide : « tout » (`["tout"]` sur le fil). Toujours passé par `services_notes`.
     pub notes_services: Vec<String>,
+    /// La fiche de la personne : les liens faits à la main (marque `personnes`).
+    pub personnes: Vec<Personne>,
+    /// Les paires « Pas la même personne » (marque `personnes_refus`), rangées.
+    pub personnes_refus: Vec<(String, String)>,
 }
 
 /// La marque `notes_musique_format` rangée comme dans `Marques` (vide : "artiste").
@@ -1169,6 +1252,8 @@ impl Marques {
             && self.notes_musique.is_empty()
             && self.notes_musique_format.is_empty()
             && self.notes_services.is_empty()
+            && self.personnes.is_empty()
+            && self.personnes_refus.is_empty()
     }
 
     /// Chaque liste de `dabord`, dans son ordre, puis les ids de `ensuite` qui n'y sont pas.
@@ -1201,6 +1286,8 @@ impl Marques {
             notes_musique: dabord.notes_musique.clone(),
             notes_musique_format: dabord.notes_musique_format.clone(),
             notes_services: dabord.notes_services.clone(),
+            personnes: unir_personnes(&dabord.personnes, &ensuite.personnes),
+            personnes_refus: nettoyer_refus(dabord.personnes_refus.iter().chain(ensuite.personnes_refus.iter()).cloned().collect()),
         }
     }
 
@@ -1223,6 +1310,9 @@ impl Marques {
             notes_musique: self.notes_musique.clone(),
             notes_musique_format: self.notes_musique_format.clone(),
             notes_services: self.notes_services.clone(),
+            // Les personnes changées ici (absentes ou différentes chez `autre`).
+            personnes: self.personnes.iter().filter(|p| !autre.personnes.contains(p)).cloned().collect(),
+            personnes_refus: self.personnes_refus.iter().filter(|p| !autre.personnes_refus.contains(p)).cloned().collect(),
         }
     }
 }
@@ -1241,6 +1331,7 @@ pub enum NouvelleMarques {
     /// `avec_presence` : de même pour un serveur d'avant `presence_en_ligne`.
     /// `avec_sons` : de même pour un serveur d'avant `sons_conversation`.
     /// `avec_notes` : de même pour un serveur d'avant les marques `notes_*`.
+    /// `avec_personnes` : de même pour un serveur d'avant `personnes`.
     Recues {
         marques: Marques,
         version: u64,
@@ -1255,6 +1346,7 @@ pub enum NouvelleMarques {
         avec_presence: bool,
         avec_sons: bool,
         avec_notes: bool,
+        avec_personnes: bool,
     },
     /// La connexion est tombée : rien n'est plus en vol.
     Coupure,
@@ -1309,6 +1401,8 @@ impl NouvelleMarques {
                     .unwrap_or_default(),
                 notes_musique_format: format_musique(v.get("notes_musique_format")),
                 notes_services: services_notes(v.get("notes_services")),
+                personnes: lire_personnes(v.get("personnes")),
+                personnes_refus: lire_refus(v.get("personnes_refus")),
             },
             version: v.get("version")?.as_u64()?,
             id: v.get("id").and_then(Value::as_u64),
@@ -1322,8 +1416,48 @@ impl NouvelleMarques {
             avec_presence: v.get("presence_en_ligne").is_some_and(Value::is_boolean),
             avec_sons: v.get("sons_conversation").is_some_and(|j| j.is_string() || j.is_boolean()),
             avec_notes: v.get("notes_services").is_some_and(Value::is_array),
+            avec_personnes: v.get("personnes").is_some_and(Value::is_array),
         })
     }
+}
+
+/// `personnes` d'une trame, avec indulgence (un élément mal formé est sauté).
+pub fn lire_personnes(v: Option<&Value>) -> Vec<Personne> {
+    let Some(Value::Array(a)) = v else { return Vec::new() };
+    nettoyer_personnes(
+        a.iter()
+            .filter_map(|p| {
+                Some(Personne {
+                    id: p.get("id")?.as_str()?.to_string(),
+                    convs: p.get("convs")?.as_array()?.iter().filter_map(Value::as_str).map(str::to_string).collect(),
+                    principal: p.get("principal").and_then(Value::as_str).unwrap_or_default().to_string(),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// `personnes_refus` d'une trame : des paires `[a, b]`.
+pub fn lire_refus(v: Option<&Value>) -> Vec<(String, String)> {
+    let Some(Value::Array(a)) = v else { return Vec::new() };
+    nettoyer_refus(
+        a.iter()
+            .filter_map(|p| match p.as_array()?.as_slice() {
+                [a, b] => Some((a.as_str()?.to_string(), b.as_str()?.to_string())),
+                _ => None,
+            })
+            .collect(),
+    )
+}
+
+/// Les personnes pour le fil.
+pub fn personnes_json(l: &[Personne]) -> Value {
+    json!(l)
+}
+
+/// Les refus pour le fil : `[[a, b]]`.
+pub fn refus_json(l: &[(String, String)]) -> Value {
+    Value::Array(l.iter().map(|(a, b)| json!([a, b])).collect())
 }
 
 /// Un emoji rapide fait au plus 32 octets (un graphème, PROTOCOLE.md §5.5).
@@ -1392,6 +1526,8 @@ impl SuiviMarques {
             "notes_musique": c.listes.notes_musique,
             "notes_musique_format": if c.listes.notes_musique_format.is_empty() { "artiste" } else { c.listes.notes_musique_format.as_str() },
             "notes_services": services_notes_json(&c.listes.notes_services),
+            "personnes": personnes_json(&c.listes.personnes),
+            "personnes_refus": refus_json(&c.listes.personnes_refus),
             "version": c.version,
             "id": id,
         }}))
@@ -1419,6 +1555,7 @@ impl SuiviMarques {
                 avec_presence,
                 avec_sons,
                 avec_notes,
+                avec_personnes,
             } => {
                 // Un serveur d'avant `archives` : nos archives restent les nôtres, jamais vidées.
                 let mut marques = marques;
@@ -1459,6 +1596,11 @@ impl SuiviMarques {
                     marques.notes_musique = c.listes.notes_musique.clone();
                     marques.notes_musique_format = c.listes.notes_musique_format.clone();
                     marques.notes_services = c.listes.notes_services.clone();
+                }
+                // Et pour `personnes` (serveur d'avant la fiche de la personne).
+                if !avec_personnes {
+                    marques.personnes = c.listes.personnes.clone();
+                    marques.personnes_refus = c.listes.personnes_refus.clone();
                 }
                 (marques, version, id, refus)
             }
@@ -1714,6 +1856,7 @@ mod essais {
             avec_presence: true,
             avec_sons: true,
             avec_notes: true,
+            avec_personnes: true,
         }
     }
 
@@ -1851,6 +1994,46 @@ mod essais {
         let u = Marques::union(&a, &b);
         assert_eq!(u.emojis.get("k").map(String::as_str), Some("👍"));
         assert_eq!(u.emojis.len(), 2);
+    }
+
+    #[test]
+    fn marques_personnes() {
+        let p1 = Personne { id: "p1".into(), convs: vec!["123".into(), "m:9".into()], principal: "123".into() };
+        // Reçues : nettoyées (élément mal formé sauté, refus rangé).
+        let n = NouvelleMarques::lire(&json!({"head": [], "favoris": [], "epingles": [], "archives": [], "privees": [],
+            "personnes": [{"id": "p1", "convs": ["123", "m:9"], "principal": "123"}, {"id": 4}, {"id": "p2", "convs": ["x"]}],
+            "personnes_refus": [["m:9", "123"], ["a"]], "version": 3}));
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 2, ..Default::default() };
+        assert!(s.recu(n.unwrap(), &mut c).is_none());
+        assert_eq!(c.listes.personnes, vec![p1.clone()]);
+        assert_eq!(c.listes.personnes_refus, vec![("123".to_string(), "m:9".to_string())]);
+        // Changées ici : envoyées, en listes.
+        c.listes.personnes_refus.clear();
+        let t = s.changement(&mut c).expect("envoi");
+        assert_eq!(t["marques"]["personnes"][0]["convs"], json!(["123", "m:9"]));
+        assert_eq!(t["marques"]["personnes_refus"], json!([]));
+        // Un serveur d'avant `personnes` : les nôtres restent.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 4, ..Default::default() };
+        c.listes.personnes = vec![p1.clone()];
+        let vieux = NouvelleMarques::lire(&json!({"head": [], "favoris": ["b"], "epingles": [], "archives": [], "privees": [], "version": 5})).unwrap();
+        assert!(s.recu(vieux, &mut c).is_none());
+        assert_eq!(c.listes.personnes, vec![p1.clone()]);
+        assert!(!c.listes.vide());
+        // Union : même id, la nôtre gagne ; une conversation à une seule personne.
+        let a = Marques { personnes: vec![p1.clone()], ..Default::default() };
+        let b = Marques {
+            personnes: vec![
+                Personne { id: "p1".into(), convs: vec!["123".into(), "i:4".into()], principal: String::new() },
+                Personne { id: "p3".into(), convs: vec!["m:9".into(), "w:1".into(), "t:2".into()], principal: String::new() },
+            ],
+            ..Default::default()
+        };
+        let u = Marques::union(&a, &b);
+        assert_eq!(u.personnes.len(), 2);
+        assert_eq!(u.personnes[0], p1);
+        assert_eq!(u.personnes[1].convs, vec!["w:1".to_string(), "t:2".into()]);
     }
 
     #[test]
@@ -2061,6 +2244,7 @@ mod essais {
             avec_presence: true,
             avec_sons: true,
             avec_notes: true,
+            avec_personnes: true,
         };
         let t = s.recu(r, &mut c).expect("renvoi");
         assert_eq!(t["marques"]["favoris"], json!(["z", "a", "y", "x"]));

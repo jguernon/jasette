@@ -27,6 +27,7 @@ mod notes;
 mod pop;
 mod musique;
 mod groupes;
+mod personne;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -1593,6 +1594,13 @@ struct Reglages {
     /// Les services où publier ; vide : « Tout » (marque `notes_services`).
     #[serde(default)]
     notes_services: Vec<String>,
+    /// La fiche de la personne : les conversations reliées à la main
+    /// (marque `personnes`) et les refus « Pas la même personne » (marque
+    /// `personnes_refus`). Partagés par le serveur Jasette s'il y en a un.
+    #[serde(default)]
+    personnes: Vec<pont::Personne>,
+    #[serde(default)]
+    personnes_refus: Vec<(String, String)>,
     /// L'audience des notes Instagram : 0 abonnés mutuels, 1 amis proches.
     /// Propre à cet appareil.
     #[serde(default)]
@@ -1756,6 +1764,8 @@ impl Default for Reglages {
             notes_musique: String::new(),
             notes_musique_format: String::new(),
             notes_services: Vec::new(),
+            personnes: Vec::new(),
+            personnes_refus: Vec::new(),
             notes_audience: 0,
             head_grille: String::new(),
             marques_cache: HashMap::new(),
@@ -1875,6 +1885,8 @@ impl Reglages {
                     notes_musique: self.notes_musique.clone(),
                     notes_musique_format: self.notes_musique_format.clone(),
                     notes_services: self.notes_services.clone(),
+                    personnes: self.personnes.clone(),
+                    personnes_refus: self.personnes_refus.clone(),
                 },
                 version: self.marques_version,
                 a_envoyer: self.marques_a_envoyer,
@@ -1899,6 +1911,8 @@ impl Reglages {
         self.notes_musique = b.copie.listes.notes_musique;
         self.notes_musique_format = b.copie.listes.notes_musique_format;
         self.notes_services = b.copie.listes.notes_services;
+        self.personnes = b.copie.listes.personnes;
+        self.personnes_refus = b.copie.listes.personnes_refus;
         self.marques_version = b.copie.version;
         self.marques_a_envoyer = b.copie.a_envoyer;
         self.marques_serveur = b.serveur;
@@ -2278,6 +2292,13 @@ struct Jasette {
     /// par clé de numéro (10 derniers chiffres), et par nom plié (noms ambigus écartés).
     photos_numeros: HashMap<String, PathBuf>,
     photos_noms: HashMap<String, PathBuf>,
+    /// Les contacts du téléphone (pont Google), en mémoire seulement : (nom,
+    /// numéro E.164), pour la fiche de la personne (src/personne.rs).
+    contacts_tel: Vec<(String, String)>,
+    /// La fiche de la personne ouverte (src/personne.rs), et sa recherche
+    /// « Lier une autre conversation… ».
+    fiche: Option<personne::Fiche>,
+    fiche_recherche: Entity<InputState>,
     /// La dernière demande `contacts` au pont Google (refaite toutes les 30 minutes).
     contacts_demandes: Option<Instant>,
     /// Le résumé des services (Comptes, mode client) : l'état de chaque
@@ -2826,6 +2847,16 @@ impl Jasette {
         .detach();
         let numero = cx.new(|cx| InputState::new(window, cx).placeholder(t("Nom ou numéro de téléphone")));
         let nom_groupe = cx.new(|cx| InputState::new(window, cx).placeholder(t("Nom du groupe (facultatif)")));
+        // La fiche de la personne : « Lier une autre conversation… ».
+        let fiche_recherche = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(if anglais() { "Search a conversation" } else { "Chercher une conversation" })
+        });
+        cx.subscribe_in(&fiche_recherche, window, |_this, _state, ev: &InputEvent, _window, cx| {
+            if let InputEvent::Change = ev {
+                cx.notify();
+            }
+        })
+        .detach();
         // WhatsApp : « Associer avec un numéro de téléphone » (Entrée envoie).
         let telephone_wa = cx.new(|cx| InputState::new(window, cx).placeholder(t("Numéro, ex. : +1 514 555 1234")));
         cx.subscribe_in(&telephone_wa, window, |this, _state, ev: &InputEvent, _window, cx| {
@@ -3195,6 +3226,9 @@ impl Jasette {
             fantomes_faits: false,
             photos_numeros: HashMap::new(),
             photos_noms: HashMap::new(),
+            contacts_tel: Vec::new(),
+            fiche: None,
+            fiche_recherche,
             contacts_demandes: None,
             etats_depuis: HashMap::new(),
             serveur_perdu: None,
@@ -5296,6 +5330,19 @@ impl Jasette {
         let mut carres: HashMap<String, PathBuf> = HashMap::new();
         let mut au_carre = |c: String| carres.entry(c.clone()).or_insert_with(|| carre(PathBuf::from(c))).clone();
         self.photos_numeros = numeros.into_iter().map(|(k, c)| (k, au_carre(c))).collect();
+        // Nom et numéro de chaque contact : le pont de la fiche de la personne.
+        self.contacts_tel = v["items"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|x| {
+                let nom = x.get("name")?.as_str()?.trim();
+                let num = personne::cle_tel(x.get("id")?.as_str()?)?;
+                (!nom.is_empty()).then(|| (nom.to_string(), num))
+            })
+            .take(20_000)
+            .collect();
         self.photos_noms = noms.into_iter().filter_map(|(k, e)| Some((k, au_carre(e??)))).collect();
     }
 
@@ -8432,20 +8479,40 @@ impl Jasette {
                             }
                         };
                         let en_ligne = self.en_ligne(&conv);
-                        d.child(badge_service(
+                        // À deux : toucher le nom ou l'avatar ouvre la fiche de la
+                        // personne (src/personne.rs). Un groupe ne change pas.
+                        let a_fiche = !conv.group && !conv.large;
+                        let id_fiche = conv.id.clone();
+                        d.child(
                             div()
-                                .relative()
-                                .child(self.avatar_conv(&conv, &nom, 38.))
-                                .when(en_ligne, |d| d.child(presence::point_presence(38., givre_haut))),
-                        ))
-                        .child(
-                            div()
+                                .id("entete-personne")
                                 .flex()
-                                .flex_col()
+                                .flex_row()
+                                .items_center()
+                                .gap(px(12.))
                                 .flex_1()
                                 .min_w(px(0.))
-                                .child(div().truncate().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(nom))
-                                .child(div().truncate().text_size(px(12.)).text_color(th().texte_pale).child(detail)),
+                                .when(a_fiche, |d| {
+                                    d.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
+                                        this.ouvrir_fiche(&id_fiche);
+                                        cx.notify();
+                                    }))
+                                })
+                                .child(badge_service(
+                                    div()
+                                        .relative()
+                                        .child(self.avatar_conv(&conv, &nom, 38.))
+                                        .when(en_ligne, |d| d.child(presence::point_presence(38., givre_haut))),
+                                ))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .flex_1()
+                                        .min_w(px(0.))
+                                        .child(div().truncate().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(nom))
+                                        .child(div().truncate().text_size(px(12.)).text_color(th().texte_pale).child(detail)),
+                                ),
                         )
                         .child(boutons_appel)
                         .child(bouton_medias)
@@ -11531,7 +11598,16 @@ impl Jasette {
                         cx.notify();
                     }
                 } else if k.key == "escape" {
-                    if this.mood_feuille.take().is_some() {
+                    if this.fiche.as_ref().is_some_and(|f| f.lier) {
+                        if let Some(f) = this.fiche.as_mut() {
+                            f.lier = false;
+                        }
+                        cx.stop_propagation();
+                        cx.notify();
+                    } else if this.fiche.take().is_some() {
+                        cx.stop_propagation();
+                        cx.notify();
+                    } else if this.mood_feuille.take().is_some() {
                         cx.stop_propagation();
                         cx.notify();
                     } else if this.barre_reactions.is_some() || this.reaction_cible.is_some() {
@@ -11627,6 +11703,8 @@ impl Jasette {
         .when(th().sirene, |d| d.child(self.barre_etat_sirene()))
         // La feuille « Mood » de la conversation ouverte.
         .children(self.feuille_mood(cx))
+        // La fiche de la personne (src/personne.rs).
+        .children(self.fiche_vue(cx))
         .when_some(self.apercu.clone(), |d, chemin| {
             d.child(
                 div()
