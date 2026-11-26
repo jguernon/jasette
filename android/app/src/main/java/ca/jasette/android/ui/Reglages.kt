@@ -43,6 +43,9 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.border
@@ -252,7 +255,10 @@ private fun PageSection(
         when (s) {
             SectionReglages.COMPTES -> SectionComptes(connecter)
             SectionReglages.NOTIFICATIONS -> SectionNotifications()
-            SectionReglages.SONS -> ChoixSons()
+            SectionReglages.SONS -> {
+                ChoixSons()
+                CurseurVolume()
+            }
             SectionReglages.QUOI_DE_NEUF -> SectionQuoiDeNeuf()
             SectionReglages.APPARENCE -> {
                 ChoixTheme()
@@ -660,6 +666,119 @@ private fun ChoixSons() {
                 Spacer(Modifier.width(14.dp))
                 Text(t(nom), color = P.texteFort, fontSize = 15.sp, modifier = Modifier.weight(1f))
             }
+        }
+    }
+}
+
+/**
+ * Réglages > Sons : le volume de cet appareil, une piste aimantée aux crans
+ * de `Sons.CRANS_VOLUME`, ses encoches dessous (des blocs de pixels en EGA),
+ * un haut-parleur et la valeur. Chaque cran relâché fait entendre le son reçu.
+ */
+@Composable
+private fun CurseurVolume() {
+    val crans = ca.jasette.android.Sons.CRANS_VOLUME
+    val volume = ca.jasette.android.Sons.volume
+    val choisi = ca.jasette.android.Sons.cran(volume)
+    val n = crans.size
+    val carre = P.carre || P.retro
+    val accent = P.accent
+    val vide = P.filet
+    val pale = P.textePale
+    val bordBouton = if (carre) P.texteFort else androidx.compose.ui.graphics.Color.White
+    Text(
+        t("Volume sur cet appareil. Chaque cran relâché fait entendre le son reçu."),
+        color = P.textePale, fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 10.dp),
+    )
+    Groupe {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(
+                when {
+                    volume == 0 -> Icones.volumeMuet
+                    volume <= 75 -> Icones.volumeBas
+                    else -> Icones.volume
+                },
+                null, tint = if (volume > 0) P.texteFort else P.textePale,
+                modifier = Modifier.padding(top = 4.dp).size(20.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                androidx.compose.foundation.Canvas(
+                    Modifier.fillMaxWidth().height(38.dp).pointerInput(n) {
+                        fun indice(x: Float) = (x / (size.width.toFloat() / n)).toInt().coerceIn(0, n - 1)
+                        awaitEachGesture {
+                            val bas = awaitFirstDown()
+                            ca.jasette.android.Sons.choisirVolume(crans[indice(bas.position.x)])
+                            bas.consume()
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                val c = ev.changes.firstOrNull { it.id == bas.id } ?: break
+                                if (!c.pressed) break
+                                ca.jasette.android.Sons.choisirVolume(crans[indice(c.position.x)])
+                                c.consume()
+                            }
+                            // Relâché : l'aperçu, le son reçu du jeu choisi.
+                            ca.jasette.android.Sons.jouer(
+                                ca.jasette.android.Marques.sonsConversation, ca.jasette.android.Sons.Son.RECU,
+                            )
+                        }
+                    },
+                ) {
+                    val pas = size.width / n
+                    fun cx(i: Int) = pas * (i + 0.5f)
+                    val y = 14.dp.toPx()
+                    val epaisseur = 4.dp.toPx()
+                    val coin = if (carre) androidx.compose.ui.geometry.CornerRadius.Zero
+                    else androidx.compose.ui.geometry.CornerRadius(epaisseur / 2)
+                    drawRoundRect(vide, androidx.compose.ui.geometry.Offset(cx(0), y - epaisseur / 2),
+                        androidx.compose.ui.geometry.Size(cx(n - 1) - cx(0), epaisseur), coin)
+                    drawRoundRect(accent, androidx.compose.ui.geometry.Offset(cx(0), y - epaisseur / 2),
+                        androidx.compose.ui.geometry.Size(cx(choisi) - cx(0), epaisseur), coin)
+                    // Les encoches, sous la piste ; plus longues aux centaines.
+                    val haut = 28.dp.toPx()
+                    for (i in 0 until n) {
+                        val l = (if (carre) 4 else 2).dp.toPx()
+                        val h = (if (crans[i] % 100 == 0) 8 else 4).dp.toPx()
+                        drawRoundRect(
+                            if (i <= choisi) accent else pale,
+                            androidx.compose.ui.geometry.Offset(cx(i) - l / 2, haut),
+                            androidx.compose.ui.geometry.Size(l, h),
+                            if (carre) androidx.compose.ui.geometry.CornerRadius.Zero else androidx.compose.ui.geometry.CornerRadius(l / 2),
+                        )
+                    }
+                    // Le bouton, sur le cran choisi : rond, ou carré (EGA, rétro).
+                    val r = 10.dp.toPx()
+                    val trait = 2.dp.toPx()
+                    val centre = androidx.compose.ui.geometry.Offset(cx(choisi), y)
+                    if (carre) {
+                        drawRect(bordBouton, androidx.compose.ui.geometry.Offset(centre.x - r, y - r), androidx.compose.ui.geometry.Size(2 * r, 2 * r))
+                        drawRect(accent, androidx.compose.ui.geometry.Offset(centre.x - r + trait, y - r + trait),
+                            androidx.compose.ui.geometry.Size(2 * (r - trait), 2 * (r - trait)))
+                    } else {
+                        drawCircle(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.18f), r + 1.dp.toPx(), centre.copy(y = y + 1.dp.toPx()))
+                        drawCircle(bordBouton, r, centre)
+                        drawCircle(accent, r - trait, centre)
+                    }
+                }
+                Row(Modifier.fillMaxWidth()) {
+                    for (v in crans) {
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            if (v % 100 == 0) Text("$v", color = P.textePale, fontSize = 10.sp)
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (volume > 0) "$volume %" else t("Muet"),
+                color = if (volume > 0) P.accent else P.textePale,
+                fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                modifier = Modifier.width(56.dp).padding(top = 2.dp),
+            )
         }
     }
 }

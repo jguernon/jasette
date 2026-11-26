@@ -499,6 +499,8 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Bulle" to "Bubble",
     "Bois" to "Wood",
     "Aucun son" to "No sounds",
+    "Muet" to "Muted",
+    "Volume sur cet appareil. Chaque cran relâché fait entendre le son reçu." to "Volume on this device. Each notch you release plays the received sound.",
     "Dans la conversation ouverte : à l'envoi, à la réception et quand on vous écrit." to "In the open conversation: when you send, when you receive and when someone is typing.",
     "Un nouveau message ne les ramène plus dans la boîte de réception." to "A new message no longer brings them back to the inbox.",
     "Cacher les conversations plus anciennes de la boîte de réception" to "Hide older conversations from the inbox",
