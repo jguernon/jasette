@@ -66,6 +66,10 @@ object Depot {
     /** Les réactions d'avant une réaction optimiste : id du message → (conv, réactions). */
     private val reactionsAvant = HashMap<String, Pair<String, List<Reaction>>>()
     private val demandes = HashSet<String>()
+    /** Les pièces en cours de téléchargement (l'interface montre « Téléchargement… »). */
+    val telechargements = mutableStateMapOf<String, Boolean>()
+    /** Les pièces à ouvrir dès qu'elles arrivent (un clic sur un fichier pas encore là). */
+    private val ouvrirApres = HashSet<String>()
     /** Les conversations dont le service a déjà répondu `messages` depuis qu'il est prêt (pas le cache). */
     private val fraiches = HashSet<String>()
     /** Les conversations dont on attend la réponse `messages` (une seule demande à la fois). */
@@ -315,6 +319,8 @@ object Depot {
         envois.clear()
         reactionsAvant.clear()
         demandes.clear()
+        telechargements.clear()
+        ouvrirApres.clear()
         fraiches.clear()
         demandesFil.clear()
         Service.entries.forEach { etats[it] = Etat.DEMARRAGE }
@@ -814,15 +820,19 @@ object Depot {
             "media" -> {
                 val id = v.chaine("media_id")
                 demandes.remove(id)
+                telechargements.remove(id)
                 val path = v.chaine("path")
                 if (path.isNotEmpty()) {
                     medias[id] = path
+                    echecs.remove(id)
+                    if (ouvrirApres.remove(id)) ouvrirFichier(id, path)
                     // Le fichier est gardé avec les messages de sa conversation.
                     for ((conv, liste) in messages) {
                         if (liste.any { m -> m.attachments.any { it.mediaId == id } }) CacheConvs.noterFil(conv)
                     }
                 } else {
                     echecs[id] = true
+                    ouvrirApres.remove(id)
                 }
             }
             "messages" -> {
@@ -1299,9 +1309,44 @@ object Depot {
     fun telecharger(p: Piece) {
         if (p.mediaId.isEmpty() || medias.containsKey(p.mediaId) || echecs.containsKey(p.mediaId)) return
         if (!demandes.add(p.mediaId)) return
+        telechargements[p.mediaId] = true
         commande(
             JSONObject().put("cmd", "download").put("media_id", p.mediaId).put("key", p.key).put("mime", p.mime),
         )
+    }
+
+    /**
+     * Un clic sur une pièce qui n'est pas une image (PDF, document…), envoyée
+     * ou reçue : ouverte tout de suite si le fichier est là, sinon téléchargée
+     * puis ouverte à son arrivée (`media`). Un échec se réessaie ainsi ; un
+     * fichier disparu (copie d'envoi effacée) est redemandé.
+     */
+    fun ouvrirPiece(p: Piece) {
+        val id = p.mediaId
+        if (id.isEmpty()) return
+        val chemin = medias[id]
+        if (chemin != null && File(chemin).isFile) {
+            Fichiers.ouvrir(appli, chemin, p.mime, p.name)
+            return
+        }
+        if (chemin != null) medias.remove(id)
+        // Une copie locale d'envoi (« local:… ») perdue : rien à demander aux ponts.
+        if (id.startsWith("local:")) {
+            echecs[id] = true
+            return
+        }
+        echecs.remove(id)
+        ouvrirApres.add(id)
+        piecesOuvertes[id] = p
+        telecharger(p)
+    }
+
+    /** Les pièces demandées par [ouvrirPiece] (leur type et leur nom, pour l'Intent). */
+    private val piecesOuvertes = HashMap<String, Piece>()
+
+    private fun ouvrirFichier(id: String, chemin: String) {
+        val p = piecesOuvertes.remove(id)
+        Fichiers.ouvrir(appli, chemin, p?.mime.orEmpty(), p?.name.orEmpty())
     }
 
     val versionAndroid get() = Build.VERSION.SDK_INT

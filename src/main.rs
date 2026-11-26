@@ -3699,6 +3699,21 @@ impl Jasette {
         self.commande(json!({"cmd": "download", "media_id": p.media_id, "key": p.key, "mime": p.mime}));
     }
 
+    /// Ouvre une pièce jointe avec l'application du système : tout de suite si
+    /// le fichier est là, sinon après son téléchargement (`ouvrir_apres`). Un
+    /// fichier disparu (copie d'envoi effacée, cache vidé) est redemandé.
+    fn ouvrir_piece(&mut self, p: &Piece) {
+        if let Some(chemin) = self.medias.get(&p.media_id) {
+            if chemin.is_file() {
+                ouvrir_fichier(chemin);
+                return;
+            }
+            self.medias.remove(&p.media_id);
+        }
+        self.ouvrir_apres.insert(p.media_id.clone());
+        self.telecharger(p);
+    }
+
     /// Les images s'affichent d'elles-mêmes : on les télécharge dès qu'elles arrivent.
     fn telecharger_images(&mut self, msgs: &[Msg]) {
         let images: Vec<Piece> =
@@ -4685,12 +4700,7 @@ impl Jasette {
                                 .rounded(rayon(8.))
                                 .hover(|s| s.bg(th().survol))
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    if let Some(c) = this.medias.get(&piece.media_id) {
-                                        ouvrir_fichier(c);
-                                    } else {
-                                        this.ouvrir_apres.insert(piece.media_id.clone());
-                                        this.telecharger(&piece);
-                                    }
+                                    this.ouvrir_piece(&piece);
                                     cx.notify();
                                 }))
                                 .child(icone("external-link", 16., th().accent)),
@@ -6397,6 +6407,7 @@ impl Jasette {
         };
         let nom = if p.name.is_empty() { p.mime.clone() } else { p.name.clone() };
         let attente = self.demandes.contains(&p.media_id);
+        let echec = !attente && self.echecs.contains(&p.media_id);
         let piece = p.clone();
         div()
             .id(id)
@@ -6415,12 +6426,7 @@ impl Jasette {
             .cursor_pointer()
             .hover(|s| s.bg(ton(blanc(0.95), c(0x3a3a3c))))
             .on_click(cx.listener(move |this, _, _, cx| {
-                if let Some(chemin) = this.medias.get(&piece.media_id) {
-                    ouvrir_fichier(chemin);
-                } else {
-                    this.ouvrir_apres.insert(piece.media_id.clone());
-                    this.telecharger(&piece);
-                }
+                this.ouvrir_piece(&piece);
                 cx.notify();
             }))
             .child(
@@ -6440,11 +6446,15 @@ impl Jasette {
                     .flex_col()
                     .min_w(px(0.))
                     .child(div().truncate().text_size(px(13.)).text_color(th().texte_fort).child(nom))
-                    .child(div().text_size(px(11.)).text_color(th().texte_pale).child(if attente {
-                        t("Téléchargement…").to_string()
-                    } else {
-                        taille(p.size)
-                    })),
+                    .child(div().text_size(px(11.)).text_color(if echec { c(DANGER) } else { th().texte_pale }).child(
+                        if attente {
+                            t("Téléchargement…").to_string()
+                        } else if echec {
+                            t("Indisponible · réessayer").to_string()
+                        } else {
+                            taille(p.size)
+                        },
+                    )),
             )
             .into_any_element()
     }
@@ -11924,6 +11934,7 @@ fn t(fr: &'static str) -> &'static str {
         "Google Messages vous montre quelques emojis : choisissez le même." => "Google Messages shows you a few emojis: pick the same one.",
         "Hier" => "Yesterday",
         "Image indisponible · réessayer" => "Image unavailable · retry",
+        "Indisponible · réessayer" => "Unavailable · retry",
         "Initiale" => "Initial",
         "Lavande" => "Lavender",
         "Lilas" => "Lilac",

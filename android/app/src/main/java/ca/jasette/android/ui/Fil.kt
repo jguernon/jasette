@@ -586,10 +586,10 @@ private fun Message(
                     if (p.estImage || Depot.vignettes.containsKey(p.mediaId)) {
                         PieceImage(p, envoi = c == Coche.ENVOI && m.local, appuiLong = appuiLong, agrandir = agrandir)
                     } else {
-                        PieceAutre(p.name.ifEmpty { p.mime }, Modifier.combinedClickable(onClick = {}, onLongClick = appuiLong))
+                        PieceAutre(p.name.ifEmpty { p.mime }, p, appuiLong)
                     }
                 }
-                if (m.attachments.isEmpty() && m.media.isNotEmpty()) PieceAutre(m.media)
+                if (m.attachments.isEmpty() && m.media.isNotEmpty()) PieceAutre(m.media, null, appuiLong)
                 // Une carte avec titre et image dit déjà où mène le lien : l'adresse
                 // sort du texte (et la bulle disparaît s'il ne restait qu'elle).
                 val apercuLien = ca.jasette.android.Apercus.de(m)
@@ -891,13 +891,38 @@ private fun PieceImage(p: Piece, envoi: Boolean, appuiLong: () -> Unit, agrandir
     }
 }
 
+/**
+ * Une pièce qui n'est pas une image (PDF, document…), envoyée ou reçue : un
+ * appui la télécharge au besoin puis l'ouvre avec l'app du système
+ * ([Depot.ouvrirPiece]). Pendant le téléchargement, une petite roue ; après un
+ * échec, « Indisponible · réessayer ». Sans [piece] (le service n'a donné que
+ * le nom), rien à ouvrir.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PieceAutre(nom: String, modifier: Modifier = Modifier) {
-    Text(
-        "📎 $nom", color = P.texte, fontSize = 13.sp,
-        modifier = Modifier.carte(16.dp).then(modifier)
+private fun PieceAutre(nom: String, piece: Piece?, appuiLong: () -> Unit = {}) {
+    val attente = piece != null && Depot.telechargements.containsKey(piece.mediaId)
+    val echec = piece != null && !attente && Depot.echecs.containsKey(piece.mediaId)
+    Row(
+        Modifier.carte(16.dp)
+            .combinedClickable(onClick = { if (piece != null) Depot.ouvrirPiece(piece) }, onLongClick = appuiLong)
             .padding(horizontal = 12.dp, vertical = 8.dp),
-    )
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (attente) {
+            CircularProgressIndicator(Modifier.size(14.dp), color = P.textePale, strokeWidth = 2.dp)
+        } else {
+            Text("📎", fontSize = 13.sp)
+        }
+        Column(Modifier.weight(1f, fill = false)) {
+            Text(nom, color = P.texte, fontSize = 13.sp)
+            when {
+                attente -> Text(t("Téléchargement…"), color = P.textePale, fontSize = 11.sp)
+                echec -> Text(t("Indisponible · réessayer"), color = P.danger, fontSize = 11.sp)
+            }
+        }
+    }
 }
 
 /**
@@ -1374,7 +1399,7 @@ private fun Galerie(liste: List<Msg>, fermer: () -> Unit, agrandir: (String) -> 
                     }
                 }
                 items(autres.size, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) { i ->
-                    PieceAutre(autres[i].name.ifEmpty { autres[i].mime })
+                    PieceAutre(autres[i].name.ifEmpty { autres[i].mime }, autres[i])
                 }
             }
         }

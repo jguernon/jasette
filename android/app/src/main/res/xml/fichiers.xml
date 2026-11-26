@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Les fichiers que l'appareil photo écrit pour Jasette (FileProvider). -->
+<!-- Les fichiers que Jasette partage par son FileProvider (jamais exporté :
+     chaque URI est accordée une à une) : ce que l'appareil photo écrit, et les
+     pièces jointes ouvertes avec une autre app (Fichiers.kt). -->
 <paths>
     <cache-path name="capture" path="capture/" />
+    <!-- Mes envois, copiés avant `send_media` (Envoi.kt). -->
+    <cache-path name="envoi" path="envoi/" />
+    <!-- Les pièces téléchargées par les ponts (mode local) et les MMS. -->
+    <files-path name="media" path="media/" />
+    <!-- Les copies locales des fichiers du serveur Jasette (mode client). -->
+    <files-path name="distant" path="distant/" />
 </paths>
