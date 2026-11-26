@@ -21,6 +21,7 @@ mod maj;
 mod retro;
 mod presence;
 mod ecrit;
+mod sons;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -1373,6 +1374,8 @@ enum Section {
     Comptes,
     Serveur,
     Notifications,
+    /// Les sons des conversations (src/sons.rs).
+    Sons,
     Apparence,
     Langue,
     APropos,
@@ -1457,6 +1460,11 @@ struct Reglages {
     /// Vrai par défaut.
     #[serde(default = "vrai")]
     presence_en_ligne: bool,
+    /// Le jeu de sons des conversations (src/sons.rs) : "bois", "verre" ou
+    /// "aucun" ; vide, "bulle". Partagé par le serveur Jasette s'il y en a un
+    /// (marque `sons_conversation`).
+    #[serde(default)]
+    sons_conversation: String,
     /// La grille du Head : son nombre de colonnes, de 3 à 6 (« 5 ») ; vide = 4.
     /// Une ancienne valeur « colonnes x rangées » (« 8x3 ») donne ses colonnes,
     /// ramenées entre 3 et 6. Propre à cet appareil.
@@ -1610,6 +1618,7 @@ impl Default for Reglages {
             garder_archives: false,
             cacher_apres_jours: 0,
             presence_en_ligne: true,
+            sons_conversation: String::new(),
             head_grille: String::new(),
             marques_cache: HashMap::new(),
             heures_messages: true,
@@ -1723,6 +1732,7 @@ impl Reglages {
                     garder_archives: self.garder_archives,
                     cacher_apres_jours: self.cacher_apres_jours,
                     presence_cachee: !self.presence_en_ligne,
+                    sons: self.sons_conversation.clone(),
                 },
                 version: self.marques_version,
                 a_envoyer: self.marques_a_envoyer,
@@ -1742,6 +1752,7 @@ impl Reglages {
         self.garder_archives = b.copie.listes.garder_archives;
         self.cacher_apres_jours = b.copie.listes.cacher_apres_jours;
         self.presence_en_ligne = !b.copie.listes.presence_cachee;
+        self.sons_conversation = b.copie.listes.sons;
         self.marques_version = b.copie.version;
         self.marques_a_envoyer = b.copie.a_envoyer;
         self.marques_serveur = b.serveur;
@@ -2070,6 +2081,8 @@ struct Jasette {
     presences: HashMap<String, presence::Presence>,
     /// Qui écrit, par conversation (src/ecrit.rs).
     ecrits: HashMap<String, ecrit::Ecrit>,
+    /// Les sons des conversations : le dernier reçu, les « … » partis (src/sons.rs).
+    memoire_sons: sons::Memoire,
     /// Les aperçus de liens faits par Jasette (adresse → aperçu ; None : en
     /// cours, ou rien à montrer), les images `image_url` des services, et les
     /// recherches en cours.
@@ -2949,6 +2962,7 @@ impl Jasette {
             ondes_pretes: Arc::new(Mutex::new(Vec::new())),
             presences: HashMap::new(),
             ecrits: HashMap::new(),
+            memoire_sons: Default::default(),
             apercus: HashMap::new(),
             images_apercu: HashMap::new(),
             travaux_apercus: Arc::new(apercu::Travaux::default()),
@@ -4088,6 +4102,7 @@ impl Jasette {
                     if nouveau && !m.from_me {
                         // Le message est là : plus de « … ».
                         self.ecrit_fini(&m.conv);
+                        self.son_recu(&m.conv, m.time);
                     }
                     let actif = self.active;
                     if let Some(conv) = self.convs.iter_mut().find(|c| c.id == m.conv) {
@@ -4497,6 +4512,7 @@ impl Jasette {
         }
         let tmp = self.en_attente(&conv, texte.clone(), String::new(), Vec::new());
         self.commande(json!({"cmd": "send", "conv": conv, "text": texte, "tmp_id": tmp}));
+        self.son_envoi(&conv, false);
         self.saisie.update(cx, |s, cx| s.set_value("", window, cx));
         self.emojis_ouverts = false;
         cx.notify();
@@ -4537,6 +4553,7 @@ impl Jasette {
             self.calculer_onde(&id_local, &chemin);
         }
         let tmp = self.en_attente(&conv, String::new(), String::new(), vec![piece]);
+        self.son_envoi(&conv, false);
         self.commande(json!({
             "cmd": "send_media", "conv": conv, "path": chemin, "tmp_id": tmp, "mime": mime.unwrap_or_default()
         }));
@@ -8829,6 +8846,12 @@ impl Jasette {
                     cx.notify();
                 }),
             ))
+            .child(item("s-sons", Section::Sons, t("Sons"), "volume-2", 0xf59e0b, None).on_click(cx.listener(
+                |this, _, _, cx| {
+                    this.section = Some(Section::Sons);
+                    cx.notify();
+                },
+            )))
             .child(item("s-apparence", Section::Apparence, t("Apparence"), "palette", ROSE, None).on_click(
                 cx.listener(|this, _, _, cx| {
                     this.section = Some(Section::Apparence);
@@ -8881,6 +8904,7 @@ impl Jasette {
             Section::Comptes => self.comptes(cx).into_any_element(),
             Section::Serveur => self.serveur_vue(cx),
             Section::Prive => self.reglages_prive(cx),
+            Section::Sons => self.reglages_sons(cx),
             Section::Notifications => carte_section("Notifications")
                 .child(
                     groupe()
@@ -12012,6 +12036,11 @@ fn t(fr: &'static str) -> &'static str {
         "Les emojis que vous utilisez apparaîtront ici." => "Emojis you use will show up here.",
         "Garder les conversations archivées hors de la boîte de réception" => "Keep archived conversations out of the inbox",
         "Afficher qui est en ligne et qui écrit" => "Show who's online and typing",
+        "Sons" => "Sounds",
+        "Bulle" => "Bubble",
+        "Bois" => "Wood",
+        "Aucun son" => "No sounds",
+        "Dans la conversation ouverte : à l'envoi, à la réception et quand on vous écrit." => "In the open conversation: when you send, when you receive and when someone is typing.",
         "Point vert sur les contacts actifs et « … » quand on vous écrit." => "Green dot on active contacts and “…” when someone is typing.",
         "écrit…" => "typing…",
         "Actif maintenant" => "Active now",

@@ -24,3 +24,5 @@ base64 = "0.22"
 ureq = { version = "2.12", default-features = false, features = ["tls", "gzip"] }
 # La mise à jour dans l'app (src/maj.rs) : lire l'archive .tar.gz (déjà dans l'arbre par ureq).
 flate2 = "1"
+# Les sons des conversations (src/sons.rs) : mp3 (symphonia) joués par cpal (ALSA). MIT ou Apache-2.0.
+rodio = { version = "0.23", default-features = false, features = ["playback", "mp3"] }

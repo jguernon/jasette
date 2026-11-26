@@ -1119,7 +1119,7 @@ private fun Saisie(conv: String, actif: Boolean) {
                     peut, label = "emoji-rapide",
                     animationSpec = if (P.sec) androidx.compose.animation.core.snap() else androidx.compose.animation.core.tween(160),
                 ) {
-                    if (it) envoi() else BoutonEmojiRapide(rapide, actif) { Depot.envoyer(conv, rapide) }
+                    if (it) envoi() else BoutonEmojiRapide(rapide, actif) { Depot.envoyer(conv, rapide, emojiRapide = true) }
                 }
             }
         }

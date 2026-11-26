@@ -1089,6 +1089,19 @@ pub struct Marques {
     /// à faux, PROTOCOLE.md §5.10). Gardé à l'envers : faux, le réglage par
     /// défaut, veut dire « afficher ».
     pub presence_cachee: bool,
+    /// Le jeu de sons des conversations (marque `sons_conversation`,
+    /// PROTOCOLE.md §5.5) : "bois", "verre" ou "aucun" ; vide, le défaut
+    /// ("bulle"). Toujours passé par `jeu_sons`.
+    pub sons: String,
+}
+
+/// Un jeu de sons connu, rangé comme dans `Marques::sons` (vide : "bulle").
+pub fn jeu_sons(v: Option<&Value>) -> String {
+    match v {
+        Some(Value::Bool(false)) => "aucun".into(),
+        Some(Value::String(j)) if matches!(j.as_str(), "bois" | "verre" | "aucun") => j.clone(),
+        _ => String::new(),
+    }
 }
 
 impl Marques {
@@ -1103,6 +1116,7 @@ impl Marques {
             && !self.garder_archives
             && self.cacher_apres_jours == 0
             && !self.presence_cachee
+            && self.sons.is_empty()
     }
 
     /// Chaque liste de `dabord`, dans son ordre, puis les ids de `ensuite` qui n'y sont pas.
@@ -1130,6 +1144,7 @@ impl Marques {
             garder_archives: dabord.garder_archives,
             cacher_apres_jours: dabord.cacher_apres_jours,
             presence_cachee: dabord.presence_cachee,
+            sons: dabord.sons.clone(),
         }
     }
 
@@ -1147,6 +1162,7 @@ impl Marques {
             garder_archives: self.garder_archives,
             cacher_apres_jours: self.cacher_apres_jours,
             presence_cachee: self.presence_cachee,
+            sons: self.sons.clone(),
         }
     }
 }
@@ -1163,6 +1179,7 @@ pub enum NouvelleMarques {
     /// `avec_garder` : de même pour un serveur d'avant `garder_archives`.
     /// `avec_cacher` : de même pour un serveur d'avant `cacher_apres_jours`.
     /// `avec_presence` : de même pour un serveur d'avant `presence_en_ligne`.
+    /// `avec_sons` : de même pour un serveur d'avant `sons_conversation`.
     Recues {
         marques: Marques,
         version: u64,
@@ -1175,6 +1192,7 @@ pub enum NouvelleMarques {
         avec_garder: bool,
         avec_cacher: bool,
         avec_presence: bool,
+        avec_sons: bool,
     },
     /// La connexion est tombée : rien n'est plus en vol.
     Coupure,
@@ -1218,6 +1236,8 @@ impl NouvelleMarques {
                     .unwrap_or(0) as u32,
                 // Absent : vrai (afficher).
                 presence_cachee: v.get("presence_en_ligne").and_then(Value::as_bool) == Some(false),
+                // Absent ou inconnu : "bulle" ; un booléen : vrai "bulle", faux "aucun".
+                sons: jeu_sons(v.get("sons_conversation")),
             },
             version: v.get("version")?.as_u64()?,
             id: v.get("id").and_then(Value::as_u64),
@@ -1229,6 +1249,7 @@ impl NouvelleMarques {
             avec_garder: v.get("garder_archives").is_some_and(Value::is_boolean),
             avec_cacher: v.get("cacher_apres_jours").is_some_and(Value::is_number),
             avec_presence: v.get("presence_en_ligne").is_some_and(Value::is_boolean),
+            avec_sons: v.get("sons_conversation").is_some_and(|j| j.is_string() || j.is_boolean()),
         })
     }
 }
@@ -1294,6 +1315,7 @@ impl SuiviMarques {
             "garder_archives": c.listes.garder_archives,
             "cacher_apres_jours": c.listes.cacher_apres_jours,
             "presence_en_ligne": !c.listes.presence_cachee,
+            "sons_conversation": if c.listes.sons.is_empty() { "bulle" } else { c.listes.sons.as_str() },
             "version": c.version,
             "id": id,
         }}))
@@ -1319,6 +1341,7 @@ impl SuiviMarques {
                 avec_garder,
                 avec_cacher,
                 avec_presence,
+                avec_sons,
             } => {
                 // Un serveur d'avant `archives` : nos archives restent les nôtres, jamais vidées.
                 let mut marques = marques;
@@ -1348,6 +1371,10 @@ impl SuiviMarques {
                 // Et pour `presence_en_ligne`.
                 if !avec_presence {
                     marques.presence_cachee = c.listes.presence_cachee;
+                }
+                // Et pour `sons_conversation`.
+                if !avec_sons {
+                    marques.sons = c.listes.sons.clone();
                 }
                 (marques, version, id, refus)
             }
@@ -1601,6 +1628,7 @@ mod essais {
             avec_garder: true,
             avec_cacher: true,
             avec_presence: true,
+            avec_sons: true,
         }
     }
 
@@ -1781,6 +1809,8 @@ mod essais {
         let mut c = CopieMarques { version: 4, ..Default::default() };
         assert!(s.recu(n.unwrap(), &mut c).is_none());
         assert!(c.listes.presence_cachee);
+        // Pas de `sons_conversation` dans cette trame : le défaut reste.
+        assert_eq!(c.listes.sons, "");
         c.listes.presence_cachee = false;
         let t = s.changement(&mut c).expect("envoi");
         assert_eq!(t["marques"]["presence_en_ligne"], json!(true));
@@ -1795,6 +1825,32 @@ mod essais {
         assert!(!c.listes.vide());
         // Le défaut (afficher) : vide.
         assert!(Marques::default().vide());
+    }
+
+    #[test]
+    fn marques_sons_conversation() {
+        assert_eq!(jeu_sons(None), "");
+        assert_eq!(jeu_sons(Some(&json!("bois"))), "bois");
+        assert_eq!(jeu_sons(Some(&json!("klaxon"))), "");
+        assert_eq!(jeu_sons(Some(&json!(true))), "");
+        assert_eq!(jeu_sons(Some(&json!(false))), "aucun");
+        let n = NouvelleMarques::lire(&json!({"head": [], "favoris": [], "epingles": [], "archives": [], "privees": [],
+            "moods": {}, "emojis": {}, "sons_conversation": "verre", "version": 5}));
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 4, ..Default::default() };
+        assert!(s.recu(n.unwrap(), &mut c).is_none());
+        assert_eq!(c.listes.sons, "verre");
+        c.listes.sons = String::new();
+        let t = s.changement(&mut c).expect("envoi");
+        assert_eq!(t["marques"]["sons_conversation"], json!("bulle"));
+        // Un serveur d'avant `sons_conversation` : le nôtre reste.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 4, ..Default::default() };
+        c.listes.sons = "aucun".into();
+        let vieux = NouvelleMarques::lire(&json!({"head": [], "favoris": [], "epingles": [], "archives": [], "privees": [],
+            "moods": {}, "emojis": {}, "version": 5})).unwrap();
+        assert!(s.recu(vieux, &mut c).is_none());
+        assert_eq!(c.listes.sons, "aucun");
     }
 
     #[test]
@@ -1886,6 +1942,7 @@ mod essais {
             avec_garder: true,
             avec_cacher: true,
             avec_presence: true,
+            avec_sons: true,
         };
         let t = s.recu(r, &mut c).expect("renvoi");
         assert_eq!(t["marques"]["favoris"], json!(["z", "a", "y", "x"]));

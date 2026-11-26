@@ -144,7 +144,7 @@ Version: $VERSION
 Architecture: amd64
 Maintainer: Jonathan Guernon <https://jonathanguernon.net/jasette/>
 Installed-Size: $TAILLE
-Depends: libc6 (>= $GLIBC), libgcc-s1, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libvulkan1, libwayland-client0, python3, python3-gi, gir1.2-webkit-6.0, gir1.2-gtk-4.0
+Depends: libc6 (>= $GLIBC), libgcc-s1, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libvulkan1, libwayland-client0, libasound2t64 | libasound2, python3, python3-gi, gir1.2-webkit-6.0, gir1.2-gtk-4.0
 Recommends: mesa-vulkan-drivers | vulkan-icd, libegl1, libwayland-egl1, ffmpeg, pipewire-bin, libnotify-bin, xdg-utils
 Section: net
 Priority: optional

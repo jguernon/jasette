@@ -354,7 +354,7 @@ compte et le relais `did:web:api.bsky.chat`) :
   conversation Bluesky ; un message : `<conversation>/<id>`. Les résultats de
   `search` ont le DID de la personne pour id (à passer à `new`).
 
-### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, garder_archives, cacher_apres_jours, presence_en_ligne)
+### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
@@ -398,6 +398,12 @@ Et des réglages (facultatifs) :
   quand on vous écrit, §5.11). Le serveur le
   transmet aux ponts ; faux, les ponts ne suivent aucune présence et le
   serveur ne relaie plus l'événement `presence`.
+- `sons_conversation` (chaîne, **`"bulle"`** par défaut) : le jeu de sons
+  des conversations, `"bulle"`, `"bois"`, `"verre"` ou `"aucun"` (aucun son).
+  Seuls les clients jouent : dans la conversation ouverte et visible, l'app
+  au premier plan, un son à l'envoi (ou celui de l'émoji rapide), à la
+  réception d'un message (au plus un par 400 ms ; ni historique, ni
+  synchro, ni réaction) et à l'apparition des « … » (§5.11).
 
 C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 
@@ -405,7 +411,7 @@ C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 changement, à **tous** les clients) :
 
 ```json
-{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"version":7}}
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","version":7}}
 ```
 
 `version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
@@ -414,7 +420,7 @@ encore rien reçu (listes vides).
 **Client → serveur** :
 
 ```json
-{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"version":7,"id":12}}
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","version":7,"id":12}}
 ```
 
 - `version` : la dernière version reçue du serveur (0 si aucune).
@@ -439,6 +445,11 @@ encore rien reçu (listes vides).
 - `presence_en_ligne` : même règle, mais **absent veut dire vrai** : absent
   de `marques.json` (fichier d'avant), le serveur le prend vrai ; un client
   qui reçoit des marques sans ce champ (serveur d'avant) garde le sien.
+- `sons_conversation` : absent ou `null`, rien ne change ; une chaîne
+  inconnue devient `"bulle"` ; un booléen (premiers clients) : `true` donne
+  `"bulle"`, `false` donne `"aucun"`. Toujours envoyé (une chaîne) ; absent
+  de `marques.json` : `"bulle"`. Un client qui reçoit des marques sans ce
+  champ (serveur d'avant) garde le sien.
 
 Règles du serveur :
 
@@ -478,7 +489,7 @@ archives (ou ses privées) pour lui seul, sans les vider. De même pour
 `garder_archives` : un serveur d'avant ce réglage ne l'envoie pas, et le
 client garde le sien pour lui (il l'applique alors lui-même). Union de deux
 copies : `garder_archives` de celle qui passe d'abord. Idem pour
-`cacher_apres_jours` et `presence_en_ligne`.
+`cacher_apres_jours`, `presence_en_ligne` et `sons_conversation`.
 
 **Règle des moods.**
 
@@ -965,8 +976,8 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"svc":…,"ev":{"ev":"messages",…,"cache":true}}` | copie du cache, avant la réponse du pont (§5.8) |
 | C→S | `{"rejouer":"<svc>"}` | redemander l'état d'un service |
 | ↔ | `{"ping":n}` / `{"pong":n}` | signes de vie |
-| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","version"[,"id","refus"]}}` | rejeu, changement |
-| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","version"[,"id"]}}` | changement local |
+| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","version"[,"id","refus"]}}` | rejeu, changement |
+| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","version"[,"id"]}}` | changement local |
 | S→C | `{"svc":…,"ev":{"ev":"presence","item":{"conv","user","online","last_active"}}}` | présence (§5.10), aussi au rejeu |
 | S→C | `{"svc":…,"ev":{"ev":"typing","conv","on"[,"name","audio"]}}` | « en train d'écrire » (§5.11) |
 | C→S | `{"get":{"id","chemin","sha256"}}` | télécharger |

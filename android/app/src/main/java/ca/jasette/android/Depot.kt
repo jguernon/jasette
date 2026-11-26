@@ -57,13 +57,18 @@ object Depot {
         val conv = v.chaine("conv")
         if (conv.isEmpty()) return
         if (!v.optBoolean("on")) {
-            ecrits.remove(conv)
+            if (ecrits.remove(conv) != null) Sons.ecritParti(conv)
             return
         }
         val e = Ecrit(v.chaine("name"), System.currentTimeMillis())
-        ecrits[conv] = e
+        if (ecrits.put(conv, e) == null) Sons.ecrit(conv)
         // Sans nouvelle depuis 6 s : les « … » s'en vont.
-        principal.postDelayed({ if (ecrits[conv] === e) ecrits.remove(conv) }, ECRIT_DUREE_MS)
+        principal.postDelayed({
+            if (ecrits[conv] === e) {
+                ecrits.remove(conv)
+                Sons.ecritParti(conv)
+            }
+        }, ECRIT_DUREE_MS)
     }
 
     /** La présence d'une conversation à montrer (réglage activé, pas un groupe), ou null. */
@@ -184,6 +189,7 @@ object Depot {
         appli = ctx.applicationContext
         enMarche = true
         Marques.surPresence = { oui -> principal.post { presenceReglee(oui) } }
+        Sons.init(ctx)
         generation++
         val cfg = ConfigServeur.lire(appli)
         serveur = cfg
@@ -989,7 +995,10 @@ object Depot {
         messages[m.conv] = liste
         CacheConvs.noterFil(m.conv)
         // Le message est là : plus de « … ».
-        if (nouveau && !m.fromMe) ecrits.remove(m.conv)
+        if (nouveau && !m.fromMe) {
+            if (ecrits.remove(m.conv) != null) Sons.ecritParti(m.conv)
+            Sons.recu(m.conv, m.time)
+        }
 
         val conv = conv(m.conv)
         if (conv != null) {
@@ -1272,7 +1281,7 @@ object Depot {
     }
 
     /** Envoie un texte ; rend le tmp_id de la bulle locale (pour suivre l'envoi), ou null s'il n'y a rien à envoyer. */
-    fun envoyer(conv: String, texte: String): String? {
+    fun envoyer(conv: String, texte: String, emojiRapide: Boolean = false): String? {
         val t = texte.trim()
         if (t.isEmpty()) return null
         envoiSeq++
@@ -1283,6 +1292,7 @@ object Depot {
             status = "ENVOI", kind = "", tmpId = tmp, attachments = emptyList(), reactions = emptyList(),
         )
         messages[conv] = messages[conv].orEmpty() + local
+        Sons.envoi(conv, emojiRapide)
         val cmd = JSONObject().put("cmd", "send").put("conv", conv).put("text", t).put("tmp_id", tmp)
         envois[tmp] = cmd.toString()
         commande(cmd)
@@ -1318,6 +1328,7 @@ object Depot {
             status = "ENVOI", kind = "", tmpId = tmp, attachments = listOf(piece), reactions = emptyList(),
         )
         messages[conv] = messages[conv].orEmpty() + local
+        Sons.envoi(conv, false)
         val cmd = JSONObject().put("cmd", "send_media").put("conv", conv).put("path", fichier.path)
             .put("tmp_id", tmp).put("mime", mime)
         if (texte.isNotEmpty()) cmd.put("text", texte)

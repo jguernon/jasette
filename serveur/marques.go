@@ -63,8 +63,11 @@ type Marques struct {
 	// PresenceEnLigne : « Afficher qui est en ligne » (point vert, « Actif il
 	// y a 12 min »). Vrai par défaut, et pour un ancien fichier sans ce champ.
 	// Le serveur le transmet aux ponts (presence.go).
-	PresenceEnLigne bool  `json:"presence_en_ligne"`
-	Version         int64 `json:"version"`
+	PresenceEnLigne bool `json:"presence_en_ligne"`
+	// SonsConversation : le jeu de sons des conversations, "bulle" (défaut),
+	// "bois", "verre" ou "aucun" (jeuSons). Seuls les clients jouent.
+	SonsConversation string `json:"sons_conversation"`
+	Version          int64  `json:"version"`
 	// Propre au serveur, jamais envoyé aux clients : depuis quand (ms, horloge
 	// du serveur) chaque id est dans Archives. Seul un message reçu après
 	// cette heure ramène la conversation dans l'Inbox (une réaction ou une
@@ -89,6 +92,7 @@ func (m *Marques) normaliser() {
 	m.Moods = nettoyerMoods(m.Moods)
 	m.Emojis = nettoyerEmojis(m.Emojis)
 	m.CacherApresJours = bornerJours(m.CacherApresJours)
+	m.SonsConversation = jeuSons(m.SonsConversation)
 	depuis := make(map[string]int64, len(m.Archives))
 	maintenant := time.Now().UnixMilli()
 	for _, id := range m.Archives {
@@ -109,7 +113,8 @@ func (m *Marques) memesListes(n *Marques) bool {
 		}
 	}
 	return egalesMoods(m.Moods, n.Moods) && egalesMoods(m.Emojis, n.Emojis) && m.GarderArchives == n.GarderArchives &&
-		m.CacherApresJours == n.CacherApresJours && m.PresenceEnLigne == n.PresenceEnLigne
+		m.CacherApresJours == n.CacherApresJours && m.PresenceEnLigne == n.PresenceEnLigne &&
+		m.SonsConversation == n.SonsConversation
 }
 
 // cacherApresJoursMax : au-delà de dix ans, autant tout afficher.
@@ -325,7 +330,8 @@ func trameMarques(m Marques, id json.RawMessage, refus string) []byte {
 	corps := map[string]any{
 		"head": m.Head, "favoris": m.Favoris, "epingles": m.Epingles, "archives": m.Archives,
 		"privees": m.Privees, "moods": m.Moods, "emojis": m.Emojis, "garder_archives": m.GarderArchives,
-		"cacher_apres_jours": m.CacherApresJours, "presence_en_ligne": m.PresenceEnLigne, "version": m.Version,
+		"cacher_apres_jours": m.CacherApresJours, "presence_en_ligne": m.PresenceEnLigne,
+		"sons_conversation": jeuSons(m.SonsConversation), "version": m.Version,
 	}
 	if len(id) > 0 {
 		corps["id"] = id
@@ -359,6 +365,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		Garder   *bool              `json:"garder_archives"`
 		Cacher   *int               `json:"cacher_apres_jours"`
 		Presence *bool              `json:"presence_en_ligne"`
+		Sons     json.RawMessage    `json:"sons_conversation"`
 		Version  int64              `json:"version"`
 		ID       json.RawMessage    `json:"id"`
 	}
@@ -374,7 +381,8 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	nouv := Marques{
 		Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Archives: cur.Archives,
 		Privees: cur.Privees, Moods: cur.Moods, Emojis: cur.Emojis, GarderArchives: cur.GarderArchives,
-		CacherApresJours: cur.CacherApresJours, PresenceEnLigne: cur.PresenceEnLigne, ArchivesDepuis: cur.ArchivesDepuis,
+		CacherApresJours: cur.CacherApresJours, PresenceEnLigne: cur.PresenceEnLigne, SonsConversation: cur.SonsConversation,
+		ArchivesDepuis: cur.ArchivesDepuis,
 	}
 	// Une liste absente de la trame ne change pas (un ancien client, qui ne
 	// connaît pas `archives` ou `privees`, ne les vide donc jamais).
@@ -405,6 +413,11 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	// ce réglage ne le désactive jamais).
 	if d.Presence != nil {
 		nouv.PresenceEnLigne = *d.Presence
+	}
+	// Et pour `sons_conversation` : absent (ou null), rien ne change ; un
+	// booléen (premiers clients) : vrai "bulle", faux "aucun".
+	if j, ok := lireJeuSons(d.Sons); ok {
+		nouv.SonsConversation = j
 	}
 	repondre := func(m Marques, refus string) {
 		select {
@@ -449,8 +462,8 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		return
 	}
 	s.marques = nouv
-	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v",
-		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne)
+	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s",
+		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation)
 	if nouv.PresenceEnLigne != cur.PresenceEnLigne {
 		s.presenceChangee(nouv.PresenceEnLigne)
 	}
@@ -507,7 +520,7 @@ func (s *Serveur) desarchiverSiRecu(svc string, ligne []byte) {
 	cur := s.marques
 	nouv := Marques{Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Privees: cur.Privees, Moods: cur.Moods, Emojis: cur.Emojis,
 		GarderArchives: cur.GarderArchives, CacherApresJours: cur.CacherApresJours, PresenceEnLigne: cur.PresenceEnLigne,
-		ArchivesDepuis: cur.ArchivesDepuis}
+		SonsConversation: cur.SonsConversation, ArchivesDepuis: cur.ArchivesDepuis}
 	for _, a := range cur.Archives {
 		if a != id {
 			nouv.Archives = append(nouv.Archives, a)
@@ -522,4 +535,34 @@ func (s *Serveur) desarchiverSiRecu(svc string, ligne []byte) {
 	s.marques = nouv
 	logf("marques version %d : une conversation %s sort des archives (message reçu)", nouv.Version, svc)
 	s.diffuserVerrouille(trameMarques(nouv, nil, ""))
+}
+
+// jeuSons : un jeu de sons connu, sinon "bulle" (le défaut).
+func jeuSons(j string) string {
+	switch j {
+	case "bulle", "bois", "verre", "aucun":
+		return j
+	}
+	return "bulle"
+}
+
+// lireJeuSons : la valeur de `sons_conversation` d'une trame. Faux si elle
+// est absente ou nulle (rien ne change) ; un booléen (premiers clients) :
+// vrai "bulle", faux "aucun" ; une chaîne inconnue : "bulle".
+func lireJeuSons(brute json.RawMessage) (string, bool) {
+	if len(brute) == 0 || string(brute) == "null" {
+		return "", false
+	}
+	var b bool
+	if json.Unmarshal(brute, &b) == nil {
+		if b {
+			return "bulle", true
+		}
+		return "aucun", true
+	}
+	var j string
+	if json.Unmarshal(brute, &j) == nil {
+		return jeuSons(j), true
+	}
+	return "", false
 }

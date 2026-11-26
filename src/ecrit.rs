@@ -34,21 +34,29 @@ impl Jasette {
                 // La bulle apparaît en bas du fil.
                 self.descendre = true;
             }
+            if nouveau {
+                self.son_ecrit(conv);
+            }
         } else {
-            self.ecrits.remove(conv);
+            self.ecrit_fini(conv);
         }
     }
 
     /// Un message reçu de cette conversation : la bulle s'en va.
     pub(crate) fn ecrit_fini(&mut self, conv: &str) {
-        self.ecrits.remove(conv);
+        if self.ecrits.remove(conv).is_some() {
+            self.ecrit_parti(conv);
+        }
     }
 
     /// Les bulles sans nouvelle depuis 6 s s'en vont ; vrai si l'écran change.
     pub(crate) fn ecrits_perimes(&mut self) -> bool {
-        let avant = self.ecrits.len();
-        self.ecrits.retain(|_, e| e.depuis.elapsed() < ECRIT_DUREE);
-        avant != self.ecrits.len()
+        let perimes: Vec<String> =
+            self.ecrits.iter().filter(|(_, e)| e.depuis.elapsed() >= ECRIT_DUREE).map(|(k, _)| k.clone()).collect();
+        for k in &perimes {
+            self.ecrit_fini(k);
+        }
+        !perimes.is_empty()
     }
 
     /// Quelqu'un écrit-il dans cette conversation (et le réglage le montre-t-il) ?

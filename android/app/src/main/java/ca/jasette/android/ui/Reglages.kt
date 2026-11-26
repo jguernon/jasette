@@ -83,6 +83,7 @@ import androidx.compose.runtime.key
 enum class SectionReglages(val nom: String, val couleur: Long, val couleurEga: Long) {
     COMPTES("Comptes", 0x8b5cf6, 0xaa00aa),
     NOTIFICATIONS("Notifications", 0x16a34a, 0x00aa00),
+    SONS("Sons", 0xf59e0b, 0xaa5500),
     APPARENCE("Apparence", 0xec4899, 0xaa00aa),
     CONVERSATIONS("Conversations", 0x14b8a6, 0x00aaaa),
     SERVEUR("Serveur Jasette", 0x8b5cf6, 0xaa00aa),
@@ -94,6 +95,7 @@ enum class SectionReglages(val nom: String, val couleur: Long, val couleurEga: L
 private fun iconeSection(s: SectionReglages): androidx.compose.ui.graphics.vector.ImageVector = when (s) {
     SectionReglages.COMPTES -> Icones.arobase
     SectionReglages.NOTIFICATIONS -> Icons.Filled.Notifications
+    SectionReglages.SONS -> Icones.volume
     SectionReglages.APPARENCE -> Icones.palette
     SectionReglages.CONVERSATIONS -> Icones.forum
     SectionReglages.SERVEUR -> Icones.serveur
@@ -107,6 +109,8 @@ private fun resumeSection(s: SectionReglages): String? = when (s) {
     SectionReglages.COMPTES -> Depot.services.count { Depot.etat(it).associe }.let { n ->
         if (n == 1) t("1 connecté") else "$n ${t("connectés")}"
     }
+    SectionReglages.SONS -> ca.jasette.android.Sons.JEUX.firstOrNull { it.first == ca.jasette.android.Marques.sonsConversation }
+        ?.let { t(it.second) }
     SectionReglages.CONVERSATIONS -> ca.jasette.android.Marques.cacherApresJours.takeIf { it > 0 }?.let { nomCacherApres(it) }
     SectionReglages.SERVEUR -> Depot.serveur?.adresse ?: t("Sur cet appareil")
     SectionReglages.LANGUE -> when (Langue.choix) {
@@ -242,6 +246,7 @@ private fun PageSection(
         when (s) {
             SectionReglages.COMPTES -> SectionComptes(connecter)
             SectionReglages.NOTIFICATIONS -> SectionNotifications()
+            SectionReglages.SONS -> ChoixSons()
             SectionReglages.APPARENCE -> {
                 ChoixTheme()
                 ChoixTeinte()
@@ -548,6 +553,38 @@ fun ChoixRangee(
 }
 
 /** Réglages → Langue : Automatique (celle du téléphone), Français ou English. */
+/** Réglages > Sons : un bouton radio par jeu ; le choisir le fait entendre (Sons.kt). */
+@Composable
+private fun ChoixSons() {
+    val choix = ca.jasette.android.Marques.sonsConversation
+    Text(
+        t("Dans la conversation ouverte : à l'envoi, à la réception et quand on vous écrit."),
+        color = P.textePale, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp),
+    )
+    Groupe {
+        for ((valeur, nom) in ca.jasette.android.Sons.JEUX) {
+            val actif = choix == valeur
+            Row(
+                Modifier.fillMaxWidth().clickable {
+                    ca.jasette.android.Marques.choisirSons(valeur)
+                    ca.jasette.android.Sons.apercu(valeur)
+                }.padding(horizontal = 16.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val forme = if (P.carre) androidx.compose.ui.graphics.RectangleShape else formeRonde
+                Box(
+                    Modifier.size(20.dp).clip(forme).border(2.dp, if (actif) P.accent else P.textePale, forme),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (actif) Box(Modifier.size(10.dp).clip(forme).background(P.accent))
+                }
+                Spacer(Modifier.width(14.dp))
+                Text(t(nom), color = P.texteFort, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
 @Composable
 private fun ChoixLangue() {
     val choix = Langue.choix

@@ -209,6 +209,8 @@ impl Jasette {
         }
         let tmp = self.en_attente(&conv, e.clone(), String::new(), Vec::new());
         self.commande(json!({"cmd": "send", "conv": conv, "text": e, "tmp_id": tmp}));
+        // Son propre son, à la place de celui de l'envoi (src/sons.rs).
+        self.son_envoi(&conv, true);
         self.emojis_ouverts = false;
         cx.notify();
     }

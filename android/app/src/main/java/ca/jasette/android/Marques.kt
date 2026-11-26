@@ -146,6 +146,21 @@ object Marques {
         surPresence?.invoke(oui)
     }
 
+    /**
+     * Le jeu de sons des conversations (Sons.kt) : "bulle" (défaut), "bois",
+     * "verre" ou "aucun". Une marque (`sons_conversation`, §5.5) : partagée
+     * par le serveur Jasette s'il y en a un, gardée ici sinon.
+     */
+    var sonsConversation by mutableStateOf("bulle")
+        private set
+
+    fun choisirSons(jeu: String) {
+        val j = jeuSons(jeu)
+        if (j == sonsConversation) return
+        sonsConversation = j
+        changement()
+    }
+
     /** Chaque bulle montre son heure (et sa date si ce n'est pas aujourd'hui), comme `details_heures`. */
     var heureChaqueMessage by mutableStateOf(true)
         private set
@@ -243,6 +258,7 @@ object Marques {
         garderArchives = p.getBoolean("garder_archives", false)
         cacherApresJours = bornerJours(p.getInt("cacher_apres_jours", 0))
         presenceEnLigne = p.getBoolean("presence_en_ligne", true)
+        sonsConversation = jeuSons(p.getString("sons_conversation", "bulle"))
         archivesDepuis.clear()
         try {
             val o = JSONObject(p.getString("archives_depuis", "{}") ?: "{}")
@@ -308,6 +324,7 @@ object Marques {
             ?.putBoolean("garder_archives", garderArchives)
             ?.putInt("cacher_apres_jours", cacherApresJours)
             ?.putBoolean("presence_en_ligne", presenceEnLigne)
+            ?.putString("sons_conversation", sonsConversation)
             ?.putString("archives_depuis", JSONObject(archivesDepuis.toMap()).toString())
             ?.putLong("version", version)
             ?.putBoolean("a_envoyer", aEnvoyer)
@@ -439,9 +456,11 @@ object Marques {
         val garderArchives: Boolean,
         val cacherApresJours: Int,
         val presenceEnLigne: Boolean,
+        val sons: String,
     ) {
         fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty() && privees.isEmpty() &&
-            moods.isEmpty() && emojis.isEmpty() && !garderArchives && cacherApresJours == 0 && presenceEnLigne
+            moods.isEmpty() && emojis.isEmpty() && !garderArchives && cacherApresJours == 0 && presenceEnLigne &&
+            sons == "bulle"
 
         /** Chaque liste de this, dans son ordre, puis les ids de [b] qui n'y sont pas. */
         fun union(b: Listes) = Listes(
@@ -459,6 +478,7 @@ object Marques {
             // De même pour la durée.
             cacherApresJours,
             presenceEnLigne,
+            sons,
         )
 
         /** Les ids de this absents de [b], liste par liste. */
@@ -470,13 +490,14 @@ object Marques {
             garderArchives,
             cacherApresJours,
             presenceEnLigne,
+            sons,
         )
     }
 
     private fun listes() =
         Listes(
             head.toList(), favoris.toList(), epingles.toList(), archives.toList(), privees.toList(), moods.toMap(), emojis.toMap(),
-            garderArchives, cacherApresJours, presenceEnLigne,
+            garderArchives, cacherApresJours, presenceEnLigne, sonsConversation,
         )
 
     private fun poser(l: Listes) {
@@ -497,6 +518,7 @@ object Marques {
             presenceEnLigne = l.presenceEnLigne
             surPresence?.invoke(l.presenceEnLigne)
         }
+        sonsConversation = l.sons
     }
 
     /** Envoie une trame au serveur ; faux si la connexion est coupée. Posé par [Depot] en mode client. */
@@ -538,6 +560,7 @@ object Marques {
             .put("garder_archives", l.garderArchives)
             .put("cacher_apres_jours", l.cacherApresJours)
             .put("presence_en_ligne", l.presenceEnLigne)
+            .put("sons_conversation", l.sons)
             .put("version", version).put("id", prochain)
         if (!envoi(JSONObject().put("marques", corps))) {
             // La connexion tombe : le rejeu suivant tranchera.
@@ -572,6 +595,12 @@ object Marques {
             if (m.opt("cacher_apres_jours") is Number) bornerJours(m.optInt("cacher_apres_jours")) else cacherApresJours,
             // Et pour `presence_en_ligne` (absent : le nôtre reste ; vrai par défaut).
             if (m.opt("presence_en_ligne") is Boolean) m.optBoolean("presence_en_ligne") else presenceEnLigne,
+            // Et pour `sons_conversation` (absent : le nôtre reste) ; un booléen : vrai "bulle", faux "aucun".
+            when (val j = m.opt("sons_conversation")) {
+                is Boolean -> if (j) "bulle" else "aucun"
+                is String -> jeuSons(j)
+                else -> sonsConversation
+            },
         )
         val v = m.optLong("version", -1)
         if (v < 0) return
@@ -627,4 +656,10 @@ object Marques {
         if (listes() != avant.first) CacheMarques.synchroniser()
         pousser()
     }
+}
+
+/** Un jeu de sons connu, sinon "bulle" (le défaut). */
+fun jeuSons(j: String?): String = when (j) {
+    "bulle", "bois", "verre", "aucun" -> j
+    else -> "bulle"
 }
