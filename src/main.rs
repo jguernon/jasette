@@ -5430,6 +5430,12 @@ impl Jasette {
             .child(
                 Self::bouton_rail("r-reglages", en_reglages)
                     .on_click(cx.listener(|this, _, _, cx| {
+                        // En arrivant dans les Réglages : la liste des comptes, pas
+                        // un écran d'ajout resté ouvert d'une visite précédente.
+                        if this.section.is_none() {
+                            this.ajout_compte = false;
+                            this.ajout_service = None;
+                        }
                         this.section = Some(this.section.unwrap_or(Section::Comptes));
                         cx.notify();
                     }))
@@ -8700,7 +8706,11 @@ impl Jasette {
             .child(
                 item("s-comptes", Section::Comptes, t("Comptes"), "at-sign", ACCENT_2, Some(comptes_actifs)).on_click(
                     cx.listener(|this, _, _, cx| {
+                        // « Comptes » montre toujours la liste des comptes connectés,
+                        // même si on avait laissé l'écran d'ajout ouvert.
                         this.section = Some(Section::Comptes);
+                        this.ajout_compte = false;
+                        this.ajout_service = None;
                         cx.notify();
                     }),
                 ),
