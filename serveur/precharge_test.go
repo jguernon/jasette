@@ -40,3 +40,26 @@ func TestPrechargeSansGrands(t *testing.T) {
 		t.Fatalf("candidats : %v", r)
 	}
 }
+
+// Reddit : service facultatif, préfixe « r: », préchargement prudent comme Discord.
+func TestServiceReddit(t *testing.T) {
+	if prefixeService["reddit"] != "r:" {
+		t.Fatalf("préfixe de Reddit : %q", prefixeService["reddit"])
+	}
+	if svc, id := svcDeId("r:!abc:reddit.com"); svc != "reddit" || id != "!abc:reddit.com" {
+		t.Fatalf("svcDeId : %s %s", svc, id)
+	}
+	if f, ok := pontsFacultatifs["reddit"]; !ok || f.bin != "jasette-reddit" || f.dossier != "reddit" {
+		t.Fatalf("pont facultatif : %+v", f)
+	}
+	if ordreServices[len(ordreServices)-1] != "reddit" {
+		t.Fatalf("ordre : %v", ordreServices)
+	}
+	_, compte, total, pause := reglagesPrecharge("reddit")
+	if compte > 30 || total == 0 || pause < 2e9 {
+		t.Fatalf("préchargement de Reddit : %d, %d, %v", compte, total, pause)
+	}
+	if ids := idsDuService([]string{"r:!a:reddit.com", "d:1", "123"}, "google"); len(ids) != 1 || ids[0] != "123" {
+		t.Fatalf("idsDuService : %v", ids)
+	}
+}

@@ -46,6 +46,8 @@ var prechargeParService = map[string]struct {
 	pause                 time.Duration
 }{
 	"discord": {nombre: 8, compte: 30, total: 15, pause: 4 * time.Second},
+	// Reddit : même prudence (pas d'API officielle pour le chat).
+	"reddit": {nombre: 8, compte: 30, total: 15, pause: 4 * time.Second},
 }
 
 // reglagesPrecharge : nombre de conversations récentes, messages par

@@ -29,7 +29,7 @@ const (
 
 // Marques : cinq listes ordonnées d'ids de conversations (préfixés « m: »
 // pour Messenger, « i: » pour Instagram, « w: », « s: », « x: », « t: »,
-// « b: », « d: » pour WhatsApp, Signal, X, Telegram, Bluesky et Discord,
+// « b: », « d: », « r: » pour WhatsApp, Signal, X, Telegram, Bluesky, Discord et Reddit,
 // sans préfixe pour Google).
 // Version 0 : le serveur n'a encore rien reçu.
 //
@@ -552,7 +552,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 
 // Le préfixe des ids d'un service, tels que les clients les voient.
 var prefixeService = map[string]string{
-	"google": "", "messenger": "m:", "instagram": "i:", "whatsapp": "w:", "signal": "s:", "x": "x:", "telegram": "t:", "bluesky": "b:", "discord": "d:",
+	"google": "", "messenger": "m:", "instagram": "i:", "whatsapp": "w:", "signal": "s:", "x": "x:", "telegram": "t:", "bluesky": "b:", "discord": "d:", "reddit": "r:",
 }
 
 // desarchiverSiRecu : un événement `message` d'un pont. Un message reçu (pas
