@@ -241,3 +241,28 @@ func TestSessionEvents(t *testing.T) {
 		t.Fatal("session.json gardé après un refus")
 	}
 }
+
+// create_group : les demandes impossibles sont refusées avant tout appel à Discord.
+func TestCreateGroupRefus(t *testing.T) {
+	_, lire := capture(t)
+	ctx, annule := context.WithCancel(context.Background())
+	defer annule()
+	p := newPont(ctx)
+	for _, membres := range [][]string{
+		{"2"},         // une seule personne
+		{"2", "2"},    // la même deux fois
+		{"2", "emma"}, // pas un id Discord
+		{"2", "3", "4", "5", "6", "7", "8", "9", "10", "11"}, // plus de 9
+	} {
+		p.createGroup(Cmd{Cmd: "create_group", Members: membres})
+		e := find(lire(), "error")
+		if e == nil || e["where"] != "create_group" {
+			t.Fatalf("%v : pas d'erreur create_group (%v)", membres, e)
+		}
+	}
+	// Valide, mais pas de session : une erreur aussi, sans réseau.
+	p.createGroup(Cmd{Cmd: "create_group", Members: []string{"d:2", "3"}, Name: "Les amis"})
+	if e := find(lire(), "error"); e == nil || e["where"] != "create_group" {
+		t.Fatalf("sans session : %v", e)
+	}
+}

@@ -10,7 +10,8 @@ package main
 // Discord pousse lui-même la présence des amis à un compte utilisateur
 // (READY, puis PRESENCE_UPDATE) : aucune requête de plus. « online »,
 // « idle » et « dnd » comptent comme en ligne ; Discord ne dit jamais depuis
-// quand quelqu'un est hors ligne (last_active 0). Le pont, lui, se déclare
+// quand quelqu'un est hors ligne : last_active 0, sauf si le pont l'a vu
+// passer hors ligne (alors, ce moment-là). Le pont, lui, se déclare
 // toujours « invisible » (comme mautrix-discord) : le téléphone garde ses
 // notifications et personne ne voit Jasette en ligne.
 
@@ -65,6 +66,9 @@ func (p *Pont) notePresence(userID string, st discordgo.Status) {
 	old, seen := p.presence[conv]
 	if seen && old.online == s.online {
 		return
+	}
+	if seen && old.online && !online {
+		s.last = time.Now().UnixMilli() // vu en ligne jusqu'à maintenant
 	}
 	p.presence[conv] = s
 	if !seen && !online {

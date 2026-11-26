@@ -441,7 +441,7 @@ func (p *Pont) rejeu() [][]byte {
 const presenceMax = 500
 
 // Les services dont le pont sait suivre la présence (PROTOCOLE.md, §5.10).
-var servicesPresence = []string{"messenger", "instagram", "whatsapp", "telegram"}
+var servicesPresence = []string{"messenger", "instagram", "whatsapp", "telegram", "discord"}
 
 func envPresence(on bool) string {
 	if on {

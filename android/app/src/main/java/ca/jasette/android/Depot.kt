@@ -393,7 +393,7 @@ object Depot {
     }
 
     /** Les services dont le pont suit la présence. */
-    private val SERVICES_PRESENCE = listOf(Service.MESSENGER, Service.INSTAGRAM, Service.WHATSAPP, Service.TELEGRAM)
+    private val SERVICES_PRESENCE = listOf(Service.MESSENGER, Service.INSTAGRAM, Service.WHATSAPP, Service.TELEGRAM, Service.DISCORD)
 
     /**
      * Le réglage « Afficher qui est en ligne » vient de changer : les ponts

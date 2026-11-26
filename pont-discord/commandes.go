@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -388,4 +389,73 @@ func (p *Pont) newChat(cmd Cmd) {
 	p.mu.Unlock()
 	p.emitConv(ch.ID, true)
 	go p.fetchAvatars([]string{ch.ID})
+}
+
+// Un groupe privé Discord : dix personnes au plus, moi compris.
+const maxGroupe = 9
+
+// createGroup : un groupe privé avec ces personnes (PROTOCOLE.md §5.6 bis),
+// comme le client web : POST /users/@me/channels avec « recipients », puis
+// le nom, s'il y en a un.
+func (p *Pont) createGroup(cmd Cmd) {
+	var ids []string
+	vus := map[string]bool{}
+	for _, m := range cmd.Members {
+		m = strings.TrimPrefix(strings.TrimSpace(m), "d:")
+		if m == "" || vus[m] {
+			continue
+		}
+		if strings.Trim(m, "0123456789") != "" {
+			emitErr("create_group", fmt.Errorf("personne introuvable : %s", m))
+			return
+		}
+		vus[m] = true
+		ids = append(ids, m)
+	}
+	if len(ids) < 2 {
+		emitErr("create_group", errors.New("il faut au moins deux personnes"))
+		return
+	}
+	if len(ids) > maxGroupe {
+		emitErr("create_group", fmt.Errorf("un groupe Discord compte %d personnes au plus, toi compris", maxGroupe+1))
+		return
+	}
+	sess, err := p.api()
+	if err != nil {
+		emitErr("create_group", err)
+		return
+	}
+	ctx, annule := context.WithTimeout(p.ctx, 30*time.Second)
+	defer annule()
+	if err := p.rest.wait(ctx); err != nil {
+		emitErr("create_group", err)
+		return
+	}
+	body, err := sess.RequestWithBucketID(http.MethodPost, discordgo.EndpointUserChannels("@me"),
+		map[string]any{"recipients": ids}, discordgo.EndpointUserChannels(""), discordgo.WithContext(ctx))
+	if err != nil {
+		emitErr("create_group", explainSend(err))
+		return
+	}
+	var ch discordgo.Channel
+	if err := json.Unmarshal(body, &ch); err != nil || ch.ID == "" {
+		emitErr("create_group", errors.New("réponse de Discord illisible"))
+		return
+	}
+	if nom := strings.TrimSpace(cmd.Name); nom != "" {
+		if len([]rune(nom)) > 100 {
+			nom = string([]rune(nom)[:100])
+		}
+		if p.rest.wait(ctx) == nil {
+			if edit, err := sess.ChannelEdit(ch.ID, &discordgo.ChannelEdit{Name: nom}, referer(ch.ID), discordgo.WithContext(ctx)); err == nil && edit != nil {
+				ch.Name = edit.Name
+			} else if err != nil {
+				log.Warn().Err(err).Msg("nom du groupe")
+			}
+		}
+	}
+	p.mu.Lock()
+	p.addChannel(&ch)
+	p.mu.Unlock()
+	p.emitConv(ch.ID, true)
 }

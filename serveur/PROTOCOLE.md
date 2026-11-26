@@ -663,6 +663,7 @@ deux personnes, au plus 50 (moi en plus) ; `name` est facultatif.
 | `whatsapp` | `pont-wa` | `CreateGroup` de whatsmeow | oui, 25 caractères ; sans nom : ceux des membres |
 | `signal` | `pont-signal` | `CreateGroup` de signalmeow (les PNI sont invités) | oui, 32 caractères ; sans nom : ceux des membres |
 | `telegram` | `pont-telegram` | `messages.createChat` (groupe simple) | oui, 128 caractères ; sans nom : ceux des membres |
+| `discord` | `pont-discord` | `POST /users/@me/channels` (`recipients`, comme le client web), puis `PATCH` du salon pour le nom ; 9 personnes au plus (10 avec moi) | oui, 100 caractères ; sans nom : ceux des membres |
 
 X (mautrix-twitter ne sait pas créer de groupe XChat) et Bluesky (les
 messages privés n'y ont pas de groupes) ne l'offrent pas : le pont répond
@@ -834,8 +835,8 @@ mêmes garde-fous. Rien n'attend : la carte apparaît quand l'aperçu arrive.
 
 ### 5.10 Présence en ligne
 
-Les ponts Messenger, Instagram, WhatsApp et Telegram annoncent qui est en
-ligne, pour les conversations **individuelles** qu'ils connaissent :
+Les ponts Messenger, Instagram, WhatsApp, Telegram et Discord annoncent qui
+est en ligne, pour les conversations **individuelles** qu'ils connaissent :
 
 ```json
 {"ev":"presence","item":{"conv":"4155551234@s.whatsapp.net","user":"4155551234@s.whatsapp.net","online":true,"last_active":1764160000000}}
@@ -886,6 +887,11 @@ Par service :
 - **Telegram** : le `status` de chaque personne (`userStatusOnline`,
   `userStatusOffline` avec `was_online`, sinon heure inconnue) et
   `updateUserStatus`. Le pont ne se déclare jamais en ligne lui-même.
+- **Discord** : les présences que Discord pousse déjà au compte (READY, puis
+  `PRESENCE_UPDATE`, pour les amis) ; aucune requête de plus. `online`,
+  `idle` et `dnd` comptent comme en ligne ; `last_active` est le moment où
+  le pont a vu la personne passer hors ligne, sinon 0. Le pont se déclare
+  toujours « invisible ».
 
 ### 5.11 « En train d'écrire »
 
