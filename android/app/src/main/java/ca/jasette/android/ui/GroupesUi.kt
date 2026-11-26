@@ -136,7 +136,7 @@ fun Groupes(
                         }
                     } else {
                         Text(
-                            t("Groupes"), fontWeight = FontWeight.Bold, fontSize = 22.sp,
+                            t("Canaux"), fontWeight = FontWeight.Bold, fontSize = 22.sp,
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
                     }

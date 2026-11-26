@@ -372,7 +372,7 @@ private fun Liste(
         Vue.Tout -> t("Boîte de réception")
         Vue.Favoris -> t("Favoris")
         Vue.Archives -> t("Archives")
-        Vue.Groupes -> t("Groupes")
+        Vue.Groupes -> t("Canaux")
         is Vue.DuService -> vue.service.titre
         Vue.Privees -> t("Privées")
     }

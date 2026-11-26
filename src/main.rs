@@ -6009,7 +6009,7 @@ impl Jasette {
         let titre = t(match self.vue {
             Vue::Tout => "Boîte de réception",
             Vue::Favoris => "Favoris",
-            Vue::Groupes => "Groupes",
+            Vue::Groupes => "Canaux",
             Vue::Archives => "Archives",
             Vue::Privees => "Privées",
             Vue::Service(s) => s.nom(),
@@ -12752,7 +12752,7 @@ fn t(fr: &'static str) -> &'static str {
         "Ajouter au Head" => "Add to Head",
         "Retirer du Head" => "Remove from Head",
         "Favoris" => "Favorites",
-        "Groupes" => "Groups",
+        "Canaux" => "Channels",
         "Aucun favori : ajoutez-en par le menu « … » d'une conversation." => "No favorites yet: add some from a conversation's “…” menu.",
         "Retirer des favoris" => "Remove from favorites",
         "Désarchiver" => "Unarchive",

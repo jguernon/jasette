@@ -411,7 +411,6 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Sans nom" to "Unnamed",
     "Services" to "Services",
     // L'onglet Groupes (PROTOCOLE.md §5.13).
-    "Groupes" to "Groups",
     "Salons" to "Channels",
     "Aucun salon" to "No channels",
     "1 salon" to "1 channel",

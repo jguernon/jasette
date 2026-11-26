@@ -191,7 +191,7 @@ fun Rail(vue: Vue, enReglages: Boolean, choisir: (Vue) -> Unit, reglages: () -> 
         val fixes = listOf(
             Triple(Vue.Tout, Icones.inbox, t("Boîte de réception")),
             Triple(Vue.Favoris, Icons.Filled.Star, t("Favoris")),
-            Triple(Vue.Groupes, Icones.groupes, t("Groupes")),
+            Triple(Vue.Groupes, Icones.groupes, t("Canaux")),
             Triple(Vue.Archives, Icones.archive, t("Archives")),
         )
         for ((v, ic, nom) in fixes) {
@@ -252,7 +252,7 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
         val fixes = listOf(
             Triple(Vue.Tout, Icones.inbox, t("Inbox")),
             Triple(Vue.Favoris, Icons.Filled.Star, t("Favoris")),
-            Triple(Vue.Groupes, Icones.groupes, t("Groupes")),
+            Triple(Vue.Groupes, Icones.groupes, t("Canaux")),
             Triple(Vue.Archives, Icones.archive, t("Archives")),
         )
         for ((v, ic, nom) in fixes) {
