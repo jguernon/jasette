@@ -903,18 +903,25 @@ Par service :
   (`PresenceAvailable`) en permanence et s'abonne (`SubscribePresence`) aux
   50 conversations individuelles les plus récentes, à chaque connexion ;
   WhatsApp ne transmet la présence des autres qu'à un appareil disponible.
+  L'abonnement vise le LID de la personne quand on le connaît (sinon son
+  numéro) ; la présence reçue est ramenée au numéro de la conversation.
   Conséquences : les contacts vous voient « en ligne » tant que le pont
   tourne, et le téléphone ne sonne plus pour les messages WhatsApp tant
   qu'un appareil lié est disponible (comportement de WhatsApp Web).
   Désactivé : « indisponible », comme avant (disponible seulement pendant
   3 minutes après une action dans Jasette).
-- **Messenger** (messagix) : la table lightspeed
-  `LSDeleteThenInsertContactPresence` (Status ≠ 0 : actif, jusqu'à
-  `ExpirationTimestampMs`) et `LSTruncatePresenceDatabase`, quand Meta les
-  pousse sur le socket.
-- **Instagram** (instameow, qui n'implémente pas le flux de présence du
-  site) : `GET /api/v1/direct_v2/get_presence/` une fois par minute ;
-  trois échecs de suite, pause de 30 minutes.
+- **Messenger** et **Instagram** : le flux « PresenceUnifiedJSON » que
+  les sites facebook.com et instagram.com ouvrent sur le socket
+  « streamcontroller » de leur passerelle (gateway.facebook.com,
+  gateway.instagram.com), à côté du socket de messagix ou d'instameow
+  (presence_flux.go, commun aux deux ponts). Le pont écoute sans annoncer
+  sa propre présence, et demande toutes les 2,5 minutes celle des personnes
+  de ses conversations individuelles récentes (comme le site). Coupure :
+  nouvel essai de 5 s à 5 min ; cinq échecs de suite, pause de 30 minutes ;
+  session refusée, arrêt jusqu'à la prochaine connexion. Messenger lit
+  aussi la table lightspeed `LSDeleteThenInsertContactPresence` si Meta la
+  pousse encore. L'ancien `GET /api/v1/direct_v2/get_presence/` d'Instagram
+  répond 404 : il n'est plus appelé.
 - **Telegram** : le `status` de chaque personne (`userStatusOnline`,
   `userStatusOffline` avec `was_online`, sinon heure inconnue) et
   `updateUserStatus`. Le pont ne se déclare jamais en ligne lui-même.
