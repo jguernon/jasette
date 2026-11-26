@@ -158,6 +158,7 @@ type Cmd struct {
 	ReplyTo string            `json:"reply_to"`
 	ID      string            `json:"id"`
 	Emoji   string            `json:"emoji"`
+	Number  string            `json:"number"`
 	Cookies map[string]string `json:"cookies"`
 	Auto    bool              `json:"auto"`
 }
@@ -322,8 +323,10 @@ func main() {
 			go p.search(strings.TrimSpace(cmd.Text))
 		case "search_messages":
 			go p.searchMessages(cmd.Text, int(cmd.Limit))
-		case "new", "create_group":
-			emitErr(cmd.Cmd, fmt.Errorf("Reddit : commencez la conversation dans Reddit, elle apparaîtra ici"))
+		case "new":
+			go p.newChat(cmd)
+		case "create_group":
+			emitErr(cmd.Cmd, fmt.Errorf("Reddit : créez le groupe dans Reddit, il apparaîtra ici"))
 		case "edit":
 			emitErr("edit", fmt.Errorf("Reddit ne permet pas de modifier un message"))
 		case "typing":

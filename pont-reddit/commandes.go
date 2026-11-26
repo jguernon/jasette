@@ -665,6 +665,25 @@ func (p *Pont) search(q string) {
 	}
 }
 
+// newChat : un résultat de « search » (l'id d'une conversation connue)
+// s'ouvre. Jasette ne commence pas de nouvelle conversation Reddit (pas de
+// création de salon automatique ni de recherche dans l'annuaire).
+func (p *Pont) newChat(cmd Cmd) {
+	q := strings.TrimPrefix(strings.TrimSpace(firstOf(cmd.Number, cmd.ID, cmd.Conv, cmd.Text)), "r:")
+	p.mu.Lock()
+	s := p.salons[q]
+	var item Conversation
+	if s != nil {
+		item = s.convOut(p.me, p.noms)
+	}
+	p.mu.Unlock()
+	if s == nil {
+		emitErr("new", errors.New("Reddit : commencez la conversation dans Reddit, elle apparaîtra ici"))
+		return
+	}
+	emit("conversation", map[string]any{"item": item, "open": true})
+}
+
 // searchMessages : les messages en mémoire dont le texte contient « text ».
 func (p *Pont) searchMessages(text string, limit int) {
 	items := []map[string]any{}
