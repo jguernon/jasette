@@ -106,12 +106,22 @@ Mots de passe d'app > Ajouter, en cochant « Autoriser l'accès à vos messages
 privés ». Jasette ne garde que les jetons de session
 (`<données>/bluesky/session.json`, 0600), jamais le mot de passe.
 
-Discord : **messages privés et groupes privés seulement** (pas les salons des
-serveurs : trop de volume, et c'est là que Discord surveille le plus les
-clients non officiels). Connexion par **code QR**, à scanner dans l'app Discord
+Discord : messages privés, groupes privés et, dans l'onglet **Groupes**, les
+salons texte des serveurs, avec prudence : la liste vient des données que
+Discord envoie à la connexion (aucune requête de plus, aucun abonnement aux
+serveurs), et un salon n'a d'historique que si tu l'ouvres (50 messages au
+plus). Connexion par **code QR**, à scanner dans l'app Discord
 du téléphone (Paramètres > Scanner le code QR), ou en collant le **jeton** du
 compte. Le pont garde le jeton dans `<données>/discord/session.json` (0600).
 Les ids de conversation portent le préfixe `d:`.
+
+**Onglet Groupes** : les grands espaces (serveurs Discord, canaux et
+supergroupes Telegram, communautés WhatsApp, discussions de communauté et
+canaux de diffusion Messenger) y vivent, hors de la boîte de réception ; ils
+y reviennent sur une mention, une réponse à un de tes messages, s'ils sont
+épinglés, ou par « Montrer dans la boîte de réception » (menu de la
+conversation). Les groupes de personnes ne bougent pas. Voir
+`serveur/PROTOCOLE.md`, §5.13.
 
 **Risque** : Discord interdit officiellement les clients tiers sur un compte
 d'utilisateur (« self-bot »). Le pont imite le client web (empreinte TLS de

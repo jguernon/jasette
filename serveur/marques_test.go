@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -279,5 +280,42 @@ func TestCacherApresJours(t *testing.T) {
 	}
 	if m := chargerMarques(); m.CacherApresJours != 0 || !m.GarderArchives {
 		t.Fatalf("ancien fichier : %+v", m)
+	}
+}
+
+// groupes_inbox : une liste comme les autres (absente, rien ne change ;
+// partagée ; gardée par un désarchivage ; relue sur disque).
+func TestGroupesInbox(t *testing.T) {
+	s, c := serveurEssai(t)
+	s.recevoirMarques(c, json.RawMessage(`{"archives":["m:7"],"groupes_inbox":["d:g5:11","t:c9"],"version":0}`))
+	lireTrame(t, c)
+	if len(s.marques.GroupesInbox) != 2 || s.marques.GroupesInbox[0] != "d:g5:11" {
+		t.Fatalf("reçue : %+v", s.marques)
+	}
+	// Un ancien client (sans le champ) ne la vide pas.
+	s.recevoirMarques(c, json.RawMessage(`{"head":["a"],"version":1}`))
+	lireTrame(t, c)
+	if len(s.marques.GroupesInbox) != 2 {
+		t.Fatalf("ancien client : %+v", s.marques)
+	}
+	// Un message reçu désarchive sans toucher à groupes_inbox.
+	s.desarchiverSiRecu("messenger", []byte(`{"item":{"conv":"7","time":99999999999999}}`))
+	if len(s.marques.Archives) != 0 || len(s.marques.GroupesInbox) != 2 {
+		t.Fatalf("désarchivage : %+v", s.marques)
+	}
+	lireTrame(t, c) // la diffusion du désarchivage
+	// Client en retard qui la viderait : refusé.
+	s.recevoirMarques(c, json.RawMessage(`{"groupes_inbox":[],"version":1}`))
+	if tr := lireTrame(t, c); tr.Marques.Refus == "" {
+		t.Fatalf("garde-fou : %+v", tr.Marques)
+	}
+	// À jour : vidée exprès.
+	s.recevoirMarques(c, json.RawMessage(fmt.Sprintf(`{"groupes_inbox":[],"version":%d}`, s.marques.Version)))
+	lireTrame(t, c)
+	if len(s.marques.GroupesInbox) != 0 {
+		t.Fatalf("vidée : %+v", s.marques)
+	}
+	if m := chargerMarques(); m.GroupesInbox == nil || len(m.GroupesInbox) != 0 {
+		t.Fatalf("relu : %+v", m)
 	}
 }

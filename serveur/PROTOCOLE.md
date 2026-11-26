@@ -356,7 +356,7 @@ compte et le relais `did:web:api.bsky.chat`) :
   conversation Bluesky ; un message : `<conversation>/<id>`. Les résultats de
   `search` ont le DID de la personne pour id (à passer à `new`).
 
-**Discord** (messages privés et groupes privés seulement ; une session de
+**Discord** (messages privés, groupes privés et salons des serveurs ; une session de
 plus du compte, qui se présente comme le client web, par la discordgo
 modifiée de mautrix-discord) :
 
@@ -380,20 +380,41 @@ modifiée de mautrix-discord) :
 - Le pont garde le jeton dans `<données>/discord/session.json` (0600) ;
   le serveur ne l'écrit jamais dans ses journaux. `unpair` déconnecte
   aussi la session chez Discord.
-- Les ids : celui du salon privé (snowflake) ; un message : son snowflake.
+- Les ids : celui du salon privé (snowflake) ; un salon de serveur :
+  `g<guilde>:<salon>` (donc `d:g<guilde>:<salon>` dans les marques et chez
+  les clients) ; un message : son snowflake.
   Les résultats de `search` (amis et gens des conversations connues, sans
   requête) ont l'id Discord de la personne pour id (à passer à `new`).
   `search_messages` ne cherche que dans les messages vus depuis le
-  lancement du pont. Les salons des serveurs Discord ne sont pas offerts.
+  lancement du pont.
+- **Serveurs** (§5.13) : les salons texte et d'annonces que je peux voir
+  (permissions calculées sur mes rôles), tirés de READY et des événements
+  qui suivent (serveur rejoint ou quitté, salon créé, modifié, supprimé,
+  mes rôles changés), **sans requête REST** et **sans abonnement « lazy
+  guild » (op 14)**. Ils arrivent dans la liste `conversations` après les
+  messages privés (200 au plus), avec `large`, `kind: "server"`,
+  `parent: "g<guilde>"`, `parent_name`, `section`, `section_order`,
+  `order`, `announce` (salon d'annonces), `read_only` (pas le droit
+  d'écrire) et `mentions` (`mention_count` du `read_state`). 150 salons
+  au plus par serveur, 2000 en tout. Pas d'image de salon, pas de « … ».
+  Un salon sans état de lecture est pris pour lu. **Aucun historique** tant
+  que l'utilisateur ne l'ouvre pas (`messages` : une page de 50 au plus) ;
+  le dernier message et les non-lus viennent de READY (`last_message_id`,
+  sans texte : l'aperçu reste vide) et des messages que la passerelle
+  pousse d'elle-même. Discord ne pousse pas tout pour les très gros
+  serveurs sans op 14 : ces salons se mettent à jour à leur ouverture.
+  `send`, `send_media`, `react`, `read` et `typing` : le même chemin que pour
+  un message privé. Les messages portent `mentions_me` (`@moi`,
+  `@everyone`, `@here`, un de mes rôles) et `reply_to_me`.
 - Discord interdit les « self-bots » : le pont n'agit que sur commande,
   espace ses requêtes (400 ms au moins) et le serveur en précharge moins
   (§5.8). Pas d'archives chez Discord (celles de Jasette, §5.5) ; 10 Mo au
   plus par fichier envoyé.
 
-### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*)
+### 5.5 Marques (Head, favoris, épinglées, archives, privées, groupes_inbox, moods, emojis rapides, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
-tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
+tous ses appareils. Ce sont six listes **ordonnées** d'ids de
 conversations, tels que l'interface les voit (« m: » pour Messenger,
 « i: » pour Instagram, « w: » pour WhatsApp, « s: » pour Signal, « x: »
 pour X, « t: » pour Telegram, « b: » pour Bluesky, « d: » pour Discord, sans préfixe pour Google) :
@@ -405,7 +426,11 @@ pour X, « t: » pour Telegram, « b: » pour Bluesky, « d: » pour Discord, sa
   savent pas archiver (Messenger, Instagram, Signal, X, Bluesky, Discord). Google, WhatsApp et
   Telegram archivent pour de vrai (commande `archive` de leur pont) et n'y
   vont pas ;
-- `privees` : la **Liste privée** (voir « Règle des privées » plus bas).
+- `privees` : la **Liste privée** (voir « Règle des privées » plus bas) ;
+- `groupes_inbox` : les grands espaces (`large` : salons de serveurs
+  Discord, canaux et supergroupes Telegram, communautés WhatsApp…) qu'on
+  montre aussi dans la boîte de réception (§5.13). Un client d'avant ce
+  champ ne l'envoie pas : le serveur garde la liste.
 
 S'y ajoutent deux objets (facultatifs) :
 
@@ -465,7 +490,7 @@ C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 changement, à **tous** les clients) :
 
 ```json
-{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"version":7}}
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"groupes_inbox":["d:g81384:99120"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"version":7}}
 ```
 
 `version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
@@ -474,7 +499,7 @@ encore rien reçu (listes vides).
 **Client → serveur** :
 
 ```json
-{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"version":7,"id":12}}
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"groupes_inbox":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"version":7,"id":12}}
 ```
 
 - `version` : la dernière version reçue du serveur (0 si aucune).
@@ -747,7 +772,8 @@ conversations les plus récentes de la boîte de réception et pour celles du
 Head, des favoris et des épinglées (§5.5) qui sont dans ses listes. Une à la
 fois (il attend la réponse, 45 s au plus), avec 1,5 s de pause entre deux ;
 seulement celles dont la copie manque, date d'avant le lancement du pont, ou
-n'a pas le dernier message annoncé par la liste (`time`). **Discord** :
+n'a pas le dernier message annoncé par la liste (`time`). Jamais une
+conversation `large` (§5.13), même marquée. **Discord** :
 8 conversations récentes, 30 messages chacune, 15 conversations au plus
 (marquées comprises), 4 s de pause. Ces réponses (et
 leurs erreurs `where: "messages"`) ne vont **qu'au cache** : aucun client ne
@@ -1150,6 +1176,121 @@ dernier. Anti-rafale, sur l'appareil :
   fois, `note_clear` avec `"source":"musique"` ; le pont remet la note
   écrite à la main si elle a moins de 24 h, sinon il efface.
 
+### 5.13 Groupes : canaux, serveurs et communautés
+
+L'onglet **Groupes** (Android : barre du bas `Inbox · Favoris · Groupes ·
+Archives · Moi` ; bureau : une entrée de la colonne de gauche) réunit
+**seulement les grands espaces** de type canal ou communauté. Les groupes de
+personnes (Messenger, WhatsApp, Signal, Instagram, Google RCS/MMS, X,
+Bluesky, groupes Telegram ordinaires, groupes privés Discord) n'y vont
+**pas** : ils restent dans la boîte de réception, comme avant.
+
+**Champs d'une conversation** (événements `conversations` et
+`conversation`, tous facultatifs ; un pont d'avant ne les envoie pas et
+tout reste comme avant) :
+
+- `large` (booléen) : un grand espace (voir `kind`). Seul ce champ décide
+  du classement chez les clients.
+- `kind` (chaîne) : la sorte de grand espace, pour l'icône et le
+  regroupement :
+  - `"server"` : un salon texte ou d'annonces d'un **serveur Discord** ;
+  - `"channel"` : un **canal** Telegram (diffusion) ;
+  - `"supergroup"` : un **supergroupe** Telegram ;
+  - `"community"` : une **communauté** WhatsApp (le groupe parent) ;
+  - `"community_group"` : un groupe rattaché à une communauté WhatsApp (dont
+    son groupe d'annonces : voir `announce`) ;
+  - `"newsletter"` : une **chaîne** WhatsApp ;
+  - `"community_chat"` : une discussion de communauté d'un Groupe Facebook
+    (Messenger) ;
+  - `"broadcast"` : un **canal de diffusion** (Instagram, Messenger).
+  Un client ignore une valeur qu'il ne connaît pas (icône générique).
+- `announce` (booléen) : seuls les administrateurs y écrivent (groupe
+  d'annonces WhatsApp, salon d'annonces Discord).
+- `parent` (chaîne) : l'id, propre au service et **sans préfixe**, de
+  l'espace qui le contient : le serveur Discord (`g<guild>`), la
+  communauté WhatsApp (l'id de la conversation parente, si elle est dans
+  la liste). `parent_name` : son nom.
+- `section` (chaîne) : la catégorie du salon (Discord) ; `section_order`
+  (entier) : sa position ; `order` (entier) : la position du salon dans sa
+  catégorie. Les clients rangent par `section_order`, puis `order`, puis
+  nom ; un salon sans catégorie passe en tête.
+- `mentions` (entier) : les non-lus qui me mentionnent, quand le service
+  le compte lui-même (Discord : `mention_count` du `read_state` ;
+  Telegram : `unread_mentions_count`).
+
+**Champs d'un message** (événements `message` et `messages`, facultatifs) :
+
+- `mentions_me` (booléen) : le message me mentionne (Discord : `@moi`,
+  `@everyone`, `@here`, un de mes rôles ; Telegram : mention ou
+  `@moi` ; WhatsApp : mention de mon numéro ou de mon LID) ;
+- `reply_to_me` (booléen) : il répond à un de mes messages.
+
+**Marque `groupes_inbox`** (§5.5) : la liste ordonnée des grands espaces
+(ids préfixés, comme les autres marques) qu'on a choisi de **montrer dans la
+boîte de réception**. Même règles que `archives` : absente, rien ne change ;
+garde-fou et union des clients en retard ; 5000 ids au plus.
+
+**Règle de la boîte de réception** (côté clients ; le serveur ne filtre
+rien) :
+
+1. Une conversation sans `large` va dans la boîte de réception, comme
+   avant, et **jamais** dans Groupes.
+2. Une conversation `large` va dans Groupes. Elle va **aussi** dans la
+   boîte de réception (vue « Tout » et vues par service ; Favoris, Head,
+   Archives et Privées gardent leurs propres règles) si :
+   - son id est dans `groupes_inbox` (« Montrer dans la boîte de
+     réception » ; « Garder dans Groupes seulement » l'en retire) ;
+   - ou elle est épinglée (`epingles`) ;
+   - ou elle demande **mon attention** : `mentions` > 0, ou un message
+     reçu (pas `from_me`, pas d'un historique) avec `mentions_me` ou
+     `reply_to_me` depuis la dernière lecture. Chaque client garde cette
+     attention en mémoire et l'oublie quand la conversation est lue.
+3. Notifications : une conversation `large` qui n'est pas dans la boîte de
+   réception ne notifie que sur une mention ou une réponse à moi. Les
+   pastilles de l'Inbox ne comptent que ce qu'elle montre ; l'onglet
+   Groupes a sa propre pastille.
+
+**Présentation** : une section repliable par service (badge du service,
+nombre d'espaces non lus ; l'état replié est gardé sur l'appareil).
+Discord : la liste des serveurs (`parent`) ; un serveur ouvre ses salons
+rangés par catégorie (`#`) ; un salon ouvre le fil. WhatsApp : les
+communautés et leurs groupes, puis les chaînes. Telegram : canaux
+(haut-parleur) et supergroupes. Messenger et Instagram : leurs canaux et
+discussions de communauté.
+
+**Préchargement** : le serveur ne précharge **jamais** les messages d'une
+conversation `large` (§5.8) ; l'historique n'est demandé qu'à l'ouverture.
+
+**Ce que chaque pont expose** :
+
+- Discord : salons texte et d'annonces des serveurs (§5.4), `mentions`,
+  `mentions_me`, `reply_to_me`.
+- Telegram : canaux (`channel`) et supergroupes (`supergroup`) ;
+  `mentions` (`unread_mentions_count` des dialogues) ; `mentions_me`
+  (drapeau `mentioned`, levé aussi pour une réponse à moi) ; `reply_to_me`
+  si le message cité est dans la base du pont. `read` lit aussi les
+  mentions (`messages.readMentions`) quand il y en a, sinon Telegram les
+  rendrait à la liste suivante.
+- WhatsApp : communautés (`community`) et leurs groupes
+  (`community_group`, `parent` = JID du parent), `announce` ;
+  `mentions_me` (mon numéro ou mon LID), `reply_to_me`. **Pas les chaînes**
+  (`newsletter`) : le pont les écarte ; il faudrait
+  `GetSubscribedNewsletters` à la connexion et `GetNewsletterMessages` pour
+  l'historique (requêtes GraphQL aux identifiants changeants), et éviter
+  tout accusé de lecture ou de vue.
+- Messenger : discussions de communauté (`community_chat` :
+  `COMMUNITY_GROUP`, `COMMUNITY_SUB_THREAD`, `DISCOVERABLE_PUBLIC_CHAT`…)
+  et canaux de diffusion (`broadcast` : `COMMUNITY_BROADCAST_*`,
+  `DISCOVERABLE_PUBLIC_BROADCAST_CHAT*`), `parent` = le fil du Groupe
+  Facebook. Seulement ceux que messagix synchronise (groupes de synchro 1
+  et 95) : une discussion jamais ouverte peut manquer. Elles ne vont plus
+  dans les archives (dossier « community »).
+- Instagram : **rien** pour l'instant ; les types d'instameow ne
+  distinguent pas les canaux de diffusion (le pont journalise
+  `sous_type` et `diffusion` en débogage pour les reconnaître plus tard).
+- Google Messages, Signal, X, Bluesky : seulement des groupes de
+  personnes ; rien de neuf.
+
 ## 6. Fichiers
 
 Les événements contiennent des chemins de fichiers **du serveur** :
@@ -1250,8 +1391,8 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"svc":…,"ev":{"ev":"messages",…,"cache":true}}` | copie du cache, avant la réponse du pont (§5.8) |
 | C→S | `{"rejouer":"<svc>"}` | redemander l'état d'un service |
 | ↔ | `{"ping":n}` / `{"pong":n}` | signes de vie |
-| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","version"[,"id","refus"]}}` | rejeu, changement |
-| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","version"[,"id"]}}` | changement local |
+| S→C | `{"marques":{"head","favoris","epingles","archives","privees","groupes_inbox","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","version"[,"id","refus"]}}` | rejeu, changement |
+| C→S | `{"marques":{"head","favoris","epingles","archives","privees","groupes_inbox","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","version"[,"id"]}}` | changement local |
 | S→C | `{"svc":…,"ev":{"ev":"presence","item":{"conv","user","online","last_active"}}}` | présence (§5.10), aussi au rejeu |
 | S→C | `{"svc":…,"ev":{"ev":"typing","conv","on"[,"name","audio"]}}` | « en train d'écrire » (§5.11) |
 | C→S | `{"svc":…,"cmd":{"cmd":"note_set","text","audience","source"[,"req"]}}` | publier ma note (§5.12) |

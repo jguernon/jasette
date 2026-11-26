@@ -28,3 +28,15 @@ func TestPrechargeDiscord(t *testing.T) {
 		t.Fatalf("Google : %d candidats", len(r))
 	}
 }
+
+// Un grand espace (§5.13) n'est jamais préchargé, même marqué.
+func TestPrechargeSansGrands(t *testing.T) {
+	liste, _ := json.Marshal(map[string]any{"ev": "conversations", "items": []map[string]any{
+		{"id": "1", "time": 10}, {"id": "g5:11", "time": 20, "large": true}, {"id": "g5:12", "time": 5, "large": true},
+	}})
+	c := &Cache{svc: "discord", listes: map[string]json.RawMessage{"inbox": liste}, convs: map[string]*convCache{}}
+	r := c.candidats([]string{"g5:12"}, 8, 15)
+	if len(r) != 1 || r[0].conv != "1" {
+		t.Fatalf("candidats : %v", r)
+	}
+}

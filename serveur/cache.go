@@ -519,15 +519,19 @@ func (c *Cache) candidats(marquees []string, nombre, total int) []candidat {
 	for _, cle := range []string{"inbox", "archive"} {
 		var ev struct {
 			Items []struct {
-				ID   string `json:"id"`
-				Time int64  `json:"time"`
+				ID    string `json:"id"`
+				Time  int64  `json:"time"`
+				Large bool   `json:"large"`
 			} `json:"items"`
 		}
 		if json.Unmarshal(c.listes[cle], &ev) != nil {
 			continue
 		}
 		for _, it := range ev.Items {
-			if it.ID == "" {
+			// Un grand espace (salon de serveur Discord, canal Telegram… :
+			// PROTOCOLE.md §5.13) n'est jamais préchargé, même marqué :
+			// son historique n'est demandé qu'à l'ouverture.
+			if it.ID == "" || it.Large {
 				continue
 			}
 			connues[it.ID] = it.Time
