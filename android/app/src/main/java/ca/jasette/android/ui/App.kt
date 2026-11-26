@@ -613,12 +613,12 @@ private fun contactsTelephone(texte: String): List<ContactTrouve> {
 }
 
 /** Les personnes trouvées par les ponts, sans conversation ici ni doublon (par numéro) d'un contact du téléphone. */
-private fun personnesPonts(tel: List<ContactTrouve>): List<Pair<String, String>> {
+private fun personnesPonts(tel: List<ContactTrouve>, avecConvs: Boolean = false): List<Pair<String, String>> {
     val cles = tel.map { it.cle }.toSet()
     return Depot.resultatsMeta.filter { (id, _) ->
-        Depot.conv(id) == null &&
+        (avecConvs || Depot.conv(id) == null) &&
             !(Service.de(id) == Service.GOOGLE && Contacts.cleDe(Depot.numerosContacts[id] ?: id) in cles)
-    }.take(8)
+    }.let { if (avecConvs) it else it.take(8) }
 }
 
 /**
@@ -747,6 +747,10 @@ private fun ChampFiltre(texte: String, focaliser: Boolean, changer: (String) -> 
 @Composable
 private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
     var texte by remember { mutableStateOf("") }
+    // La puce de service, le mode groupe et les personnes choisies (NouveauGroupe.kt) :
+    // retenus seulement tant que l'écran est ouvert (toujours « Tout » à l'ouverture).
+    var choix by remember { mutableStateOf(ca.jasette.android.ChoixNouveau(sms = Depot.smsActif)) }
+    var nomGroupe by remember { mutableStateOf("") }
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     // La première ouverture propose l'accès aux contacts (avec une courte explication).
@@ -756,13 +760,24 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
         Contacts.demarrer(ctx)
         if (Contacts.proposerAuNouveau()) demanderContacts()
     }
-    LaunchedEffect(texte) { Depot.chercherContacts(texte) }
+    // La recherche dans les ponts : seulement ceux de la puce choisie.
+    val interroges = Depot.services.filter { choix.montre(it) }.toSet()
+    LaunchedEffect(texte, interroges) {
+        Depot.chercherContacts(texte, interroges.takeIf { it.size < Depot.services.size })
+    }
     fun finir() {
         Depot.chercherContacts("")
         fermer()
     }
+    /** Mode groupe : ajoute ou enlève une personne ; le champ se vide pour chercher la suivante. */
+    fun basculer(id: String, nom: String) {
+        val apres = choix.basculer(id, nom)
+        if (apres.choisis.size > choix.choisis.size) texte = ""
+        choix = apres
+    }
     val q = ca.jasette.android.plier(texte.trim())
     val numero = ca.jasette.android.estNumero(texte.trim())
+    val groupe = choix.groupe
     androidx.compose.ui.window.Dialog(
         onDismissRequest = ::finir,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
@@ -799,11 +814,33 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
                         }
                     }
                 }
+                // Les puces : Tout, puis chaque service connecté ; « Créer un groupe » ;
+                // les personnes choisies et « Créer » (Nouveau.kt).
+                item(key = "puces") {
+                    PucesServices(choix, Depot.services.filter { Depot.etat(it).associe }) { choix = choix.avecFiltre(it) }
+                }
+                item(key = "groupe") {
+                    LigneCreerGroupe(choix, Depot.services.filter { Depot.etat(it).associe }) {
+                        choix = choix.basculerGroupe()
+                        if (!choix.groupe) nomGroupe = ""
+                    }
+                }
+                if (groupe && choix.choisis.isNotEmpty()) {
+                    item(key = "choisis") { PucesChoisis(choix) { basculer(it, "") } }
+                    item(key = "creer") {
+                        BarreCreer(choix, nomGroupe, { nomGroupe = it }) {
+                            val s = choix.verrou ?: return@BarreCreer
+                            Depot.creerGroupe(s, choix.membres, if (ca.jasette.android.ChoixNouveau.nommeGroupes(s)) nomGroupe else "")
+                            finir()
+                        }
+                    }
+                }
                 if (q.isEmpty()) return@LazyColumn
-                // Les conversations qui existent déjà (pas les groupes).
-                val existantes = (Depot.convs + Depot.archives).filter { c ->
-                    !c.group && !Marques.estPrivee(c.id) && (ca.jasette.android.plier(c.name).contains(q) ||
-                        c.members.any { ca.jasette.android.plier(it).contains(q) })
+                // Les conversations qui existent déjà (pas les groupes ; pas en mode groupe :
+                // ce sont des fils, pas des personnes).
+                val existantes = if (groupe) emptyList() else (Depot.convs + Depot.archives).filter { c ->
+                    !c.group && choix.montre(c.service) && !Marques.estPrivee(c.id) &&
+                        (ca.jasette.android.plier(c.name).contains(q) || c.members.any { ca.jasette.android.plier(it).contains(q) })
                 }.distinctBy { it.id }.take(6)
                 items(existantes, key = { "c-" + it.id }) { c ->
                     Suggestion(c.name.ifEmpty { t("Sans nom") }, c.service.titre, c.service, c) {
@@ -812,35 +849,56 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
                     }
                 }
                 // Les contacts du téléphone (« Contact · numéro », avec leur photo).
-                val tel = contactsTelephone(texte)
+                val tel = if (choix.montre(Service.GOOGLE)) contactsTelephone(texte) else emptyList()
                 items(tel, key = { "t-" + it.cle }) { c ->
-                    Suggestion(c.nom, "${t("Contact")} · ${c.numero}", Service.GOOGLE, null, image = { PhotoContact(c.photo, 42.dp) }) {
-                        Depot.nouvelleConversation(Service.GOOGLE, c.envoi)
-                        finir()
-                    }
-                }
-                // Les personnes trouvées par les ponts, sans conversation ici ni doublon d'un contact du téléphone.
-                val trouvees = personnesPonts(tel)
-                items(trouvees, key = { "m-" + it.first }) { (id, nom) ->
-                    val s = Service.de(id)
-                    val detail = detailPersonne(s, id)
-                    Suggestion(nom, detail, s, null) {
-                        Depot.nouvelleConversation(s, id)
-                        finir()
-                    }
-                }
-                // Un numéro : un SMS par Google Messages.
-                if (numero && Depot.etat(Service.GOOGLE).associe) {
-                    item(key = "sms") {
-                        Suggestion(texte.trim(), t("Nouveau message par Google Messages"), Service.GOOGLE, null) {
-                            Depot.nouvelleConversation(Service.GOOGLE, texte.trim())
+                    val coche = if (groupe) choix.estChoisi(c.envoi) else null
+                    Suggestion(c.nom, "${t("Contact")} · ${c.numero}", Service.GOOGLE, null, coche = coche, image = { PhotoContact(c.photo, 42.dp) }) {
+                        if (groupe) {
+                            basculer(c.envoi, c.nom)
+                        } else {
+                            Depot.nouvelleConversation(Service.GOOGLE, c.envoi)
                             finir()
                         }
                     }
                 }
-                if (existantes.isEmpty() && tel.isEmpty() && trouvees.isEmpty() && !numero) {
+                // Les personnes trouvées par les ponts, sans doublon d'un contact du téléphone ;
+                // sans conversation ici, sauf en mode groupe (jamais un groupe, alors).
+                val trouvees = personnesPonts(tel, avecConvs = groupe).filter { (id, _) ->
+                    choix.montre(Service.de(id)) && !(groupe && ca.jasette.android.ChoixNouveau.idGroupe(id))
+                }.take(if (groupe) 12 else 8)
+                items(trouvees, key = { "m-" + it.first }) { (id, nom) ->
+                    val s = Service.de(id)
+                    val detail = if (groupe) s.court else detailPersonne(s, id)
+                    Suggestion(nom, detail, s, null, coche = if (groupe) choix.estChoisi(id) else null) {
+                        if (groupe) {
+                            basculer(id, nom)
+                        } else {
+                            Depot.nouvelleConversation(s, id)
+                            finir()
+                        }
+                    }
+                }
+                // Un numéro : un SMS par Google Messages (en mode groupe : un membre).
+                val sms = numero && Depot.etat(Service.GOOGLE).associe && choix.montre(Service.GOOGLE)
+                if (sms) {
+                    item(key = "sms") {
+                        val n = texte.trim()
+                        Suggestion(
+                            n, if (groupe) Service.GOOGLE.court else t("Nouveau message par Google Messages"), Service.GOOGLE, null,
+                            coche = if (groupe) choix.estChoisi(n) else null,
+                        ) {
+                            if (groupe) {
+                                basculer(n, n)
+                            } else {
+                                Depot.nouvelleConversation(Service.GOOGLE, n)
+                                finir()
+                            }
+                        }
+                    }
+                }
+                if (existantes.isEmpty() && tel.isEmpty() && trouvees.isEmpty() && !sms) {
                     item {
-                        val cherche = q.length >= 2 && Depot.services.any { Depot.pret(it) }
+                        val cherche = q.length >= 2 && interroges.any { Depot.pret(it) }
                         Text(
                             if (cherche) t("Recherche…") else t("Aucun résultat"),
                             color = P.textePale, modifier = Modifier.padding(24.dp),
@@ -859,10 +917,13 @@ private fun Suggestion(
     s: Service,
     conv: Conv?,
     image: (@Composable () -> Unit)? = null,
+    /** Mode groupe : la personne est-elle choisie (✓) ? null hors du mode groupe. */
+    coche: Boolean? = null,
     onClick: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().let { if (coche == true) it.background(P.choisi) else it }
+            .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (image != null) {
@@ -880,6 +941,7 @@ private fun Suggestion(
             Text(nom, color = P.texteFort, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(detail, color = P.textePale, fontSize = 13.sp, maxLines = 1)
         }
+        if (coche != null) Coche(coche)
     }
 }
 

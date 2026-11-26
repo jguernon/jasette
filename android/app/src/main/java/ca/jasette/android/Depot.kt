@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
@@ -1208,16 +1209,19 @@ object Depot {
     /** Le numéro affiché d'un contact trouvé par Google, par id. */
     val numerosContacts = mutableStateMapOf<String, String>()
     private var requeteContacts = ""
+    /** Les services interrogés par la dernière recherche (null : tous). */
+    private var servicesContacts: Set<Service>? = null
 
     /**
      * « À : » a changé : Messenger et Instagram cherchent parmi les amis et
      * contacts, Google parmi les contacts du téléphone (aussi par numéro),
      * WhatsApp et Signal parmi leurs contacts et groupes (aussi par numéro).
      */
-    fun chercherContacts(texte: String) {
+    fun chercherContacts(texte: String, montre: Set<Service>? = null) {
         val q = texte.trim()
-        if (q == requeteContacts) return
+        if (q == requeteContacts && montre == servicesContacts) return
         requeteContacts = q
+        servicesContacts = montre
         resultatsMeta.clear()
         numerosContacts.clear()
         if (q.length < 2) return
@@ -1225,6 +1229,8 @@ object Depot {
         val numero = estNumero(q)
         for (s in services) {
             if (!pret(s) || !(s.cherchePersonnes || s == Service.GOOGLE)) continue
+            // La puce de service choisie : seulement ses ponts.
+            if (montre != null && s !in montre) continue
             if (numero && !s.chercheNumeros) continue
             commande(s, cmd())
         }
@@ -1264,6 +1270,17 @@ object Depot {
      */
     fun nouvelleConversation(service: Service, numero: String) {
         commande(service, JSONObject().put("cmd", "new").put("number", numero.removePrefix(service.prefixe)))
+    }
+
+    /**
+     * Crée un groupe (commande `create_group`, §5.6 bis du protocole) avec des
+     * personnes d'un même service ([membres] : ids sans préfixe). Le pont
+     * répond par la conversation avec open, qui l'ouvre, ou par une erreur.
+     */
+    fun creerGroupe(service: Service, membres: List<String>, nom: String) {
+        val m = JSONArray()
+        membres.forEach { m.put(it) }
+        commande(service, JSONObject().put("cmd", "create_group").put("members", m).put("name", nom.trim()))
     }
 
     /**
