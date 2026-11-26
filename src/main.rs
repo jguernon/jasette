@@ -2674,6 +2674,19 @@ fn deprefixer_meta(v: &mut Value) -> Option<Service> {
 
 /// Une fenêtre de connexion (`jasette-connexion-meta.py`, `jasette-connexion-x.py`) :
 /// à côté de l'exécutable, sinon dans `connexion/` du projet.
+/// Le python3 d'une fenêtre de connexion (GTK 4). Sans WAYLAND_DISPLAY mais avec
+/// DISPLAY (session X11, bureau à distance VNC), GTK essaierait quand même le
+/// socket wayland-0 par défaut et ouvrirait la fenêtre sur l'écran physique :
+/// on le force alors sur X11, le même écran que Jasette.
+fn commande_fenetre_connexion() -> std::process::Command {
+    let mut c = std::process::Command::new("python3");
+    let sans_wayland = std::env::var_os("WAYLAND_DISPLAY").map_or(true, |v| v.is_empty());
+    if sans_wayland && std::env::var_os("DISPLAY").is_some() && std::env::var_os("GDK_BACKEND").is_none() {
+        c.env("GDK_BACKEND", "x11");
+    }
+    c
+}
+
 fn script_connexion_nomme(nom: &str) -> Option<PathBuf> {
     let mut essais = Vec::new();
     if let Ok(exe) = std::env::current_exe()
@@ -3853,7 +3866,7 @@ impl Jasette {
         self.meta_mut(svc).connexion_ouverte = true;
         let retour = self.meta(svc).connexion.clone();
         std::thread::spawn(move || {
-            let res = std::process::Command::new("python3")
+            let res = commande_fenetre_connexion()
                 .arg(&script)
                 .arg(option)
                 .stdin(std::process::Stdio::null())
@@ -4421,7 +4434,7 @@ impl Jasette {
         self.connexion_ouverte = true;
         let retour = self.connexion.clone();
         std::thread::spawn(move || {
-            let res = std::process::Command::new("python3")
+            let res = commande_fenetre_connexion()
                 .arg(&script)
                 .stdin(std::process::Stdio::null())
                 .stderr(std::process::Stdio::inherit())
