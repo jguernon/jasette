@@ -84,7 +84,7 @@ private fun initiales(nom: String): String? {
  * [grise] : la conversation n'est pas chargée (service absent) ; le logo du service reste en couleur.
  */
 @Composable
-fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false) {
+fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false, presence: Boolean = false, fondPoint: Color = P.fond) {
     val photo = ca.jasette.android.Contacts.photoPour(conv, grande = taille >= 48.dp) ?: Depot.avatars[conv.id]
         ?: ca.jasette.android.CacheMarques.avatar(conv.id)
     Box(Modifier.size(taille)) {
@@ -107,6 +107,10 @@ fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false
                 }
             }
         }
+        // Le point vert « en ligne » (PROTOCOLE.md §5.10), à l'opposé du badge du service.
+        if (presence && Depot.presenceDe(conv)?.online == true) {
+            PointPresence(taille, fondPoint, Modifier.align(Alignment.BottomStart))
+        }
         if (badge) {
             val b = taille * 0.36f
             Image(
@@ -116,6 +120,23 @@ fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false
             )
         }
     }
+}
+
+/**
+ * Le point vert d'un contact en ligne, cerclé de la couleur du fond [fond].
+ * Carré dans les thèmes aux avatars pixelisés ou carrés (EGA, Live, Sirène).
+ */
+@Composable
+fun PointPresence(taille: Dp, fond: Color, modifier: Modifier = Modifier) {
+    val d = (taille * 0.26f).coerceIn(10.dp, 16.dp)
+    val carre = P.ega || P.retro
+    val forme = if (carre) androidx.compose.ui.graphics.RectangleShape else CircleShape
+    val vert = when {
+        P.ega -> Color(0xff55ff55)
+        P.retro -> Color(0xff2fb52a)
+        else -> Color(0xff31c45a)
+    }
+    Box(modifier.size(d).clip(forme).background(fond).padding(2.dp).clip(forme).background(vert))
 }
 
 /** Le fond d'un avatar sans photo d'une conversation absente (un gris neutre ; EGA : gris foncé). */

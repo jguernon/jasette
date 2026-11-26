@@ -54,6 +54,11 @@ type Pont struct {
 	phoneCode     bool // un code d'association par numéro a été donné : plus de QR
 	online        bool
 	lastActive    time.Time
+
+	// La présence des contacts (presence.go) : réglage, et abonnements de
+	// cette connexion.
+	presenceOn bool
+	subscribed map[string]bool
 }
 
 func newPont(ctx context.Context) *Pont {
@@ -61,19 +66,21 @@ func newPont(ctx context.Context) *Pont {
 	store.SetOSInfo("Jasette", [3]uint32{1, 0, 0})
 	store.DeviceProps.PlatformType = waCompanionReg.DeviceProps_DESKTOP.Enum()
 	p := &Pont{
-		ctx:       ctx,
-		convs:     map[string]*convState{},
-		names:     map[string]string{},
-		lidPN:     map[string]string{},
-		pending:   map[string]string{},
-		loaded:    map[string]int64{},
-		fetching:  map[string]bool{},
-		histWait:  map[string][]chan struct{}{},
-		histAsked: map[string]time.Time{},
-		retryWait: map[string]chan *events.MediaRetry{},
-		noPic:     map[string]time.Time{},
-		picIDs:    map[string]string{},
-		listCount: 50,
+		ctx:        ctx,
+		convs:      map[string]*convState{},
+		subscribed: map[string]bool{},
+		presenceOn: presenceEnv(),
+		names:      map[string]string{},
+		lidPN:      map[string]string{},
+		pending:    map[string]string{},
+		loaded:     map[string]int64{},
+		fetching:   map[string]bool{},
+		histWait:   map[string][]chan struct{}{},
+		histAsked:  map[string]time.Time{},
+		retryWait:  map[string]chan *events.MediaRetry{},
+		noPic:      map[string]time.Time{},
+		picIDs:     map[string]string{},
+		listCount:  50,
 	}
 	go p.listLoop()
 	return p
@@ -332,8 +339,17 @@ func (p *Pont) afterConnect(cli *whatsmeow.Client) {
 			p.upsertGroup(cli, g)
 		}
 	}
-	// Hors ligne par défaut : le téléphone garde ses notifications.
-	_ = cli.SendPresence(context.WithoutCancel(p.ctx), types.PresenceUnavailable)
+	p.mu.Lock()
+	presence := p.presenceOn
+	p.mu.Unlock()
+	if presence {
+		// « Afficher qui est en ligne » : disponible, et abonné aux contacts
+		// récents (WhatsApp ne donne la présence qu'à un appareil disponible).
+		go p.presenceUp(cli)
+	} else {
+		// Hors ligne par défaut : le téléphone garde ses notifications.
+		_ = cli.SendPresence(context.WithoutCancel(p.ctx), types.PresenceUnavailable)
+	}
 	p.emitList()
 	go p.myAvatarDownload(cli)
 }
@@ -410,6 +426,8 @@ func (p *Pont) onEvent(cli *whatsmeow.Client, raw any) {
 		p.handleReceipt(cli, evt)
 	case *events.ChatPresence:
 		p.handleTyping(cli, evt)
+	case *events.Presence:
+		p.handlePresence(cli, evt)
 	case *events.Archive:
 		p.setConvFlag(cli, evt.JID, func(c *convState) { c.Archived = evt.Action.GetArchived() })
 	case *events.MarkChatAsRead:
@@ -763,7 +781,8 @@ func (p *Pont) listLoop() {
 		case <-t.C:
 			p.mu.Lock()
 			dirty := p.listDirty && p.ready
-			idle := p.online && time.Since(p.lastActive) > 3*time.Minute
+			// Avec la présence, on reste disponible.
+			idle := p.online && !p.presenceOn && time.Since(p.lastActive) > 3*time.Minute
 			if idle {
 				p.online = false
 			}

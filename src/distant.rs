@@ -1085,6 +1085,10 @@ pub struct Marques {
     /// « Cacher les conversations plus anciennes de la boîte de réception »,
     /// en jours (0 : tout afficher), PROTOCOLE.md §5.5. Filtré à l'affichage.
     pub cacher_apres_jours: u32,
+    /// « Afficher qui est en ligne » désactivé (marque `presence_en_ligne`
+    /// à faux, PROTOCOLE.md §5.10). Gardé à l'envers : faux, le réglage par
+    /// défaut, veut dire « afficher ».
+    pub presence_cachee: bool,
 }
 
 impl Marques {
@@ -1098,6 +1102,7 @@ impl Marques {
             && self.emojis.is_empty()
             && !self.garder_archives
             && self.cacher_apres_jours == 0
+            && !self.presence_cachee
     }
 
     /// Chaque liste de `dabord`, dans son ordre, puis les ids de `ensuite` qui n'y sont pas.
@@ -1124,6 +1129,7 @@ impl Marques {
             // Un oui/non : celui de `dabord`.
             garder_archives: dabord.garder_archives,
             cacher_apres_jours: dabord.cacher_apres_jours,
+            presence_cachee: dabord.presence_cachee,
         }
     }
 
@@ -1140,6 +1146,7 @@ impl Marques {
             emojis: self.emojis.iter().filter(|(k, v)| autre.emojis.get(*k) != Some(*v)).map(|(k, v)| (k.clone(), v.clone())).collect(),
             garder_archives: self.garder_archives,
             cacher_apres_jours: self.cacher_apres_jours,
+            presence_cachee: self.presence_cachee,
         }
     }
 }
@@ -1155,6 +1162,7 @@ pub enum NouvelleMarques {
     /// `avec_emojis` : de même pour un serveur d'avant `emojis`.
     /// `avec_garder` : de même pour un serveur d'avant `garder_archives`.
     /// `avec_cacher` : de même pour un serveur d'avant `cacher_apres_jours`.
+    /// `avec_presence` : de même pour un serveur d'avant `presence_en_ligne`.
     Recues {
         marques: Marques,
         version: u64,
@@ -1166,6 +1174,7 @@ pub enum NouvelleMarques {
         avec_emojis: bool,
         avec_garder: bool,
         avec_cacher: bool,
+        avec_presence: bool,
     },
     /// La connexion est tombée : rien n'est plus en vol.
     Coupure,
@@ -1207,6 +1216,8 @@ impl NouvelleMarques {
                     .and_then(Value::as_u64)
                     .filter(|j| *j <= CACHER_APRES_JOURS_MAX as u64)
                     .unwrap_or(0) as u32,
+                // Absent : vrai (afficher).
+                presence_cachee: v.get("presence_en_ligne").and_then(Value::as_bool) == Some(false),
             },
             version: v.get("version")?.as_u64()?,
             id: v.get("id").and_then(Value::as_u64),
@@ -1217,6 +1228,7 @@ impl NouvelleMarques {
             avec_emojis: v.get("emojis").is_some_and(Value::is_object),
             avec_garder: v.get("garder_archives").is_some_and(Value::is_boolean),
             avec_cacher: v.get("cacher_apres_jours").is_some_and(Value::is_number),
+            avec_presence: v.get("presence_en_ligne").is_some_and(Value::is_boolean),
         })
     }
 }
@@ -1281,6 +1293,7 @@ impl SuiviMarques {
             "emojis": c.listes.emojis,
             "garder_archives": c.listes.garder_archives,
             "cacher_apres_jours": c.listes.cacher_apres_jours,
+            "presence_en_ligne": !c.listes.presence_cachee,
             "version": c.version,
             "id": id,
         }}))
@@ -1305,6 +1318,7 @@ impl SuiviMarques {
                 avec_emojis,
                 avec_garder,
                 avec_cacher,
+                avec_presence,
             } => {
                 // Un serveur d'avant `archives` : nos archives restent les nôtres, jamais vidées.
                 let mut marques = marques;
@@ -1330,6 +1344,10 @@ impl SuiviMarques {
                 // Et pour `cacher_apres_jours`.
                 if !avec_cacher {
                     marques.cacher_apres_jours = c.listes.cacher_apres_jours;
+                }
+                // Et pour `presence_en_ligne`.
+                if !avec_presence {
+                    marques.presence_cachee = c.listes.presence_cachee;
                 }
                 (marques, version, id, refus)
             }
@@ -1582,6 +1600,7 @@ mod essais {
             avec_emojis: true,
             avec_garder: true,
             avec_cacher: true,
+            avec_presence: true,
         }
     }
 
@@ -1754,6 +1773,31 @@ mod essais {
     }
 
     #[test]
+    fn marques_presence_en_ligne() {
+        // Absent : vrai (afficher) ; envoyé tel quel.
+        let n = NouvelleMarques::lire(&json!({"head": [], "favoris": [], "epingles": [], "archives": [], "privees": [],
+            "moods": {}, "emojis": {}, "presence_en_ligne": false, "version": 5}));
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 4, ..Default::default() };
+        assert!(s.recu(n.unwrap(), &mut c).is_none());
+        assert!(c.listes.presence_cachee);
+        c.listes.presence_cachee = false;
+        let t = s.changement(&mut c).expect("envoi");
+        assert_eq!(t["marques"]["presence_en_ligne"], json!(true));
+        // Un serveur d'avant `presence_en_ligne` : le nôtre reste.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 4, ..Default::default() };
+        c.listes.presence_cachee = true;
+        let vieux = NouvelleMarques::lire(&json!({"head": [], "favoris": ["b"], "epingles": [], "archives": [], "privees": [],
+            "moods": {}, "emojis": {}, "version": 5})).unwrap();
+        assert!(s.recu(vieux, &mut c).is_none());
+        assert!(c.listes.presence_cachee);
+        assert!(!c.listes.vide());
+        // Le défaut (afficher) : vide.
+        assert!(Marques::default().vide());
+    }
+
+    #[test]
     fn marques_cacher_apres_jours() {
         // Reçu du serveur.
         let mut s = SuiviMarques::default();
@@ -1841,6 +1885,7 @@ mod essais {
             avec_emojis: true,
             avec_garder: true,
             avec_cacher: true,
+            avec_presence: true,
         };
         let t = s.recu(r, &mut c).expect("renvoi");
         assert_eq!(t["marques"]["favoris"], json!(["z", "a", "y", "x"]));

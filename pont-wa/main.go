@@ -132,6 +132,8 @@ type Cmd struct {
 	// react : le message visé et l'emoji (vide = retirer ma réaction).
 	ID    string `json:"id"`
 	Emoji string `json:"emoji"`
+	// presence : le réglage « Afficher qui est en ligne » (presence.go).
+	On bool `json:"on"`
 }
 
 var (
@@ -325,6 +327,8 @@ func main() {
 		case "history_pin":
 			// Propre aux fils chiffrés de Messenger : rien à faire ici (et
 			// surtout pas de réponse, l'interface la prendrait pour Messenger).
+		case "presence":
+			go p.setPresence(cmd.On)
 		case "unpair", "logout":
 			go p.unpair()
 		default:

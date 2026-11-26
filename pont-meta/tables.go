@@ -226,6 +226,7 @@ func (p *Pont) handleTable(tbl *table.LSTable, initial bool) {
 			typings = append(typings, typing{idStr(p.canon(t.ThreadKey)), t.IsTyping})
 		}
 	}
+	presences := p.handlePresenceTable(tbl, me)
 	for id := range touched {
 		if c := p.convs[id]; c != nil {
 			p.saveConv(id, c)
@@ -305,6 +306,9 @@ func (p *Pont) handleTable(tbl *table.LSTable, initial bool) {
 	}
 	for _, t := range typings {
 		emit("typing", map[string]any{"conv": t.conv, "on": t.on})
+	}
+	for _, ev := range presences {
+		emit("presence", ev)
 	}
 }
 

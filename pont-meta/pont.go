@@ -10,8 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -72,10 +72,17 @@ type Pont struct {
 	e2eeRetried    bool
 	historyBackup  *securehistory.Backup
 	historyChecked bool
+
+	// La présence des contacts (presence.go).
+	presenceOn   bool
+	presenceSeen bool
+	presence     map[int64]presenceRow
 }
 
 func newPont(ctx context.Context) *Pont {
 	p := &Pont{
+		presenceOn: presenceEnv(),
+		presence:   map[int64]presenceRow{},
 		ctx:        ctx,
 		convs:      map[string]*convState{},
 		contacts:   map[int64]*contact{},
@@ -638,6 +645,7 @@ func (p *Pont) listLoop() {
 			if dirty {
 				p.emitList()
 			}
+			p.presenceExpire()
 		}
 	}
 }

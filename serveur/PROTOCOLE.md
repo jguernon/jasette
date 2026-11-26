@@ -205,7 +205,7 @@ non), `qr` (seulement en cours d'association),
 `login_step` (Telegram, seulement en attente du code ou du mot de passe),
 `history_pin` (seulement s'il attend un NIP : `{"needed":true}`), puis les
 dernières listes `conversations` gardées (boîte de réception, puis archives :
-§5.8). Le `qr` et
+§5.8), puis la présence en ligne (§5.10). Le `qr` et
 le `pair_code` (et le `login_step`) gardés sont oubliés dès `paired`, `state` `ready` ou
 `unpaired`, ou si le pont s'arrête ; un `pair_code` remplace le `qr` (le pont
 WhatsApp cesse alors de montrer des QR). Un client
@@ -354,7 +354,7 @@ compte et le relais `did:web:api.bsky.chat`) :
   conversation Bluesky ; un message : `<conversation>/<id>`. Les résultats de
   `search` ont le DID de la personne pour id (à passer à `new`).
 
-### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, garder_archives, cacher_apres_jours)
+### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, garder_archives, cacher_apres_jours, presence_en_ligne)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
@@ -378,7 +378,7 @@ S'y ajoutent deux objets (facultatifs) :
 - `emojis` : l'**emoji rapide** de chaque conversation, `{id: "👍"}` (voir
   « Règle des emojis rapides » plus bas).
 
-Et deux réglages (facultatifs) :
+Et des réglages (facultatifs) :
 
 - `garder_archives` (booléen, **faux** par défaut) : « Garder les
   conversations archivées hors de la boîte de réception ». Vrai : un message
@@ -393,6 +393,10 @@ Et deux réglages (facultatifs) :
   les vues par service, Privées, la recherche et le Head ; un nouveau
   message la ramène d'elle-même. Le serveur ne filtre rien, le MCP non plus
   (`lister_conversations` a ses propres filtres et sa `limite`).
+- `presence_en_ligne` (booléen, **vrai** par défaut) : « Afficher qui est en
+  ligne » (point vert, « Actif il y a 12 min », §5.10). Le serveur le
+  transmet aux ponts ; faux, les ponts ne suivent aucune présence et le
+  serveur ne relaie plus l'événement `presence`.
 
 C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 
@@ -400,7 +404,7 @@ C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 changement, à **tous** les clients) :
 
 ```json
-{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"version":7}}
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"version":7}}
 ```
 
 `version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
@@ -409,7 +413,7 @@ encore rien reçu (listes vides).
 **Client → serveur** :
 
 ```json
-{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"version":7,"id":12}}
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"version":7,"id":12}}
 ```
 
 - `version` : la dernière version reçue du serveur (0 si aucune).
@@ -431,6 +435,9 @@ encore rien reçu (listes vides).
 - `cacher_apres_jours` : même règle (absent, rien ne change ; présent, pris
   tel quel). Négatif ou au-delà de 3650 : ramené à 0. Toujours envoyé ;
   absent de `marques.json` : 0.
+- `presence_en_ligne` : même règle, mais **absent veut dire vrai** : absent
+  de `marques.json` (fichier d'avant), le serveur le prend vrai ; un client
+  qui reçoit des marques sans ce champ (serveur d'avant) garde le sien.
 
 Règles du serveur :
 
@@ -470,7 +477,7 @@ archives (ou ses privées) pour lui seul, sans les vider. De même pour
 `garder_archives` : un serveur d'avant ce réglage ne l'envoie pas, et le
 client garde le sien pour lui (il l'applique alors lui-même). Union de deux
 copies : `garder_archives` de celle qui passe d'abord. Idem pour
-`cacher_apres_jours`.
+`cacher_apres_jours` et `presence_en_ligne`.
 
 **Règle des moods.**
 
@@ -776,6 +783,61 @@ activé (il l'est par défaut), le client demande celui de la **première**
 adresse au serveur, ou, sans serveur, va chercher la page lui-même avec les
 mêmes garde-fous. Rien n'attend : la carte apparaît quand l'aperçu arrive.
 
+### 5.10 Présence en ligne
+
+Les ponts Messenger, Instagram, WhatsApp et Telegram annoncent qui est en
+ligne, pour les conversations **individuelles** qu'ils connaissent :
+
+```json
+{"ev":"presence","item":{"conv":"4155551234@s.whatsapp.net","user":"4155551234@s.whatsapp.net","online":true,"last_active":1764160000000}}
+```
+
+- `conv` : la conversation individuelle (id du pont, sans préfixe ; le
+  client ajoute le sien) ; `user` : la personne, dans les ids du service.
+- `online` : en ligne maintenant. `last_active` (ms) : dernière activité
+  connue ; **0** = inconnue (statut caché, « récemment »…).
+- Une ligne par changement. Rien n'est rejoué par le pont lui-même.
+
+**Le réglage.** La marque `presence_en_ligne` (§5.5, vraie par défaut) est
+transmise aux ponts : variable d'environnement `JASETTE_PRESENCE=1` (ou `0`)
+au lancement, puis la commande `{"cmd":"presence","on":true|false}` à
+chaque changement, sans redémarrage. Sans la variable, un pont la croit
+désactivée. Désactivée, le pont ne fait **rien** : aucun abonnement, aucune
+demande, aucun événement.
+
+**Le serveur** relaie `presence` à tous les clients, garde le dernier de
+chaque conversation (500 au plus par service) et le rejoue après les
+listes `conversations` (§5.2). Il oublie tout si le pont s'arrête ou si le
+réglage est désactivé ; désactivé, il ne relaie plus rien.
+
+**Les clients** montrent un point vert en bas à droite de l'avatar
+(liste, Head, en-tête de la conversation) et, sous le nom dans l'en-tête,
+« Actif maintenant » ou « Actif il y a 12 min » (rien au-delà de 24 h). En
+mode autonome (ponts locaux), ils passent eux-mêmes la variable et la
+commande à leurs ponts.
+
+Par service :
+
+- **WhatsApp** (whatsmeow) : activé, l'appareil lié se déclare **disponible**
+  (`PresenceAvailable`) en permanence et s'abonne (`SubscribePresence`) aux
+  50 conversations individuelles les plus récentes, à chaque connexion ;
+  WhatsApp ne transmet la présence des autres qu'à un appareil disponible.
+  Conséquences : les contacts vous voient « en ligne » tant que le pont
+  tourne, et le téléphone ne sonne plus pour les messages WhatsApp tant
+  qu'un appareil lié est disponible (comportement de WhatsApp Web).
+  Désactivé : « indisponible », comme avant (disponible seulement pendant
+  3 minutes après une action dans Jasette).
+- **Messenger** (messagix) : la table lightspeed
+  `LSDeleteThenInsertContactPresence` (Status ≠ 0 : actif, jusqu'à
+  `ExpirationTimestampMs`) et `LSTruncatePresenceDatabase`, quand Meta les
+  pousse sur le socket.
+- **Instagram** (instameow, qui n'implémente pas le flux de présence du
+  site) : `GET /api/v1/direct_v2/get_presence/` une fois par minute ;
+  trois échecs de suite, pause de 30 minutes.
+- **Telegram** : le `status` de chaque personne (`userStatusOnline`,
+  `userStatusOffline` avec `was_online`, sinon heure inconnue) et
+  `updateUserStatus`. Le pont ne se déclare jamais en ligne lui-même.
+
 ## 6. Fichiers
 
 Les événements contiennent des chemins de fichiers **du serveur** :
@@ -876,8 +938,9 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"svc":…,"ev":{"ev":"messages",…,"cache":true}}` | copie du cache, avant la réponse du pont (§5.8) |
 | C→S | `{"rejouer":"<svc>"}` | redemander l'état d'un service |
 | ↔ | `{"ping":n}` / `{"pong":n}` | signes de vie |
-| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","version"[,"id","refus"]}}` | rejeu, changement |
-| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","version"[,"id"]}}` | changement local |
+| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","version"[,"id","refus"]}}` | rejeu, changement |
+| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","version"[,"id"]}}` | changement local |
+| S→C | `{"svc":…,"ev":{"ev":"presence","item":{"conv","user","online","last_active"}}}` | présence (§5.10), aussi au rejeu |
 | C→S | `{"get":{"id","chemin","sha256"}}` | télécharger |
 | S→C | `{"fichier":{"id",…}}` | morceaux ou erreur |
 | C→S | `{"put":{"id","nom","donnees","fin"}}` | téléverser |

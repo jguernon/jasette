@@ -109,6 +109,12 @@ func (p *Pont) handlers(d tg.UpdateDispatcher) {
 		p.mu.Unlock()
 		return nil
 	})
+	d.OnUserStatus(func(ctx context.Context, e tg.Entities, u *tg.UpdateUserStatus) error {
+		p.mu.Lock()
+		p.notePresence(keyOf('u', u.UserID), u.Status)
+		p.mu.Unlock()
+		return nil
+	})
 	d.OnUserTyping(func(ctx context.Context, e tg.Entities, u *tg.UpdateUserTyping) error {
 		p.typing(keyOf('u', u.UserID), keyOf('u', u.UserID), u.Action)
 		return nil

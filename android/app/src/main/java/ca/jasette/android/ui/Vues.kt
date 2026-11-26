@@ -413,7 +413,7 @@ private fun CaseHead(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box {
-                Avatar(c, avatar, grise = absente.grise())
+                Avatar(c, avatar, grise = absente.grise(), presence = true)
                 if (c.unread) {
                     Box(
                         Modifier.align(Alignment.TopEnd).size(point).clip(formeRonde).background(P.fond)
@@ -467,7 +467,7 @@ fun Rangee(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Le logo du service toujours en pastille sur une conversation absente.
-            Avatar(c, 52.dp, badge = badge || absente != null, grise = absente.grise())
+            Avatar(c, 52.dp, badge = badge || absente != null, grise = absente.grise(), presence = true)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

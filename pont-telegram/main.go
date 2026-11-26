@@ -360,6 +360,8 @@ func main() {
 			go p.archive(cmd)
 		case "typing":
 			go p.sendTyping(cmd)
+		case "presence":
+			p.setPresence(cmd.On)
 		case "history_pin":
 			// Propre aux fils chiffrés de Messenger : rien à faire ici (et
 			// surtout pas de réponse, l'interface la prendrait pour Messenger).

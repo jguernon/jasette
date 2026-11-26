@@ -562,11 +562,19 @@ impl Jasette {
                         .flex_col()
                         .child(
                             div()
-                                .truncate()
-                                .text_size(px(14. + plus))
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(texte)
-                                .child(nom),
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap(px(5.))
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_size(px(14. + plus))
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(texte)
+                                        .child(nom),
+                                )
+                                .when(self.en_ligne(conv), |d| d.child(presence::carre_en_ligne())),
                         )
                         .child(
                             div()
@@ -614,6 +622,7 @@ impl Jasette {
                     .text_color(texte)
                     .child(nom),
             )
+            .when(self.en_ligne(conv), |d| d.child(presence::carre_en_ligne()))
             .child(div().flex_1().min_w(px(0.)).truncate().text_size(px(12. + plus)).child(texte_emoji(apercu, pale, None)))
             .when(conv.unread, |d| {
                 // L'enveloppe jaune d'un nouveau message.
@@ -701,6 +710,9 @@ impl Jasette {
             let etat = self.etat_service(service);
             let detail = if conv.group {
                 format!("{} · {} participants", service.nom(), conv.members.len() + 1)
+            } else if let Some(a) = self.activite(&conv) {
+                // « Actif il y a 12 min » (src/presence.rs).
+                if live { format!("<{}> · {a}", service.nom()) } else { format!("{} · {a}", service.nom()) }
             } else if live {
                 format!("<{}> · {}", service.nom(), t(etat.texte()))
             } else {
@@ -712,7 +724,11 @@ impl Jasette {
             let conv_medias = self.choisie.clone();
             let conv_mood = conv.id.clone();
             entete = entete
-                .when(!live, |d| d.child(self.avatar_conv(&conv, &nom, 40.)))
+                .when(!live, |d| {
+                    d.child(div().relative().child(self.avatar_conv(&conv, &nom, 40.)).when(self.en_ligne(&conv), |d| {
+                        d.child(presence::point_presence(40., c(0xe4e8df)))
+                    }))
+                })
                 .child(
                     div()
                         .flex_1()
@@ -805,7 +821,9 @@ impl Jasette {
                         .bg(linear_gradient(180., linear_color_stop(c(0xf2f8ff), 0.), linear_color_stop(c(0xe4effc), 1.)))
                 })
                 .when(!live, |d| d.ml(px(6.)))
-                .child(self.avatar_conv(conv, &nom, 112.))
+                .child(div().relative().child(self.avatar_conv(conv, &nom, 112.)).when(self.en_ligne(conv), |d| {
+                    d.child(presence::point_presence(112., if live { c(0xeef5fe) } else { c(GRIS_2000) }))
+                }))
                 .child(self.mon_avatar(&self.initiale_moi(), 112.))
         });
         let corps = div()

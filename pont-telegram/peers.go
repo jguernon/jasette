@@ -103,6 +103,9 @@ func (p *Pont) noteUser(u *tg.User) {
 		c.Photo = 0
 	}
 	c.Self, c.Bot, c.Deleted = u.Self, u.Bot, u.Deleted
+	if !u.Min && !u.Self && !u.Bot {
+		p.notePresence(k, u.Status)
+	}
 	if *c != old {
 		p.savePeer(k, c)
 		p.listDirty = true

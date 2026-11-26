@@ -258,6 +258,7 @@ private fun PageSection(
             SectionReglages.CONVERSATIONS -> {
                 ChoixGarderArchives()
                 ChoixCacherApres()
+                ChoixPresence()
                 Spacer(Modifier.height(4.dp))
                 Titre(t("Gestes"))
                 ChoixGestes()
@@ -1025,6 +1026,29 @@ private fun ChoixGarderArchives() {
             }
             Spacer(Modifier.width(12.dp))
             Interrupteur(oui) { ca.jasette.android.Marques.choisirGarderArchives(it) }
+        }
+    }
+}
+
+/**
+ * Réglages → Conversations : « Afficher qui est en ligne » (activé par défaut ;
+ * marque `presence_en_ligne`, partagée par le serveur Jasette s'il y en a un).
+ */
+@Composable
+private fun ChoixPresence() {
+    val oui = ca.jasette.android.Marques.presenceEnLigne
+    Groupe {
+        Row(
+            Modifier.fillMaxWidth().clickable { ca.jasette.android.Marques.choisirPresenceEnLigne(!oui) }
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(t("Afficher qui est en ligne"), color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text(t("Point vert sur les contacts actifs (Messenger, Instagram, WhatsApp, Telegram)."), color = P.textePale, fontSize = 13.sp)
+            }
+            Spacer(Modifier.width(12.dp))
+            Interrupteur(oui) { ca.jasette.android.Marques.choisirPresenceEnLigne(it) }
         }
     }
 }

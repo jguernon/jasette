@@ -95,6 +95,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.app.NotificationManagerCompat
 import ca.jasette.android.Appels
 import ca.jasette.android.Depot
+import ca.jasette.android.texteActivite
 import ca.jasette.android.Marques
 import ca.jasette.android.plier
 import androidx.compose.foundation.border
@@ -252,7 +253,7 @@ fun Fil(
                 },
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (entete != null) Avatar(entete, 36.dp, grise = absente.grise())
+                        if (entete != null) Avatar(entete, 36.dp, grise = absente.grise(), presence = true, fondPoint = if (P.ega) P.barre else P.fil)
                         Spacer(Modifier.width(10.dp))
                         // Le nom et le service, serrés et centrés sur l'avatar : la barre donne
                         // au titre l'interligne de titleLarge (28 sp), qui les poussait vers le haut.
@@ -261,7 +262,10 @@ fun Fil(
                                 entete?.name ?: "", fontSize = 17.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis, style = androidx.compose.material3.LocalTextStyle.current.merge(TITRE_SERRE),
                             )
+                            // « Actif il y a 12 min » d'abord (Presence.kt).
+                            val activite = conv?.let { Depot.presenceDe(it) }?.let { texteActivite(it, System.currentTimeMillis()) }
                             Text(
+                                (activite?.let { "$it · " } ?: "") +
                                 Service.de(id).court + (if (conv?.rcs == true) " · RCS" else "") +
                                     (absente.indication()?.let { " · $it" } ?: ""),
                                 fontSize = 12.sp, lineHeight = 15.sp, color = P.sousTitreBarre, style = androidx.compose.material3.LocalTextStyle.current.merge(TITRE_SERRE),

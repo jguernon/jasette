@@ -127,6 +127,25 @@ object Marques {
         changement()
     }
 
+    /**
+     * « Afficher qui est en ligne » : point vert sur les contacts actifs et
+     * « Actif il y a 12 min » (serveur/PROTOCOLE.md §5.10). Vrai par défaut.
+     * Une marque (`presence_en_ligne`, §5.5) : partagée par le serveur Jasette
+     * s'il y en a un, gardée ici sinon. [surPresence] prévient les ponts locaux.
+     */
+    var presenceEnLigne by mutableStateOf(true)
+        private set
+
+    /** Appelée à chaque changement de [presenceEnLigne] (ici ou par le serveur). Posée par [Depot]. */
+    var surPresence: ((Boolean) -> Unit)? = null
+
+    fun choisirPresenceEnLigne(oui: Boolean) {
+        if (oui == presenceEnLigne) return
+        presenceEnLigne = oui
+        changement()
+        surPresence?.invoke(oui)
+    }
+
     /** Chaque bulle montre son heure (et sa date si ce n'est pas aujourd'hui), comme `details_heures`. */
     var heureChaqueMessage by mutableStateOf(true)
         private set
@@ -223,6 +242,7 @@ object Marques {
         emojis.putAll(lireObjet("emojis", p.getString("emojis", "{}") ?: "{}", EMOJI_RAPIDE_MAX))
         garderArchives = p.getBoolean("garder_archives", false)
         cacherApresJours = bornerJours(p.getInt("cacher_apres_jours", 0))
+        presenceEnLigne = p.getBoolean("presence_en_ligne", true)
         archivesDepuis.clear()
         try {
             val o = JSONObject(p.getString("archives_depuis", "{}") ?: "{}")
@@ -287,6 +307,7 @@ object Marques {
             ?.putString("emojis", JSONObject(emojis.toMap()).toString())
             ?.putBoolean("garder_archives", garderArchives)
             ?.putInt("cacher_apres_jours", cacherApresJours)
+            ?.putBoolean("presence_en_ligne", presenceEnLigne)
             ?.putString("archives_depuis", JSONObject(archivesDepuis.toMap()).toString())
             ?.putLong("version", version)
             ?.putBoolean("a_envoyer", aEnvoyer)
@@ -417,9 +438,10 @@ object Marques {
         val emojis: Map<String, String>,
         val garderArchives: Boolean,
         val cacherApresJours: Int,
+        val presenceEnLigne: Boolean,
     ) {
         fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty() && privees.isEmpty() &&
-            moods.isEmpty() && emojis.isEmpty() && !garderArchives && cacherApresJours == 0
+            moods.isEmpty() && emojis.isEmpty() && !garderArchives && cacherApresJours == 0 && presenceEnLigne
 
         /** Chaque liste de this, dans son ordre, puis les ids de [b] qui n'y sont pas. */
         fun union(b: Listes) = Listes(
@@ -436,6 +458,7 @@ object Marques {
             garderArchives,
             // De même pour la durée.
             cacherApresJours,
+            presenceEnLigne,
         )
 
         /** Les ids de this absents de [b], liste par liste. */
@@ -446,13 +469,14 @@ object Marques {
             emojis.filter { (k, v) -> b.emojis[k] != v },
             garderArchives,
             cacherApresJours,
+            presenceEnLigne,
         )
     }
 
     private fun listes() =
         Listes(
             head.toList(), favoris.toList(), epingles.toList(), archives.toList(), privees.toList(), moods.toMap(), emojis.toMap(),
-            garderArchives, cacherApresJours,
+            garderArchives, cacherApresJours, presenceEnLigne,
         )
 
     private fun poser(l: Listes) {
@@ -469,6 +493,10 @@ object Marques {
         if (emojis.toMap() != l.emojis) { emojis.clear(); emojis.putAll(l.emojis) }
         garderArchives = l.garderArchives
         cacherApresJours = l.cacherApresJours
+        if (presenceEnLigne != l.presenceEnLigne) {
+            presenceEnLigne = l.presenceEnLigne
+            surPresence?.invoke(l.presenceEnLigne)
+        }
     }
 
     /** Envoie une trame au serveur ; faux si la connexion est coupée. Posé par [Depot] en mode client. */
@@ -509,6 +537,7 @@ object Marques {
             .put("emojis", JSONObject(l.emojis))
             .put("garder_archives", l.garderArchives)
             .put("cacher_apres_jours", l.cacherApresJours)
+            .put("presence_en_ligne", l.presenceEnLigne)
             .put("version", version).put("id", prochain)
         if (!envoi(JSONObject().put("marques", corps))) {
             // La connexion tombe : le rejeu suivant tranchera.
@@ -541,6 +570,8 @@ object Marques {
             if (m.opt("garder_archives") is Boolean) m.optBoolean("garder_archives") else garderArchives,
             // Et pour `cacher_apres_jours` (serveur d'avant ce réglage) : le nôtre reste.
             if (m.opt("cacher_apres_jours") is Number) bornerJours(m.optInt("cacher_apres_jours")) else cacherApresJours,
+            // Et pour `presence_en_ligne` (absent : le nôtre reste ; vrai par défaut).
+            if (m.opt("presence_en_ligne") is Boolean) m.optBoolean("presence_en_ligne") else presenceEnLigne,
         )
         val v = m.optLong("version", -1)
         if (v < 0) return

@@ -62,23 +62,32 @@ type Pont struct {
 	backfilling   bool
 	lastFull      time.Time
 	connCancel    context.CancelFunc
+
+	// La présence des contacts (presence.go).
+	presenceOn  bool
+	presence    map[string]presenceState
+	presenceNow chan struct{}
 }
 
 func newPont(ctx context.Context) *Pont {
 	p := &Pont{
-		ctx:        ctx,
-		convs:      map[string]*convState{},
-		contacts:   map[int64]*contact{},
-		byIGID:     map[string]string{},
-		byThreadID: map[string]string{},
-		byUserIGID: map[string]int64{},
-		pending:    map[string]string{},
-		loaded:     map[string]int64{},
-		fetching:   map[string]bool{},
-		listCount:  50,
+		ctx:         ctx,
+		convs:       map[string]*convState{},
+		contacts:    map[int64]*contact{},
+		byIGID:      map[string]string{},
+		byThreadID:  map[string]string{},
+		byUserIGID:  map[string]int64{},
+		presenceOn:  presenceEnv(),
+		presence:    map[string]presenceState{},
+		presenceNow: make(chan struct{}, 1),
+		pending:     map[string]string{},
+		loaded:      map[string]int64{},
+		fetching:    map[string]bool{},
+		listCount:   50,
 	}
 	mediadl.SetHTTP(exhttp.SensibleClientSettings)
 	go p.listLoop()
+	go p.presenceLoop()
 	return p
 }
 
@@ -438,6 +447,7 @@ func (p *Pont) onIGEvent(ctx context.Context, cli *instameow.Client, raw slidety
 		p.mu.Unlock()
 		emitState("ready")
 		p.emitList()
+		p.setPresence(p.presenceWanted())
 		go p.threadBackfill(cli)
 		go p.myAvatarDownload()
 	case *slidetypes.Disconnected:

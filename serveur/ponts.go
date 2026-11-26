@@ -46,6 +46,10 @@ type Pont struct {
 
 	// Sous srv.mu : les réponses attendues par le serveur MCP (mcp.go).
 	mcpAttentes []*attenteMCP
+
+	// Sous srv.mu : le dernier événement `presence` de chaque conversation
+	// (PROTOCOLE.md, §5.10), rejoué aux clients qui arrivent.
+	presence map[string][]byte
 }
 
 // demande : des clients attendent la réponse `messages` d'une conversation.
@@ -104,7 +108,7 @@ func trouverPont(nom, variable, binDir string) string {
 // nouveauPont prépare le pont d'un service, comme src/pont.rs le ferait.
 func nouveauPont(srv *Serveur, svc, binDir string) (*Pont, error) {
 	p := &Pont{
-		svc: svc, srv: srv, dernier: map[string][]byte{}, demandes: map[string]demande{},
+		svc: svc, srv: srv, dernier: map[string][]byte{}, demandes: map[string]demande{}, presence: map[string][]byte{},
 		prechargeFini: make(chan struct{}, 1), aPrecharger: make(chan struct{}, 1),
 	}
 	switch svc {
@@ -169,6 +173,13 @@ func (p *Pont) boucle() {
 func (p *Pont) executer() error {
 	cmd := exec.Command(p.bin)
 	cmd.Env = append(os.Environ(), p.env...)
+	// « Afficher qui est en ligne » (marque presence_en_ligne) : les ponts
+	// Messenger, Instagram, WhatsApp et Telegram le lisent au lancement, puis
+	// reçoivent la commande `presence` à chaque changement.
+	p.srv.mu.Lock()
+	presence := p.srv.marques.PresenceEnLigne
+	p.srv.mu.Unlock()
+	cmd.Env = append(cmd.Env, envPresence(presence))
 	entree, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -293,6 +304,22 @@ func (p *Pont) recu(ligne []byte) {
 		if !archive && p.pret {
 			p.declencher()
 		}
+	case "presence":
+		if !srv.marques.PresenceEnLigne {
+			// Réglage désactivé : rien ne passe (un pont d'avant la commande).
+			return
+		}
+		var pr struct {
+			Item struct {
+				Conv string `json:"conv"`
+			} `json:"item"`
+		}
+		if json.Unmarshal(ligne, &pr) != nil || pr.Item.Conv == "" {
+			return
+		}
+		if _, ok := p.presence[pr.Item.Conv]; ok || len(p.presence) < presenceMax {
+			p.presence[pr.Item.Conv] = trame
+		}
 	case "conversation":
 		p.cache.majConv(ligne)
 	case "deleted":
@@ -382,6 +409,7 @@ func (p *Pont) signalerArret() {
 	p.dernier["state"] = trame
 	p.pret = false
 	p.demandes = map[string]demande{}
+	p.presence = map[string][]byte{}
 	if p.precharge != "" {
 		p.finPrecharge()
 	}
@@ -401,7 +429,45 @@ func (p *Pont) rejeu() [][]byte {
 	for _, l := range p.cache.listesRejeu() {
 		r = append(r, emballer(p.svc, l))
 	}
+	// La présence, après les listes (le client connaît alors les conversations).
+	for _, t := range p.presence {
+		r = append(r, t)
+	}
 	return r
+}
+
+// presenceMax : au plus autant de conversations suivies par pont.
+const presenceMax = 500
+
+// Les services dont le pont sait suivre la présence (PROTOCOLE.md, §5.10).
+var servicesPresence = []string{"messenger", "instagram", "whatsapp", "telegram"}
+
+func envPresence(on bool) string {
+	if on {
+		return "JASETTE_PRESENCE=1"
+	}
+	return "JASETTE_PRESENCE=0"
+}
+
+// presenceChangee : la marque presence_en_ligne vient de changer. Les ponts
+// reçoivent la commande `presence` (sans redémarrer) ; désactivée, la
+// présence gardée est oubliée. À appeler sous s.mu.
+func (s *Serveur) presenceChangee(on bool) {
+	cmd, _ := json.Marshal(map[string]any{"cmd": "presence", "on": on})
+	for _, svc := range servicesPresence {
+		p := s.ponts[svc]
+		if p == nil {
+			continue
+		}
+		if !on {
+			p.presence = map[string][]byte{}
+		}
+		go func() {
+			if err := p.envoyer(cmd); err != nil && !errors.Is(err, errPontArrete) {
+				logf("[%s] presence : %v", p.svc, err)
+			}
+		}()
+	}
 }
 
 var errPontArrete = errors.New("le pont redémarre")

@@ -59,8 +59,12 @@ type Marques struct {
 	// de réception », en jours (0 : tout afficher). Seuls les clients filtrent
 	// (à l'affichage) ; le serveur ne fait que le garder et le partager.
 	// Absent (ancien fichier) : 0.
-	CacherApresJours int   `json:"cacher_apres_jours"`
-	Version          int64 `json:"version"`
+	CacherApresJours int `json:"cacher_apres_jours"`
+	// PresenceEnLigne : « Afficher qui est en ligne » (point vert, « Actif il
+	// y a 12 min »). Vrai par défaut, et pour un ancien fichier sans ce champ.
+	// Le serveur le transmet aux ponts (presence.go).
+	PresenceEnLigne bool  `json:"presence_en_ligne"`
+	Version         int64 `json:"version"`
 	// Propre au serveur, jamais envoyé aux clients : depuis quand (ms, horloge
 	// du serveur) chaque id est dans Archives. Seul un message reçu après
 	// cette heure ramène la conversation dans l'Inbox (une réaction ou une
@@ -105,7 +109,7 @@ func (m *Marques) memesListes(n *Marques) bool {
 		}
 	}
 	return egalesMoods(m.Moods, n.Moods) && egalesMoods(m.Emojis, n.Emojis) && m.GarderArchives == n.GarderArchives &&
-		m.CacherApresJours == n.CacherApresJours
+		m.CacherApresJours == n.CacherApresJours && m.PresenceEnLigne == n.PresenceEnLigne
 }
 
 // cacherApresJoursMax : au-delà de dix ans, autant tout afficher.
@@ -228,7 +232,8 @@ func unir(dabord, ensuite []string) []string {
 
 // lireMarquesFichier lit un fichier de marques ; erreur s'il est illisible.
 func lireMarquesFichier(chemin string) (Marques, error) {
-	var m Marques
+	// Les réglages vrais par défaut : un fichier d'avant eux ne les a pas.
+	m := Marques{PresenceEnLigne: true}
 	data, err := os.ReadFile(chemin)
 	if err != nil {
 		return m, err
@@ -262,7 +267,7 @@ func chargerMarques() Marques {
 		}
 		return b
 	}
-	m = Marques{}
+	m = Marques{PresenceEnLigne: true}
 	m.normaliser()
 	return m
 }
@@ -320,7 +325,7 @@ func trameMarques(m Marques, id json.RawMessage, refus string) []byte {
 	corps := map[string]any{
 		"head": m.Head, "favoris": m.Favoris, "epingles": m.Epingles, "archives": m.Archives,
 		"privees": m.Privees, "moods": m.Moods, "emojis": m.Emojis, "garder_archives": m.GarderArchives,
-		"cacher_apres_jours": m.CacherApresJours, "version": m.Version,
+		"cacher_apres_jours": m.CacherApresJours, "presence_en_ligne": m.PresenceEnLigne, "version": m.Version,
 	}
 	if len(id) > 0 {
 		corps["id"] = id
@@ -353,6 +358,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		Emojis   *map[string]string `json:"emojis"`
 		Garder   *bool              `json:"garder_archives"`
 		Cacher   *int               `json:"cacher_apres_jours"`
+		Presence *bool              `json:"presence_en_ligne"`
 		Version  int64              `json:"version"`
 		ID       json.RawMessage    `json:"id"`
 	}
@@ -368,7 +374,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	nouv := Marques{
 		Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Archives: cur.Archives,
 		Privees: cur.Privees, Moods: cur.Moods, Emojis: cur.Emojis, GarderArchives: cur.GarderArchives,
-		CacherApresJours: cur.CacherApresJours, ArchivesDepuis: cur.ArchivesDepuis,
+		CacherApresJours: cur.CacherApresJours, PresenceEnLigne: cur.PresenceEnLigne, ArchivesDepuis: cur.ArchivesDepuis,
 	}
 	// Une liste absente de la trame ne change pas (un ancien client, qui ne
 	// connaît pas `archives` ou `privees`, ne les vide donc jamais).
@@ -394,6 +400,11 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	// De même pour `cacher_apres_jours` (un nombre de jours, borné).
 	if d.Cacher != nil {
 		nouv.CacherApresJours = bornerJours(*d.Cacher)
+	}
+	// Et pour `presence_en_ligne` : absent, rien ne change (un client d'avant
+	// ce réglage ne le désactive jamais).
+	if d.Presence != nil {
+		nouv.PresenceEnLigne = *d.Presence
 	}
 	repondre := func(m Marques, refus string) {
 		select {
@@ -438,8 +449,11 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		return
 	}
 	s.marques = nouv
-	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, garder_archives %v, cacher_apres_jours %d",
-		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), nouv.GarderArchives, nouv.CacherApresJours)
+	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v",
+		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne)
+	if nouv.PresenceEnLigne != cur.PresenceEnLigne {
+		s.presenceChangee(nouv.PresenceEnLigne)
+	}
 	tous := trameMarques(nouv, nil, "")
 	for autre := range s.clients {
 		if autre == c {
@@ -492,7 +506,8 @@ func (s *Serveur) desarchiverSiRecu(svc string, ligne []byte) {
 	}
 	cur := s.marques
 	nouv := Marques{Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Privees: cur.Privees, Moods: cur.Moods, Emojis: cur.Emojis,
-		GarderArchives: cur.GarderArchives, CacherApresJours: cur.CacherApresJours, ArchivesDepuis: cur.ArchivesDepuis}
+		GarderArchives: cur.GarderArchives, CacherApresJours: cur.CacherApresJours, PresenceEnLigne: cur.PresenceEnLigne,
+		ArchivesDepuis: cur.ArchivesDepuis}
 	for _, a := range cur.Archives {
 		if a != id {
 			nouv.Archives = append(nouv.Archives, a)

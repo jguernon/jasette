@@ -19,6 +19,7 @@ mod prive;
 mod mood;
 mod maj;
 mod retro;
+mod presence;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -1009,6 +1010,7 @@ fn touche_cache(v: &Value) -> bool {
 
 /// Le pont d'un service : un processus ici, ou ce service sur le serveur Jasette.
 fn lancer_pont(r: &Reglages, svc: Service) -> Result<Pont, String> {
+    pont::regler_presence(r.presence_en_ligne);
     match serveur_actif(r) {
         Some(cfg) => Ok(Pont::distant(cfg, svc.cle())),
         None if svc == Service::GoogleMessages => Pont::lancer(),
@@ -1448,6 +1450,12 @@ struct Reglages {
     /// `cacher_apres_jours`). Seul l'affichage filtre ([`trop_ancienne`]).
     #[serde(default)]
     cacher_apres_jours: u32,
+    /// « Afficher qui est en ligne » : point vert sur les contacts actifs,
+    /// « Actif il y a 12 min » (PROTOCOLE.md §5.10). Gardé ici, et partagé
+    /// par le serveur Jasette s'il y en a un (marque `presence_en_ligne`).
+    /// Vrai par défaut.
+    #[serde(default = "vrai")]
+    presence_en_ligne: bool,
     /// La grille du Head : son nombre de colonnes, de 3 à 6 (« 5 ») ; vide = 4.
     /// Une ancienne valeur « colonnes x rangées » (« 8x3 ») donne ses colonnes,
     /// ramenées entre 3 et 6. Propre à cet appareil.
@@ -1600,6 +1608,7 @@ impl Default for Reglages {
             emojis: Default::default(),
             garder_archives: false,
             cacher_apres_jours: 0,
+            presence_en_ligne: true,
             head_grille: String::new(),
             marques_cache: HashMap::new(),
             heures_messages: true,
@@ -1712,6 +1721,7 @@ impl Reglages {
                     emojis: self.emojis.clone(),
                     garder_archives: self.garder_archives,
                     cacher_apres_jours: self.cacher_apres_jours,
+                    presence_cachee: !self.presence_en_ligne,
                 },
                 version: self.marques_version,
                 a_envoyer: self.marques_a_envoyer,
@@ -1730,6 +1740,7 @@ impl Reglages {
         self.emojis = b.copie.listes.emojis;
         self.garder_archives = b.copie.listes.garder_archives;
         self.cacher_apres_jours = b.copie.listes.cacher_apres_jours;
+        self.presence_en_ligne = !b.copie.listes.presence_cachee;
         self.marques_version = b.copie.version;
         self.marques_a_envoyer = b.copie.a_envoyer;
         self.marques_serveur = b.serveur;
@@ -2054,6 +2065,8 @@ struct Jasette {
     /// Où chaque vocal a été mis en pause.
     pauses: HashMap<String, f32>,
     ondes_pretes: Arc<Mutex<Vec<(String, Vec<f32>, f32)>>>,
+    /// La présence en ligne des conversations individuelles (src/presence.rs).
+    presences: HashMap<String, presence::Presence>,
     /// Les aperçus de liens faits par Jasette (adresse → aperçu ; None : en
     /// cours, ou rien à montrer), les images `image_url` des services, et les
     /// recherches en cours.
@@ -2929,6 +2942,7 @@ impl Jasette {
             ondes_demandees: HashSet::new(),
             pauses: HashMap::new(),
             ondes_pretes: Arc::new(Mutex::new(Vec::new())),
+            presences: HashMap::new(),
             apercus: HashMap::new(),
             images_apercu: HashMap::new(),
             travaux_apercus: Arc::new(apercu::Travaux::default()),
@@ -3082,6 +3096,10 @@ impl Jasette {
                     "reconnecting" => Etat::Reconnexion,
                     _ => avant,
                 };
+                if etat != Etat::Pret {
+                    // Le pont n'écoute plus : sa présence ne vaut plus rien.
+                    self.presences.retain(|id, _| service_de(id) != svc);
+                }
                 let m = self.meta_mut(svc);
                 m.etat = etat;
                 // Le code d'association ne sert plus une fois connecté ou abandonné.
@@ -3184,6 +3202,7 @@ impl Jasette {
                     self.ajouter_trouves(svc, items);
                 }
             }
+            "presence" => self.presence_recue(&v),
             "hello" | "e2ee" | "typing" => {}
             // Un pont d'avant la recherche globale : il ne la connaît pas, ce n'est pas une panne.
             "error" if v.get("text").and_then(Value::as_str).is_some_and(|t| t.contains("search_messages")) => {}
@@ -5742,8 +5761,13 @@ impl Jasette {
         }
         let trame = self.suivi_marques.recu(n, &mut b.copie);
         if b != avant {
+            let presence = b.copie.listes.presence_cachee != avant.copie.listes.presence_cachee;
             self.reglages.poser_bloc(b);
             self.reglages.garder();
+            if presence {
+                // Réglé sur un autre appareil.
+                self.presence_reglee();
+            }
             // Rendue privée sur un autre appareil : elle quitte l'écran ici aussi.
             self.cacher_privees_ouvertes();
         }
@@ -5957,6 +5981,9 @@ impl Jasette {
                         div()
                             .relative()
                             .child(self.avatar_conv(conv, &nom, mesures.avatar))
+                            .when(self.en_ligne(conv), |d| {
+                                d.child(presence::point_presence(mesures.avatar, if choisie { th().choisi } else { th().liste }))
+                            })
                             .child(
                                 div()
                                     .absolute()
@@ -6100,7 +6127,9 @@ impl Jasette {
                             .relative()
                             .flex_none()
                             .py(px(10.))
-                            .child(self.avatar_conv(conv, &nom, 50.))
+                            .child(div().relative().child(self.avatar_conv(conv, &nom, 50.)).when(self.en_ligne(conv), |d| {
+                                d.child(presence::point_presence(50., if choisie { th().choisi } else { th().liste }))
+                            }))
                             .when(badge, |d| {
                                 d.child(div().absolute().right(px(-3.)).bottom(px(7.)).child(logo(service_de(&conv.id), 20.)))
                             }),
@@ -7983,13 +8012,19 @@ impl Jasette {
                             format!("{} participants · {}", conv.members.len() + 1, service.nom())
                         } else {
                             let qui = conv.members.first().filter(|m| **m != nom).cloned();
-                            match qui {
-                                Some(q) => format!("{q} · {}", service.nom()),
-                                None => service.nom().into(),
+                            match (self.activite(&conv), qui) {
+                                // « Actif il y a 12 min » d'abord (src/presence.rs).
+                                (Some(a), _) => format!("{a} · {}", service.nom()),
+                                (None, Some(q)) => format!("{q} · {}", service.nom()),
+                                (None, None) => service.nom().into(),
                             }
                         };
+                        let en_ligne = self.en_ligne(&conv);
                         d.child(badge_service(
-                            div().relative().child(self.avatar_conv(&conv, &nom, 38.)),
+                            div()
+                                .relative()
+                                .child(self.avatar_conv(&conv, &nom, 38.))
+                                .when(en_ligne, |d| d.child(presence::point_presence(38., givre_haut))),
                         ))
                         .child(
                             div()
@@ -9061,6 +9096,20 @@ impl Jasette {
                     )))
                     .child(div().h(px(14.)))
                     .child(groupe().child(self.choix_cacher_apres(cx)))
+                    .child(div().h(px(14.)))
+                    .child(groupe().child(ligne_interrupteur(
+                        "a-presence",
+                        t("Afficher qui est en ligne"),
+                        t("Point vert sur les contacts actifs (Messenger, Instagram, WhatsApp, Telegram)."),
+                        self.reglages.presence_en_ligne,
+                        cx.listener(|this, _, _, cx| {
+                            this.reglages.presence_en_ligne = !this.reglages.presence_en_ligne;
+                            // Une marque : gardée, et partagée par le serveur Jasette s'il y en a un.
+                            this.marques_changees();
+                            this.presence_reglee();
+                            cx.notify();
+                        }),
+                    )))
                     .child(div().h(px(14.)))
                     .child(groupe().child(ligne_interrupteur(
                         "a-apercus-liens",
@@ -11940,6 +11989,9 @@ fn t(fr: &'static str) -> &'static str {
         "Lilas" => "Lilac",
         "Les emojis que vous utilisez apparaîtront ici." => "Emojis you use will show up here.",
         "Garder les conversations archivées hors de la boîte de réception" => "Keep archived conversations out of the inbox",
+        "Afficher qui est en ligne" => "Show who's online",
+        "Point vert sur les contacts actifs (Messenger, Instagram, WhatsApp, Telegram)." => "Green dot on active contacts (Messenger, Instagram, WhatsApp, Telegram).",
+        "Actif maintenant" => "Active now",
         "Cacher les conversations plus anciennes de la boîte de réception" => "Hide older conversations from the inbox",
         "Selon leur dernier message. Les épinglées et les non lues restent ; Favoris, Archives et la recherche les montrent toujours." => "Based on their last message. Pinned and unread ones stay; Favorites, Archives and search always show them.",
         "Tout afficher" => "Show all",

@@ -67,17 +67,23 @@ type Pont struct {
 	archiveWanted bool
 	inflight      map[string]int // envois en cours, par fil
 	lastDialogs   time.Time
+
+	// La présence des contacts (presence.go).
+	presenceOn bool
+	presence   map[string]presenceState
 }
 
 func newPont(ctx context.Context) *Pont {
 	p := &Pont{
-		ctx:       ctx,
-		convs:     map[string]*convState{},
-		peers:     map[string]*peer{},
-		loaded:    map[string]int64{},
-		inflight:  map[string]int{},
-		listCount: 50,
-		authCh:    make(chan struct{}, 1),
+		ctx:        ctx,
+		convs:      map[string]*convState{},
+		peers:      map[string]*peer{},
+		loaded:     map[string]int64{},
+		inflight:   map[string]int{},
+		listCount:  50,
+		authCh:     make(chan struct{}, 1),
+		presenceOn: presenceEnv(),
+		presence:   map[string]presenceState{},
 	}
 	go p.listLoop()
 	return p

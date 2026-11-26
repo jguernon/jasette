@@ -378,6 +378,8 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Notifications d'Android" to "Android notifications",
     "Sons, vibrations, bulles et notifications sur l'écran verrouillé se règlent dans Android." to "Sounds, vibration, bubbles and lock screen notifications are set in Android.",
     "Garder les conversations archivées hors de la boîte de réception" to "Keep archived conversations out of the inbox",
+    "Afficher qui est en ligne" to "Show who's online",
+    "Point vert sur les contacts actifs (Messenger, Instagram, WhatsApp, Telegram)." to "Green dot on active contacts (Messenger, Instagram, WhatsApp, Telegram).",
     "Un nouveau message ne les ramène plus dans la boîte de réception." to "A new message no longer brings them back to the inbox.",
     "Cacher les conversations plus anciennes de la boîte de réception" to "Hide older conversations from the inbox",
     "Selon leur dernier message. Les épinglées et les non lues restent ; Favoris, Archives et la recherche les montrent toujours." to "Based on their last message. Pinned and unread ones stay; Favorites, Archives and search always show them.",

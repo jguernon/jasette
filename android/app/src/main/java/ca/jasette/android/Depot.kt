@@ -42,6 +42,12 @@ object Depot {
 
     // ---- Ce que l'interface affiche ----
 
+    /** La présence en ligne des conversations individuelles (Presence.kt, PROTOCOLE.md §5.10). */
+    val presences = mutableStateMapOf<String, Presence>()
+
+    /** La présence d'une conversation à montrer (réglage activé, pas un groupe), ou null. */
+    fun presenceDe(c: Conv): Presence? = if (!Marques.presenceEnLigne || c.group) null else presences[c.id]
+
     /** Les conversations (boîte de réception) des deux comptes, les plus récentes d'abord. */
     val convs = mutableStateListOf<Conv>()
     /** Les conversations archivées, à part (comme `archives` du bureau), les plus récentes d'abord. */
@@ -156,6 +162,7 @@ object Depot {
         if (enMarche) return
         appli = ctx.applicationContext
         enMarche = true
+        Marques.surPresence = { oui -> principal.post { presenceReglee(oui) } }
         generation++
         val cfg = ConfigServeur.lire(appli)
         serveur = cfg
@@ -329,6 +336,7 @@ object Depot {
         avatarsMoi.clear()
         qr.clear()
         codeAssociation.clear()
+        presences.clear()
         emoji = null
         besoinNip = false
         erreurNip = null
@@ -347,7 +355,32 @@ object Depot {
             "HOME" to appli.filesDir.path,
             "TMPDIR" to tmp.path,
             "SSL_CERT_DIR" to "/system/etc/security/cacerts",
+            // « Afficher qui est en ligne » (PROTOCOLE.md §5.10) ; ensuite, la commande `presence`.
+            "JASETTE_PRESENCE" to if (Marques.presenceEnLigne) "1" else "0",
         )
+    }
+
+    /** Les services dont le pont suit la présence. */
+    private val SERVICES_PRESENCE = listOf(Service.MESSENGER, Service.INSTAGRAM, Service.WHATSAPP, Service.TELEGRAM)
+
+    /**
+     * Le réglage « Afficher qui est en ligne » vient de changer : les ponts
+     * locaux reçoivent la commande `presence` (en mode client, le serveur
+     * prévient les siens) ; désactivé, tout est oublié.
+     */
+    private fun presenceReglee(oui: Boolean) {
+        if (!oui) presences.clear()
+        if (connexion != null) return
+        for (s in SERVICES_PRESENCE) (ponts[s] as? PontLocal)?.envoyer(JSONObject().put("cmd", "presence").put("on", oui))
+    }
+
+    /** Une ligne `presence` d'un pont (ids déjà préfixés). */
+    private fun recevoirPresence(v: JSONObject) {
+        if (!Marques.presenceEnLigne) return
+        val item = v.optJSONObject("item") ?: return
+        val conv = item.chaine("conv")
+        if (conv.isEmpty() || (presences.size > 2000 && conv !in presences)) return
+        presences[conv] = Presence(item.optBoolean("online"), item.optLong("last_active", 0))
     }
 
     private fun executable(nom: String) = File(appli.applicationInfo.nativeLibraryDir, nom)
@@ -668,6 +701,8 @@ object Depot {
                     filsAuPret(service)
                 }
                 if (apres == Etat.NON_ASSOCIE) oublier(service)
+                // Le pont n'écoute plus : sa présence ne vaut plus rien.
+                if (apres != Etat.PRET) presences.keys.filter { Service.de(it) == service }.forEach { presences.remove(it) }
                 // Hors association, le QR et le code n'ont plus de sens.
                 if (apres != Etat.ASSOCIATION) {
                     qr.remove(service)
@@ -716,6 +751,7 @@ object Depot {
                 v.chaine("text").isNotEmpty() -> erreurNip = v.chaine("text")
             }
             "search" -> recevoirRecherche(v, service)
+            "presence" -> recevoirPresence(v)
             "hello", "e2ee", "typing" -> {}
             "error" -> {
                 val texte = v.chaine("text")
