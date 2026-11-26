@@ -9055,10 +9055,9 @@ impl Jasette {
             // sinon « Ajouter un compte » montre la liste des autres services.
             // WhatsApp, Signal et X : leur écran d'association, d'abord.
             Section::Comptes if self.ajout_service.is_some() => self.ecran_ajout_service(cx),
-            Section::Comptes
-                if (self.ajout_compte && !self.etat.associe())
-                    || (self.etat == Etat::NonAssocie && self.connexion_ouverte) =>
-            {
+            // Seulement quand on a demandé l'ajout : une connexion Google restée
+            // ouverte en arrière-plan ne doit pas remplacer la liste des comptes.
+            Section::Comptes if self.ajout_compte && !self.etat.associe() => {
                 self.ecran_connexion(cx).into_any_element()
             }
             Section::Comptes if self.ajout_compte => self.ecran_choix_service(cx),
