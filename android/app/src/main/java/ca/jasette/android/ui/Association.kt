@@ -88,7 +88,7 @@ fun Association(service: Service, mode: String, fini: () -> Unit) {
     Scaffold(
         containerColor = P.ecran,
         topBar = {
-            TopAppBar(
+            BarreHaut(
                 navigationIcon = { IconButton(onClick = fini) { Icon(Icons.Filled.Close, t("Fermer")) } },
                 title = { Text(if (service == Service.SIGNAL) t("Lier Signal") else t("Associer WhatsApp"), fontWeight = FontWeight.Bold) },
                 colors = barreCouleurs(),

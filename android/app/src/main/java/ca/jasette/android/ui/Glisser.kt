@@ -188,7 +188,10 @@ fun RangeeGlissable(
             }
             val decalage = abs(runCatching { etat.requireOffset() }.getOrDefault(0f))
             // L'icône grossit un peu une fois le seuil franchi.
-            val echelle by animateFloatAsState(if (etat.targetValue != SwipeToDismissBoxValue.Settled) 1.2f else 1f, label = "echelle")
+            val echelle by animateFloatAsState(
+                if (etat.targetValue != SwipeToDismissBoxValue.Settled) 1.2f else 1f,
+                if (P.sec) androidx.compose.animation.core.snap() else androidx.compose.animation.core.spring(), label = "echelle",
+            )
             if (a != null && a != ActionGeste.RIEN && decalage > 0f) {
                 val debut = sens == SwipeToDismissBoxValue.StartToEnd
                 val ok = possible(a, c)

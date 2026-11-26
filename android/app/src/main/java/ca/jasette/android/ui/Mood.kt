@@ -47,6 +47,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import ca.jasette.android.Marques
 import ca.jasette.android.t
 
@@ -56,7 +58,9 @@ import ca.jasette.android.t
 // dérivations. Choisi par conversation (menu ⋮ > Mood), gardé dans [Marques.moods]
 // et partagé par le serveur Jasette s'il y en a un (champ `moods`, §5.5).
 // Deux variantes de fond : Sombre (profond, assombri) et Verre (clair, pastel).
-// L'EGA n'en a pas : un mood enregistré y est ignoré.
+// L'EGA n'en a pas : un mood enregistré y est ignoré. En Live et Sirène, dont le
+// fil n'a pas de bulles, le mood ne fait que teinter discrètement le fond du fil
+// (un dégradé très pâle de ses deux premières couleurs, sans taches).
 
 /**
  * Un mood : [nomFr]/[nomEn], le dégradé de mes bulles ([envoyeA] → [envoyeB])
@@ -129,7 +133,7 @@ fun mix(a: Long, b: Long, t: Float): Color {
  * (dégradés radiaux superposés, couleur → transparent). [clair] : la variante
  * Verre (pastel), sinon Sombre (profond).
  */
-fun Modifier.fondMood(m: Mood, clair: Boolean): Modifier = drawBehind {
+fun Modifier.fondMood(m: Mood, clair: Boolean): Modifier = if (P.retro) fondMoodDiscret(m) else drawBehind {
     drawRect(Brush.verticalGradient(listOf(m.haut(clair), m.bas(clair))))
     val r = size.width * 0.75f
     for ((c, a, x, y) in listOf(
@@ -150,6 +154,15 @@ fun Modifier.fondMood(m: Mood, clair: Boolean): Modifier = drawBehind {
             radius = r, center = centre,
         )
     }
+}
+
+/**
+ * Live et Sirène : le fond blanc du fil à peine teinté du mood (texte foncé toujours
+ * lisible), plus marqué en haut qu'en bas, comme le fil de Live (#f4f9ff → blanc).
+ */
+private fun Modifier.fondMoodDiscret(m: Mood): Modifier = drawBehind {
+    val force = if (P.live) 0.76f else 0.82f
+    drawRect(Brush.verticalGradient(listOf(mix(m.t1, 0xffffffL, force), mix(m.t2, 0xffffffL, force + 0.07f))))
 }
 
 private data class Tache(val c: Long, val a: Float, val x: Float, val y: Float)
@@ -194,7 +207,7 @@ fun FeuilleMood(conv: String, nom: String, fermer: () -> Unit) {
                     }
                 }
                 Box(
-                    Modifier.clip(formeBouton).background(P.degrade).clickable { appliquer(choix) }
+                    Modifier.boutonEnvoi().clickable { appliquer(choix) }
                         .padding(horizontal = 18.dp, vertical = 9.dp),
                 ) { Text(t("Appliquer"), color = P.surAccent, fontWeight = FontWeight.SemiBold, fontSize = 14.sp) }
             }
@@ -229,7 +242,9 @@ private fun RangeeEmojiRapide(emoji: String?, choisir: (String?) -> Unit, autre:
         )
         @Composable
         fun Pastille(choisi: Boolean, toucher: () -> Unit, contenu: @Composable () -> Unit) {
-            val bord by animateColorAsState(if (choisi) P.accent else Color.Transparent, label = "bord-emoji")
+            val bord by animateColorAsState(
+                if (choisi) P.accent else Color.Transparent, if (P.sec) snap() else spring(), label = "bord-emoji",
+            )
             Box(
                 Modifier.height(44.dp).widthIn(min = 44.dp).clip(formeRonde)
                     .let { if (choisi) it.background(P.surface) else it }
@@ -258,7 +273,7 @@ private fun RangeeEmojiRapide(emoji: String?, choisir: (String?) -> Unit, autre:
 @Composable
 private fun MiniSaisie(emoji: String?) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(36.dp).carte(18.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(36.dp).boutonTheme(18.dp), contentAlignment = Alignment.Center) {
             Icon(Icons.Filled.Add, null, tint = P.texteFort, modifier = Modifier.size(18.dp))
         }
         Spacer(Modifier.width(6.dp))
@@ -268,11 +283,11 @@ private fun MiniSaisie(emoji: String?) {
         ) { Text("Message", color = P.textePale, fontSize = 14.sp) }
         Spacer(Modifier.width(6.dp))
         if (emoji != null) {
-            Box(Modifier.size(36.dp).carte(18.dp, bord = P.accent), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(36.dp).let { if (P.retro) it.boutonTheme(18.dp) else it.carte(18.dp, bord = P.accent) }, contentAlignment = Alignment.Center) {
                 EmojiCentre(emoji, 19f)
             }
         } else {
-            Box(Modifier.size(36.dp).clip(formeRonde).background(P.degrade), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(36.dp).boutonEnvoi(), contentAlignment = Alignment.Center) {
                 Icon(Icons.AutoMirrored.Filled.Send, null, tint = P.surAccent, modifier = Modifier.size(17.dp))
             }
         }
@@ -290,10 +305,27 @@ private fun Apercu(m: Mood?, emoji: String?) {
     }
     Box(
         Modifier.fillMaxWidth().height(246.dp).clip(forme)
-            .let { if (m != null) it.fondMood(m, clair) else it.background(if (clair) P.fond else P.fil) }
-            .border(1.dp, if (clair) Color.White.copy(alpha = 0.7f) else P.traitFin, forme)
+            .let { if (m != null) it.fondMood(m, clair) else it.background(if (clair && !P.retro) P.fond else P.fil) }
+            .let {
+                when {
+                    P.sirene -> it.relief(enfonce = true)
+                    P.live -> it.border(1.dp, P.bordCarte, forme)
+                    else -> it.border(1.dp, if (clair) Color.White.copy(alpha = 0.7f) else P.traitFin, forme)
+                }
+            }
             .padding(14.dp),
     ) {
+        if (P.retro) {
+            // Sans bulles, comme le fil de Live et Sirène.
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LigneExemple("Camille", moi = false, t("Tu viens au chalet vendredi ?"), 15.sp, "19:24")
+                LigneExemple(null, moi = true, t("Oui ! J'apporte les guimauves 🔥"), 15.sp, "19:25")
+                LigneExemple("Camille", moi = false, t("Parfait, on t'attend !"), 15.sp, "19:26")
+                Spacer(Modifier.weight(1f))
+                MiniSaisie(emoji)
+            }
+            return@Box
+        }
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             BulleExemple(t("Tu viens au chalet vendredi ?"), moi = false, m, 15.sp)
             BulleExemple(t("Oui ! J'apporte les guimauves 🔥"), moi = true, m, 15.sp)
@@ -307,6 +339,10 @@ private fun Apercu(m: Mood?, emoji: String?) {
 @Composable
 private fun BulleExemple(texte: String, moi: Boolean, m: Mood?, taille: androidx.compose.ui.unit.TextUnit, petite: Boolean = false) {
     val clair = P.clair
+    if (P.retro && petite) {
+        LigneMiniature(moi)
+        return
+    }
     val r = if (petite) 7.dp else 18.dp
     val pointe = if (petite) 2.dp else 4.dp
     val forme = if (moi) formeBulle(r, r, pointe, r) else formeBulle(r, r, r, pointe)
@@ -345,12 +381,14 @@ private fun BulleExemple(texte: String, moi: Boolean, m: Mood?, taille: androidx
 private fun CarteMood(m: Mood?, choisi: Boolean, modifier: Modifier, toucher: () -> Unit) {
     val clair = P.clair
     val forme = forme(18.dp)
-    val bord by animateColorAsState(if (choisi) P.accent else Color.Transparent, label = "bord-mood")
+    val bord by animateColorAsState(
+        if (choisi) P.accent else Color.Transparent, if (P.sec) snap() else spring(), label = "bord-mood",
+    )
     Column(modifier.clip(forme(20.dp)).clickable(onClick = toucher).padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             Modifier.fillMaxWidth().aspectRatio(0.82f).border(2.5.dp, bord, forme).padding(4.dp).clip(forme(14.dp))
-                .let { if (m != null) it.fondMood(m, clair) else it.background(if (clair) P.fond else P.fil) }
-                .let { if (m == null) it.border(1.dp, P.traitFin, forme(14.dp)) else it }
+                .let { if (m != null) it.fondMood(m, clair) else it.background(if (clair && !P.retro) P.fond else P.fil) }
+                .let { if (m == null || P.retro) it.border(1.dp, P.traitFin, forme(14.dp)) else it }
                 .padding(horizontal = 8.dp, vertical = 10.dp),
         ) {
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {

@@ -70,7 +70,7 @@ fun AvatarMoi(taille: Dp, source: String = Marques.avatarSource) {
         "fichier" -> Marques.avatarFichier?.takeIf { File(it).isFile }
         else -> Service.deCle(source)?.let { Depot.avatarsMoi[it] }
     }
-    val rond = Modifier.size(taille).clip(formeRonde)
+    val rond = Modifier.cadreAvatar(taille)
     if (photo != null) {
         ImageFichier(photo, rond.background(P.surface), cote = 256)
     } else {

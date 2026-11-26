@@ -150,7 +150,7 @@ private fun IconeNav(choisi: Boolean, contenu: @Composable () -> Unit) {
 }
 
 /** Les couleurs du rail : l'indicateur de Material, sauf en EGA (voir [IconeNav]). */
-private fun indicateur() = if (P.ega) androidx.compose.ui.graphics.Color.Transparent else P.choisi
+private fun indicateur() = if (P.ega) androidx.compose.ui.graphics.Color.Transparent else P.selection
 
 /**
  * Le logo d'un service. [gris] : un service caché de la boîte de réception,
@@ -177,10 +177,13 @@ fun LogoService(s: Service, taille: androidx.compose.ui.unit.Dp, modifier: Modif
 @Composable
 fun Rail(vue: Vue, enReglages: Boolean, choisir: (Vue) -> Unit, reglages: () -> Unit) {
     val couleurs = NavigationRailItemDefaults.colors(
-        selectedIconColor = P.texteFort, unselectedIconColor = P.icone,
+        selectedIconColor = P.surSelection, unselectedIconColor = P.icone,
         selectedTextColor = P.texteFort, unselectedTextColor = P.textePale, indicatorColor = indicateur(),
     )
-    NavigationRail(containerColor = P.liste, modifier = Modifier.width(76.dp)) {
+    NavigationRail(
+        containerColor = if (P.retro) androidx.compose.ui.graphics.Color.Transparent else P.liste,
+        modifier = Modifier.width(76.dp).fondRail(),
+    ) {
         Spacer(Modifier.height(8.dp))
         val fixes = listOf(
             Triple(Vue.Tout, Icones.inbox, t("Boîte de réception")),
@@ -231,7 +234,7 @@ fun Rail(vue: Vue, enReglages: Boolean, choisir: (Vue) -> Unit, reglages: () -> 
 fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
     var choixService by remember { mutableStateOf(false) }
     val couleurs = NavigationBarItemDefaults.colors(
-        selectedIconColor = P.texteFort, unselectedIconColor = P.icone,
+        selectedIconColor = P.surSelection, unselectedIconColor = P.icone,
         selectedTextColor = P.texteFort, unselectedTextColor = P.textePale, indicatorColor = indicateur(),
     )
     // Elle flotte par-dessus la liste, qui défile dessous : un flou de ce qui passe derrière,
@@ -239,7 +242,8 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
     NavigationBar(
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
         tonalElevation = 0.dp,
-        modifier = Modifier.barreFloutee(SELECTION_LISTE, opaque = P.liste),
+        // Live et Sirène : leur panneau du bas, opaque (dégradé bleu pâle, gris en relief).
+        modifier = if (P.retro) Modifier.fondPanneauBas() else Modifier.barreFloutee(SELECTION_LISTE, opaque = P.liste),
     ) {
         val fixes = listOf(
             Triple(Vue.Tout, Icones.inbox, t("Inbox")),
@@ -403,7 +407,7 @@ private fun CaseHead(
     Box {
         Column(
             Modifier.width(largeur).clip(forme(14.dp))
-                .background(if (c.id == choisie) P.choisi else androidx.compose.ui.graphics.Color.Transparent)
+                .background(if (c.id == choisie) P.selection else androidx.compose.ui.graphics.Color.Transparent)
                 .combinedClickable(onClick = { ouvrir(c.id) }, onLongClick = { menu = true })
                 .padding(vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -421,7 +425,7 @@ private fun CaseHead(
             Text(
                 prenom, fontSize = police, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-                color = if (c.unread) P.texteFort else if (absente.grise()) P.textePale else P.texte,
+                color = if (c.id == choisie) P.surSelection else if (c.unread) P.texteFort else if (absente.grise()) P.textePale else P.texte,
                 modifier = Modifier.padding(horizontal = 4.dp),
             )
             absente.indication()?.let {
@@ -452,10 +456,12 @@ fun Rangee(
     // Pas chargée (favori ou épinglée d'un service absent) : la fiche du cache, grisée.
     val absente = absence(c.id)
     val indication = absente.indication()
+    // Sirène : la rangée choisie en bleu marine, tout son texte en blanc.
+    val blanc = choisie && P.sirene
     Box {
         Row(
             Modifier.fillMaxWidth()
-                .background(if (choisie) P.choisi else androidx.compose.ui.graphics.Color.Transparent)
+                .background(if (choisie) P.selection else androidx.compose.ui.graphics.Color.Transparent)
                 .combinedClickable(onClick = onClick, onLongClick = { menu = true })
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -467,7 +473,7 @@ fun Rangee(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         c.name.ifEmpty { c.members.joinToString(", ") },
-                        color = if (absente.grise()) P.texte else P.texteFort,
+                        color = if (choisie) P.surSelection else if (absente.grise()) P.texte else P.texteFort,
                         fontWeight = if (c.unread) FontWeight.Bold else FontWeight.SemiBold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), fontSize = Taille.liste(16f),
                     )
@@ -481,19 +487,19 @@ fun Rangee(
                         if (indication != null) {
                             Text(indication, color = P.textePale, fontSize = Taille.liste(12f), fontStyle = FontStyle.Italic)
                         } else {
-                            Text(heureListe(c.time), color = if (c.unread) P.accent else P.textePale, fontSize = Taille.liste(12f))
+                            Text(heureListe(c.time), color = if (blanc) P.surSelection else if (c.unread) P.accent else P.textePale, fontSize = Taille.liste(12f))
                         }
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         (if (c.fromMe && c.preview.isNotEmpty()) t("Vous : ") else "") + c.preview.replace('\n', ' '),
-                        color = if (c.unread) P.texteFort else P.apercu, fontSize = Taille.liste(14f),
+                        color = if (blanc) P.surSelection else if (c.unread) P.texteFort else P.apercu, fontSize = Taille.liste(14f),
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                     )
                     if (c.unread) {
                         Spacer(Modifier.width(8.dp))
-                        Box(Modifier.size(10.dp).clip(formeRonde).background(P.accent))
+                        Box(Modifier.size(10.dp).clip(formeRonde).background(if (blanc) P.surSelection else P.accent))
                     }
                 }
             }
@@ -557,7 +563,7 @@ fun MenuConversation(
 
     DropdownMenu(
         expanded = ouvert, onDismissRequest = fermer, containerColor = P.menu,
-        shape = forme(16.dp), border = if (P.ega) androidx.compose.foundation.BorderStroke(1.dp, P.bordBulle) else null,
+        shape = forme(16.dp), border = bordMenu,
     ) {
         Item(if (dansHead) t("Retirer du Head") else t("Ajouter au Head"), Icones.grille) { Marques.basculerHead(c.id) }
         Item(if (favori) t("Retirer des favoris") else t("Ajouter aux favoris"), Icons.Filled.Star) { Marques.basculerFavori(c.id) }

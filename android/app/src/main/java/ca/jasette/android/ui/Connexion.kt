@@ -201,7 +201,7 @@ fun Connexion(service: Service, plateforme: String, fini: () -> Unit) {
     Scaffold(
         containerColor = P.fond,
         topBar = {
-            TopAppBar(
+            BarreHaut(
                 navigationIcon = { IconButton(onClick = fini) { Icon(Icons.Filled.Close, t("Fermer")) } },
                 title = { Text(titre) },
                 colors = barreCouleurs(),
@@ -254,7 +254,7 @@ private fun CodeXChat(cookies: Map<String, String>, fini: () -> Unit) {
     Scaffold(
         containerColor = P.ecran,
         topBar = {
-            TopAppBar(
+            BarreHaut(
                 navigationIcon = { IconButton(onClick = fini) { Icon(Icons.Filled.Close, t("Fermer")) } },
                 title = { Text(t("Code d'accès X Chat")) },
                 colors = barreCouleurs(),

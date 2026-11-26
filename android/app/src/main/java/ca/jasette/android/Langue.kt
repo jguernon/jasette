@@ -81,6 +81,11 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Aplats gris et fil noir, bulles plates." to "Flat grays, black thread, flat bubbles.",
     "Verre clair sur halos pastel." to "Light glass over pastel halos.",
     "Seize couleurs et police IBM, comme un PC de 1984." to "Sixteen colors and the IBM font, like a 1984 PC.",
+    "Bleu ciel brillant, photos au cadre vert, comme une messagerie des années 2000." to "Glossy sky blue, photos in a green frame, like a 2000s messenger.",
+    "Gris de Windows 2000, barre de titre verte, coins carrés." to "Windows 2000 gray, green title bar, square corners.",
+    // Le fil sans bulles de Live (« Camille dit (19:24) : »).
+    "%s dit (%s) :" to "%s says (%s):",
+    "Moi (%s) :" to "Me (%s):",
     "Teinte du verre" to "Glass tint",
     "Choisissez le thème Verre pour changer de teinte." to "Pick the Glass theme to change the tint.",
     "Lavande" to "Lavender",

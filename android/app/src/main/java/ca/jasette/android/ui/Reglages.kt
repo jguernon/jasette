@@ -78,7 +78,7 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
     Scaffold(
         containerColor = P.ecran,
         topBar = {
-            TopAppBar(
+            BarreHaut(
                 navigationIcon = { IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Filled.ArrowBack, t("Retour")) } },
                 title = { Text(t("Réglages"), fontWeight = FontWeight.Bold) },
                 colors = barreCouleurs(),
@@ -217,9 +217,7 @@ private fun CarteServeur(adresse: String) {
             // WhatsApp, Signal et X s'associent depuis Jasette sur l'ordinateur (QR, code, cookies).
             val aConnecter = s.serveurSeulement && (etat == Etat.NON_ASSOCIE || etat == Etat.ASSOCIATION)
             Row(verticalAlignment = if (etroit) Alignment.Top else Alignment.CenterVertically) {
-                androidx.compose.foundation.layout.Box(
-                    Modifier.padding(top = if (etroit) 6.dp else 0.dp).size(8.dp).clip(formeRonde).background(couleurEtat(etat)),
-                )
+                PastilleEtat(etat, Modifier.padding(top = if (etroit) (6.dp - (taillePastilleEtat - 8.dp) / 2).coerceAtLeast(1.dp) else 0.dp))
                 Spacer(Modifier.width(8.dp))
                 val nom = Depot.noms[s]?.takeIf { etat.associe }
                 if (etroit) {
@@ -385,7 +383,7 @@ fun ServeurJasette(retour: () -> Unit) {
     Scaffold(
         containerColor = P.ecran,
         topBar = {
-            TopAppBar(
+            BarreHaut(
                 navigationIcon = { IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Filled.ArrowBack, t("Retour")) } },
                 title = { Text(t("Serveur Jasette"), fontWeight = FontWeight.Bold) },
                 colors = barreCouleurs(),
@@ -622,9 +620,7 @@ private fun Carte(s: Service, boutons: @Composable () -> Unit) {
                 Text(s.titre, color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                 Depot.noms[s]?.let { if (etat.associe) Text(it, color = P.texte, fontSize = 13.sp) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    androidx.compose.foundation.layout.Box(
-                        Modifier.size(8.dp).clip(formeRonde).background(couleurEtat(etat)),
-                    )
+                    PastilleEtat(etat)
                     Spacer(Modifier.width(6.dp))
                     Text(etat.texte, color = P.textePale, fontSize = 13.sp)
                 }
@@ -801,6 +797,8 @@ private fun ChoixApercus() {
 @Composable
 private fun ChoixTheme() {
     val bordVignette = when {
+        P.sirene -> couleur(0x808080)
+        P.live -> couleur(0x94bbe8)
         P.clair -> androidx.compose.ui.graphics.Color.White.copy(alpha = 0.9f)
         P.ega -> couleur(EGA_GRIS)
         else -> couleur(0x48484a)
@@ -835,6 +833,62 @@ private fun ChoixTheme() {
                 androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth().height(9.dp).background(couleur(EGA_BLEU)))
                 Column(Modifier.padding(start = 5.dp, top = 1.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     for ((l, c) in listOf(28 to EGA_JAUNE, 38 to EGA_GRIS_CLAIR, 22 to EGA_CYAN_VIF, 32 to EGA_MAGENTA_VIF)) {
+                        androidx.compose.foundation.layout.Box(Modifier.width(l.dp).height(3.dp).background(couleur(c)))
+                    }
+                }
+            }
+        }
+        androidx.compose.material3.HorizontalDivider(color = P.filet)
+        // L'aperçu Live : le ciel, la barre bleue brillante, une photo au cadre vert.
+        LigneTheme(
+            Theme.LIVE, "Live", t("Bleu ciel brillant, photos au cadre vert, comme une messagerie des années 2000."),
+            Modifier.border(1.dp, bordVignette, forme(14.dp)).background(
+                androidx.compose.ui.graphics.Brush.linearGradient(
+                    listOf(couleur(0x5f9fe8), couleur(0x9cc7f4), couleur(0xd7e9fb)),
+                    androidx.compose.ui.geometry.Offset.Zero, androidx.compose.ui.geometry.Offset(20f, 160f),
+                ),
+            ),
+        ) {
+            Column {
+                androidx.compose.foundation.layout.Box(
+                    Modifier.fillMaxWidth().height(13.dp).background(
+                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                            0f to couleur(0x7db6f2), 0.5f to couleur(0x3a86e0), 0.5f to couleur(0x2a6fcf), 1f to couleur(0x4d97ea),
+                        ),
+                    ),
+                )
+                Row(Modifier.padding(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.foundation.layout.Box(
+                        Modifier.size(16.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(3.dp))
+                            .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(couleur(0xb7f08f), couleur(0x4bb52a))))
+                            .padding(2.dp).background(couleur(0xf08a5d)),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        androidx.compose.foundation.layout.Box(Modifier.width(18.dp).height(3.dp).background(couleur(0x12335e)))
+                        androidx.compose.foundation.layout.Box(Modifier.width(13.dp).height(3.dp).background(couleur(0x4d6c92)))
+                    }
+                }
+            }
+        }
+        androidx.compose.material3.HorizontalDivider(color = P.filet)
+        // L'aperçu Sirène : une fenêtre grise de Windows 2000, barre de titre verte, liste en creux.
+        LigneTheme(
+            Theme.SIRENE, "Sirène", t("Gris de Windows 2000, barre de titre verte, coins carrés."),
+            Modifier.background(couleur(GRIS_2000)).relief(enfonce = false),
+        ) {
+            Column(Modifier.padding(2.dp)) {
+                androidx.compose.foundation.layout.Box(
+                    Modifier.fillMaxWidth().height(10.dp).background(
+                        androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(couleur(0x0d5c1f), couleur(0x3aa64a))),
+                    ),
+                )
+                Column(
+                    Modifier.padding(3.dp).fillMaxWidth().background(androidx.compose.ui.graphics.Color.White)
+                        .relief(enfonce = true, epaisseur = 1.dp).padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    for ((l, c) in listOf(20 to 0xc01818L, 30 to 0x404040L, 16 to 0x1838c0L, 26 to 0x404040L)) {
                         androidx.compose.foundation.layout.Box(Modifier.width(l.dp).height(3.dp).background(couleur(c)))
                     }
                 }
@@ -907,6 +961,7 @@ private fun ChoixTeinte() {
                                 .border(
                                     1.dp,
                                     when {
+                                        P.sirene -> couleur(0x808080)
                                         P.clair -> androidx.compose.ui.graphics.Color.White.copy(alpha = 0.9f)
                                         P.ega -> couleur(EGA_GRIS)
                                         else -> couleur(0x48484a)
@@ -954,11 +1009,18 @@ private fun ChoixTailleMessages() {
             Column(
                 // Le fond du fil ; en Verre, la teinte du verre (le fil est un voile blanc,
                 // la bulle reçue ne s'y verrait pas sur la carte blanche).
-                Modifier.fillMaxWidth().clip(forme(14.dp)).background(if (P.clair && !P.ega) P.filet else P.fil).padding(12.dp),
+                Modifier.fillMaxWidth().clip(forme(14.dp)).background(if (P.clair && !P.retro) P.filet else P.fil)
+                    .let { if (P.retro) it.border(1.dp, P.traitFin, forme(14.dp)) else it }.padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 val taille = (15f * actuelle).sp
                 val ligne = (20f * actuelle).sp
+                // Live et Sirène : le fil sans bulles.
+                if (P.retro) {
+                    LigneExemple("Camille", moi = false, t("On se voit au chalet vendredi ?"), taille, "19:24")
+                    LigneExemple(null, moi = true, t("Oui ! J'apporte les guimauves."), taille, "19:25")
+                    return@Column
+                }
                 Text(
                     t("On se voit au chalet vendredi ?"), color = P.texteFort, fontSize = taille, lineHeight = ligne,
                     // Comme dans le fil : le liseré de la bulle reçue (Verre, EGA).

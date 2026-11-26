@@ -65,7 +65,7 @@ fun AssociationBluesky(fini: () -> Unit) {
     Scaffold(
         containerColor = P.ecran,
         topBar = {
-            TopAppBar(
+            BarreHaut(
                 navigationIcon = { IconButton(onClick = fini) { Icon(Icons.Filled.Close, t("Fermer")) } },
                 title = { Text(t("Connecter Bluesky"), fontWeight = FontWeight.Bold) },
                 colors = barreCouleurs(),

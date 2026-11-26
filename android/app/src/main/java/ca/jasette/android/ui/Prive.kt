@@ -114,7 +114,7 @@ fun PaveCode(
                 for (ch in r) {
                     Box(
                         Modifier.size(72.dp, 56.dp).clip(forme(16.dp))
-                            .then(if (ch == ' ') Modifier else Modifier.background(P.menu).clickable {
+                            .then(if (ch == ' ') Modifier else (if (P.retro) Modifier.boutonTheme(16.dp) else Modifier.background(P.menu)).clickable {
                                 if (ch == '<') saisie = saisie.dropLast(1) else chiffre(ch)
                             }),
                         contentAlignment = Alignment.Center,

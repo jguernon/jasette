@@ -245,8 +245,8 @@ fun Fil(
         containerColor = if (volet || mood != null) Color.Transparent else P.fil,
         // L'en-tête flotte par-dessus les messages, avec le flou de ce qui passe derrière
         // (opaque en EGA) ; les messages défilent dessous (contentPadding du haut).
-        topBar = { Column(Modifier.barreFloutee(SELECTION_FIL, opaque = P.barre, voile = mood?.haut(P.clair))) {
-            TopAppBar(
+        topBar = { Column(Modifier.barreFloutee(SELECTION_FIL, opaque = P.barre, voile = if (P.retro) null else mood?.haut(P.clair))) {
+            BarreHaut(
                 navigationIcon = {
                     if (!volet) IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Filled.ArrowBack, t("Retour")) }
                 },
@@ -264,7 +264,7 @@ fun Fil(
                             Text(
                                 Service.de(id).court + (if (conv?.rcs == true) " · RCS" else "") +
                                     (absente.indication()?.let { " · $it" } ?: ""),
-                                fontSize = 12.sp, lineHeight = 15.sp, color = P.textePale, style = androidx.compose.material3.LocalTextStyle.current.merge(TITRE_SERRE),
+                                fontSize = 12.sp, lineHeight = 15.sp, color = P.sousTitreBarre, style = androidx.compose.material3.LocalTextStyle.current.merge(TITRE_SERRE),
                             )
                         }
                     }
@@ -308,10 +308,12 @@ fun Fil(
         } },
         // La saisie flotte sur les messages, comme au bureau : pas de bande, seulement
         // un dégradé vers le fond du fil sous les pastilles (les bulles s'estompent
-        // au-dessus par le masque du fil). En EGA, l'aplat du fil.
+        // au-dessus par le masque du fil). En EGA, l'aplat du fil ; en Live et Sirène,
+        // leur panneau du bas (dégradé bleu pâle, gris en relief).
         bottomBar = {
             Box(
                 if (P.ega) Modifier.background(P.fil)
+                else if (P.retro) Modifier.fondPanneauBas()
                 else Modifier.background(
                     androidx.compose.ui.graphics.Brush.verticalGradient(
                         0f to Color.Transparent, 0.5f to (mood?.bas(P.clair) ?: P.fil).copy(alpha = 0.85f),
@@ -369,7 +371,7 @@ fun Fil(
                     val premier = avant == null || avant.fromMe != m.fromMe || avant.sender != m.sender
                     val dernier = apres == null || apres.fromMe != m.fromMe || apres.sender != m.sender
                     Message(
-                        m, groupe = conv?.group == true, premier = premier, dernier = dernier,
+                        m, groupe = conv?.group == true, nomConv = entete?.name ?: "", premier = premier, dernier = dernier,
                         surligne = if (recherche) q else "", courant = m.id == courant,
                         reagir = { coords -> reaction = m to coords },
                     ) { plein = it }
@@ -491,7 +493,9 @@ private fun Jour(ms: Long) {
     Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
         Text(
             jour(ms), color = P.jourTexte, fontSize = 12.sp,
-            modifier = Modifier.carte(50.dp, P.jourFond, if (P.ega) Color.Transparent else P.bordCarte).padding(horizontal = 12.dp, vertical = 3.dp),
+            // Sirène : une bulle d'aide jaune de Windows 2000, liseré gris.
+            modifier = (if (P.sirene) Modifier.background(P.jourFond).border(1.dp, P.bordCarte) else Modifier.carte(50.dp, P.jourFond, if (P.ega) Color.Transparent else P.bordCarte))
+                .padding(horizontal = 12.dp, vertical = 3.dp),
         )
     }
 }
@@ -523,6 +527,7 @@ private val EMOJIS = (
 private fun Message(
     m: Msg,
     groupe: Boolean,
+    nomConv: String,
     premier: Boolean,
     dernier: Boolean,
     surligne: String,
@@ -533,7 +538,9 @@ private fun Message(
     // « Afficher l'heure de chaque message » : l'heure (et la date) sur chaque bulle.
     val details = Marques.heureChaqueMessage
     val quand = if (details && jourDe(m.time) != java.time.LocalDate.now()) "${jour(m.time)} · ${heure(m.time)}" else heure(m.time)
-    val alignement = if (m.fromMe) Alignment.End else Alignment.Start
+    // Live et Sirène : pas de bulles, tout à gauche sous l'en-tête de la suite (Retro.kt).
+    val ligne = P.retro
+    val alignement = if (m.fromMe && !ligne) Alignment.End else Alignment.Start
     val c = coche(m)
     val echec = c == Coche.ECHEC
     val haptique = LocalHapticFeedback.current
@@ -553,14 +560,23 @@ private fun Message(
         horizontalAlignment = alignement,
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        if (groupe && !m.fromMe && premier && m.sender.isNotEmpty()) {
+        if (ligne) {
+            if (premier || details) {
+                val qui = when {
+                    m.fromMe -> monNom(ca.jasette.android.Service.de(m.conv))
+                    m.sender.isNotEmpty() -> m.sender
+                    else -> nomConv.ifEmpty { null }
+                }
+                EnteteLigne(qui, m.fromMe, quand, (12f * ca.jasette.android.Marques.tailleMessages).sp)
+            }
+        } else if (groupe && !m.fromMe && premier && m.sender.isNotEmpty()) {
             Text(
                 m.sender, color = P.expediteur, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(start = 12.dp),
             )
         }
         // Le corps (pièces et bulle), avec la pastille des réactions à cheval sur son bord inférieur.
-        Box {
+        Box(if (ligne) Modifier.padding(start = retraitLigne) else Modifier) {
             Column(
                 Modifier.onGloballyPositioned { bulle = it },
                 horizontalAlignment = alignement,
@@ -581,7 +597,29 @@ private fun Message(
                     ?.takeIf { (a, img) -> a.title.isNotEmpty() && img != null && java.io.File(img).isFile }
                     ?.let { (a, _) -> ca.jasette.android.Liens.sansLien(m.text, a.url) }
                     ?: m.text
-                if (texteSansLien.isNotEmpty()) {
+                if (texteSansLien.isNotEmpty() && ligne) {
+                    // Sans bulle : le texte seul, la coche au bout de ma dernière ligne.
+                    val contexte = LocalContext.current
+                    Row(
+                        Modifier.let { if (courant) it.border(2.dp, P.trouve) else it }
+                            .combinedClickable(onClick = { if (echec) reessayer() }, onLongClick = appuiLong)
+                            .padding(vertical = 1.dp),
+                        verticalAlignment = Alignment.Bottom,
+                    ) {
+                        Text(
+                            avecLiens(surligner(texteSansLien, surligne, courant), false) { ouvrirLien(contexte, it) },
+                            color = couleurTexteLigne(m.fromMe),
+                            fontSize = (15f * ca.jasette.android.Marques.tailleMessages).sp,
+                            lineHeight = (20f * ca.jasette.android.Marques.tailleMessages).sp,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        if (m.fromMe && (dernier || details || echec)) {
+                            Spacer(Modifier.width(4.dp))
+                            Box(Modifier.padding(bottom = 3.dp)) { IconeCoche(c, surBulle = false) }
+                        }
+                    }
+                    apercuLien?.let { (a, image) -> CarteApercu(a, image, appuiLong) }
+                } else if (texteSansLien.isNotEmpty()) {
                     val rayon = 18.dp
                     val forme = if (m.fromMe) {
                         formeBulle(rayon, rayon, if (dernier) 4.dp else rayon, rayon)
@@ -630,15 +668,20 @@ private fun Message(
             if (aReactions) {
                 Reactions(
                     m,
-                    Modifier.align(if (m.fromMe) Alignment.BottomEnd else Alignment.BottomStart)
-                        .offset(x = if (m.fromMe) (-10).dp else 10.dp, y = 19.dp),
+                    Modifier.align(if (m.fromMe && !ligne) Alignment.BottomEnd else Alignment.BottomStart)
+                        .offset(x = if (m.fromMe && !ligne) (-10).dp else 10.dp, y = 19.dp),
                 ) { qui = true }
             }
         }
         // Sous la bulle, comme au bureau : l'heure et la coche à la fin d'une
         // suite de messages, ou partout avec « Afficher l'heure de chaque message »
         // (toujours sous les pièces seules de mes messages).
-        if (dernier || details || echec || (m.text.isEmpty() && m.fromMe)) {
+        if (ligne) {
+            // Sans bulle, l'heure est dans l'en-tête : la coche seule sous une pièce envoyée sans texte.
+            if (m.fromMe && m.text.isEmpty() && (dernier || details || echec)) {
+                Row(Modifier.padding(start = retraitLigne, top = if (aReactions) 16.dp else 0.dp)) { IconeCoche(c, surBulle = false) }
+            }
+        } else if (dernier || details || echec || (m.text.isEmpty() && m.fromMe)) {
             Row(
                 Modifier.padding(horizontal = 6.dp)
                     .padding(top = if (aReactions) 16.dp else 0.dp)
@@ -804,7 +847,16 @@ private fun PieceImage(p: Piece, envoi: Boolean, appuiLong: () -> Unit, agrandir
     val chemin = if (p.estImage) Depot.medias[p.mediaId] else vignette
     val ratio = if (p.w > 0 && p.h > 0) (p.w.toFloat() / p.h).coerceIn(0.5f, 2.5f) else 1.3f
     val cadre = Modifier.widthIn(max = 260.dp).fillMaxWidth(0.7f).aspectRatio(ratio)
-        .carte(16.dp)
+        .let {
+            when {
+                // Live : la photo dans un cadre blanc de 3 dp, avec une ombre bleutée.
+                P.live -> it.shadow(4.dp, forme(6.dp), ambientColor = couleur(0x143c78), spotColor = couleur(0x143c78))
+                    .clip(forme(6.dp)).background(Color.White).padding(3.dp).clip(forme(4.dp)).background(P.surface)
+                // Sirène : un simple trait sombre.
+                P.sirene -> it.background(P.surface).border(1.dp, couleur(0x404040))
+                else -> it.carte(16.dp)
+            }
+        }
     Box(contentAlignment = Alignment.Center) {
         if (chemin != null) {
             ImageFichier(
@@ -910,13 +962,13 @@ private fun Saisie(conv: String, actif: Boolean) {
                 // Comme au bureau : le + dans un rond plein.
                 IconButton(
                     onClick = { choix = true }, enabled = actif,
-                    modifier = Modifier.size(HAUT_SAISIE).carte(HAUT_SAISIE / 2),
+                    modifier = Modifier.size(HAUT_SAISIE).boutonTheme(HAUT_SAISIE / 2),
                 ) {
                     Icon(Icons.Filled.Add, t("Joindre"), tint = if (actif) P.texteFort else P.textePale)
                 }
                 DropdownMenu(
                     expanded = choix, onDismissRequest = { choix = false }, containerColor = P.menu,
-                    shape = forme(16.dp), border = if (P.ega) androidx.compose.foundation.BorderStroke(1.dp, P.bordBulle) else null,
+                    shape = forme(16.dp), border = bordMenu,
                 ) {
                     DropdownMenuItem(
                         text = { Text(t("Photos et vidéos")) },
@@ -1007,8 +1059,8 @@ private fun Saisie(conv: String, actif: Boolean) {
                     }
                 },
                 enabled = peut,
-                modifier = Modifier.size(HAUT_SAISIE).clip(formeRonde)
-                    .let { if (peut) it.background(P.degrade) else it.carte(HAUT_SAISIE / 2) },
+                modifier = Modifier.size(HAUT_SAISIE)
+                    .let { if (peut) it.boutonEnvoi() else it.clip(formeRonde).carte(HAUT_SAISIE / 2) },
             ) {
                 Icon(Icons.AutoMirrored.Filled.Send, t("Envoyer"), tint = if (peut) P.surAccent else P.textePale)
             } }
@@ -1019,7 +1071,10 @@ private fun Saisie(conv: String, actif: Boolean) {
             } else {
                 Spacer(Modifier.width(8.dp))
                 // Un fondu court quand l'emoji et l'envoi se relaient.
-                androidx.compose.animation.Crossfade(peut, animationSpec = androidx.compose.animation.core.tween(160), label = "emoji-rapide") {
+                androidx.compose.animation.Crossfade(
+                    peut, label = "emoji-rapide",
+                    animationSpec = if (P.sec) androidx.compose.animation.core.snap() else androidx.compose.animation.core.tween(160),
+                ) {
                     if (it) envoi() else BoutonEmojiRapide(rapide, actif) { Depot.envoyer(conv, rapide) }
                 }
             }
@@ -1042,7 +1097,7 @@ private fun BoutonEmojiRapide(emoji: String, actif: Boolean, envoyer: () -> Unit
     val echelle by animateFloatAsState(if (presse) 0.82f else 1f, label = "emoji-rapide-presse")
     val haptique = LocalHapticFeedback.current
     Box(
-        Modifier.size(HAUT_SAISIE).carte(HAUT_SAISIE / 2)
+        Modifier.size(HAUT_SAISIE).boutonTheme(HAUT_SAISIE / 2)
             .clickable(source, indication = null, enabled = actif, onClickLabel = t("Envoyer")) {
                 haptique.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 envoyer()
@@ -1272,7 +1327,7 @@ private fun Galerie(liste: List<Msg>, fermer: () -> Unit, agrandir: (String) -> 
             modifier = Modifier.fondFenetre(),
             containerColor = P.ecran,
             topBar = {
-                TopAppBar(
+                BarreHaut(
                     navigationIcon = { IconButton(onClick = fermer) { Icon(Icons.Filled.Close, t("Fermer")) } },
                     title = { Text(t("Médias"), fontWeight = FontWeight.Bold) },
                     colors = barreCouleurs(),

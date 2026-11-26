@@ -183,7 +183,7 @@ fun PhotoContact(photo: String?, taille: Dp) {
         return
     }
     Box(Modifier.size(taille)) {
-        ImageFichier(photo, Modifier.size(taille).clip(formeRonde).background(P.surface), cote = 256)
+        ImageFichier(photo, Modifier.cadreAvatar(taille).background(P.surface), cote = 256)
         val b = taille * 0.36f
         androidx.compose.foundation.Image(
             painterResource(iconeService(Service.GOOGLE)), null,

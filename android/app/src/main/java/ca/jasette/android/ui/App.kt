@@ -311,7 +311,7 @@ private fun Liste(
     Scaffold(
         containerColor = P.ecran,
         topBar = {
-            TopAppBar(
+            BarreHaut(
                 title = {
                     Text(titre, fontWeight = FontWeight.Bold, fontSize = 22.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
@@ -325,23 +325,23 @@ private fun Liste(
                             rechercheOuverte = true
                         }
                     }) {
-                        Icon(Icons.Filled.Search, t("Rechercher"), tint = if (rechercheOuverte) P.accent else P.icone)
+                        Icon(Icons.Filled.Search, t("Rechercher"), tint = if (rechercheOuverte) P.accentBarre else P.iconeBarre)
                     }
                     if (vue == Vue.Favoris && Marques.favoris.size > 1) {
                         IconButton(onClick = { reorganiser = !reorganiser }) {
                             if (reorganiser) {
-                                Icon(Icons.Filled.Check, t("Terminé"), tint = P.accent)
+                                Icon(Icons.Filled.Check, t("Terminé"), tint = P.accentBarre)
                             } else {
-                                Icon(Icones.reorganiser, t("Réorganiser"), tint = P.icone)
+                                Icon(Icones.reorganiser, t("Réorganiser"), tint = P.iconeBarre)
                             }
                         }
                     }
                     // La vue Privées : un cadenas pour la refermer tout de suite.
                     if (verrouiller != null) {
-                        IconButton(onClick = verrouiller) { Icon(Icons.Filled.Lock, t("Verrouiller"), tint = P.icone) }
+                        IconButton(onClick = verrouiller) { Icon(Icons.Filled.Lock, t("Verrouiller"), tint = P.iconeBarre) }
                     } else if (!large) {
                         // Sur grand écran, les réglages sont en bas du rail.
-                        IconButton(onClick = reglages) { Icon(Icons.Filled.Settings, t("Réglages"), tint = P.icone) }
+                        IconButton(onClick = reglages) { Icon(Icons.Filled.Settings, t("Réglages"), tint = P.iconeBarre) }
                     }
                 },
                 colors = barreCouleurs(),
@@ -417,13 +417,13 @@ private fun Liste(
             fermer = ::fermerRecherche,
         )
         Column(Modifier.fillMaxSize().padding(margesHaut)) {
-        // Le champ glisse sous l'en-tête (180 ms) ; en EGA, il apparaît d'un coup comme le reste.
+        // Le champ glisse sous l'en-tête (180 ms) ; en EGA et Sirène, il apparaît d'un coup comme le reste.
         androidx.compose.animation.AnimatedVisibility(
             rechercheOuverte,
-            enter = if (P.ega) androidx.compose.animation.EnterTransition.None else
+            enter = if (P.sec) androidx.compose.animation.EnterTransition.None else
                 androidx.compose.animation.expandVertically(androidx.compose.animation.core.tween(180)) +
                     androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(180)),
-            exit = if (P.ega) androidx.compose.animation.ExitTransition.None else
+            exit = if (P.sec) androidx.compose.animation.ExitTransition.None else
                 androidx.compose.animation.shrinkVertically(androidx.compose.animation.core.tween(160)) +
                     androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(160)),
         ) {
@@ -712,7 +712,7 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
             modifier = Modifier.fondFenetre(),
             containerColor = P.ecran,
             topBar = {
-                TopAppBar(
+                BarreHaut(
                     navigationIcon = { IconButton(onClick = ::finir) { Icon(Icons.Filled.Close, t("Fermer")) } },
                     title = { Text(t("Nouveau message"), fontWeight = FontWeight.Bold) },
                     colors = barreCouleurs(),
@@ -827,7 +827,7 @@ private fun Suggestion(
 @Composable
 fun barreCouleurs(fond: androidx.compose.ui.graphics.Color = P.barre) = TopAppBarDefaults.topAppBarColors(
     containerColor = fond, scrolledContainerColor = fond,
-    titleContentColor = P.titre, navigationIconContentColor = P.icone, actionIconContentColor = P.icone,
+    titleContentColor = P.texteBarre, navigationIconContentColor = P.iconeBarre, actionIconContentColor = P.iconeBarre,
 )
 
 /** Les bandeaux en haut de la liste : erreurs, association Google, NIP Messenger, aucun compte. */

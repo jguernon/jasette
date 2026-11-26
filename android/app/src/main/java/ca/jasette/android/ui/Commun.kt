@@ -88,7 +88,8 @@ fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false
     val photo = ca.jasette.android.Contacts.photoPour(conv, grande = taille >= 48.dp) ?: Depot.avatars[conv.id]
         ?: ca.jasette.android.CacheMarques.avatar(conv.id)
     Box(Modifier.size(taille)) {
-        val rond = Modifier.size(taille).clip(formeRonde)
+        // Rond, carré (EGA), cadre vert brillant (Live) ou carré en creux (Sirène).
+        val rond = Modifier.cadreAvatar(taille)
         if (photo != null) {
             ImageFichier(
                 photo, rond.background(P.surface).then(if (grise) Modifier.alpha(0.7f) else Modifier), cote = 256,

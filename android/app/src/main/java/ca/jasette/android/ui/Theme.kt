@@ -6,6 +6,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -44,14 +46,18 @@ import androidx.compose.ui.unit.dp
 import ca.jasette.android.R
 import kotlin.math.sqrt
 
-// ---- Les trois thèmes du bureau (`enum Theme` de src/main.rs) : Sombre, Verre et EGA ----
+// ---- Les thèmes : Sombre, Verre et EGA (ceux du bureau, `enum Theme` de src/main.rs), Live et Sirène ----
 
 /** Les thèmes, gardés dans le réglage « theme » par leur id. */
 enum class Theme(val id: String) {
     SOMBRE("sombre"),
     VERRE("verre"),
     /** L'écran 16 couleurs d'un PC des années 80 : palette EGA, police IBM VGA 8x16, coins carrés. */
-    EGA("ega");
+    EGA("ega"),
+    /** La messagerie bleue des années 2000 : ciel en dégradé, en-tête bleu brillant, cadres verts (Retro.kt). */
+    LIVE("live"),
+    /** La messagerie verte des années 2000, look Windows 2000 : gris, reliefs, barre de titre verte (Retro.kt). */
+    SIRENE("sirene");
 
     companion object {
         /** Le thème d'un id des réglages ; sombre par défaut. */
@@ -90,6 +96,9 @@ const val EGA_ROUGE_VIF = 0xff5555L
 const val EGA_MAGENTA_VIF = 0xff55ffL
 const val EGA_JAUNE = 0xffff55L
 const val EGA_BLANC = 0xffffffL
+
+/** Le gris des fenêtres Windows 2000 (Sirène). */
+const val GRIS_2000 = 0xd4d0c8L
 
 /**
  * Une teinte pastel du thème verre (`TEINTES` du bureau) : son id gardé dans
@@ -179,10 +188,31 @@ class Palette(
     val avatarDefaut: Color,
     /** Les halos de couleur du verre, comme `halo()` du bureau. */
     val halos: List<Halo> = emptyList(),
+    /** Derrière la barre d'état, au-dessus des barres de titre de Live et Sirène. */
+    val bandeau: Color = barre,
+    /** Le titre, le sous-titre et les icônes posés sur la barre du haut. */
+    val texteBarre: Color = titre,
+    val sousTitreBarre: Color = textePale,
+    val iconeBarre: Color = icone,
+    /** Une icône « active » sur la barre du haut (loupe ouverte, Terminé). */
+    val accentBarre: Color = accent,
+    /** La rangée choisie de la liste (deux volets), le Head choisi, l'indicateur du rail ; et son texte. */
+    val selection: Color = choisi,
+    val surSelection: Color = texteFort,
 ) {
     val ega get() = theme == Theme.EGA
-    /** Thème clair (le verre) : icônes sombres dans les barres système. */
-    val clair get() = theme == Theme.VERRE
+    val live get() = theme == Theme.LIVE
+    val sirene get() = theme == Theme.SIRENE
+    /** Thème clair (Verre, Live, Sirène) : icônes sombres dans les barres système. */
+    val clair get() = theme == Theme.VERRE || live || sirene
+    /** Live ou Sirène : barres dessinées, fil sans bulles (« X dit (19:24) : »). */
+    val retro get() = live || sirene
+    /** Coins carrés : EGA et Sirène. */
+    val carre get() = ega || sirene
+    /** Pas d'animation fluide, tout change d'un coup : EGA et Sirène. */
+    val sec get() = ega || sirene
+    /** Ni flou ni verre liquide : barres opaques (EGA, Live, Sirène). */
+    val plein get() = ega || live || sirene
 }
 
 /** Un halo du verre, aux mesures du bureau (couleur, opacité, x, y, taille, dans une fenêtre de 1280 × 820). */
@@ -252,6 +282,54 @@ private fun egaPalette() = Palette(
     danger = c(EGA_ROUGE_VIF), succes = c(EGA_VERT_VIF), averti = c(0xaa5500), avatarDefaut = c(EGA_BLEU),
 )
 
+/**
+ * Live : la messagerie bleue des années 2000 (maquette Main.dc.html). Un ciel en
+ * dégradé derrière, des écrans bleu très pâle, du blanc pour les champs et les
+ * cartes, des liserés bleus (#94bbe8), texte #1d2f4a, noms #12335e. La barre
+ * du haut est bleue et brillante, le bouton Envoyer aussi (Retro.kt).
+ */
+private fun livePalette() = Palette(
+    theme = Theme.LIVE,
+    fond = c(0xd7e9fb), ecran = ca(0xeaf3fd, 0.86f), barre = c(0xcfe3fa), liste = c(0xd6e8fb), fil = c(0xf7fbff),
+    surface = c(0xffffff), bordBulle = c(0x94bbe8), bordCarte = c(0x94bbe8), filet = c(0xc3dbf5),
+    champ = c(0xf6faff), choisi = c(0xd4e6fa), survol = c(0xe3f0fd), traitFin = c(0xb9d3f1),
+    menu = c(0xf7fbff), carte = c(0xffffff),
+    texteFort = c(0x12335e), texte = c(0x1d2f4a), textePale = c(0x4d6584), apercu = c(0x3f5d85), icone = c(0x1f5fb8),
+    accent = c(0x0b5bc4), accentPlein = c(0x2f7ee0), degrade = BRILLANT_LIVE,
+    surAccent = Color.White, titre = c(0x12335e),
+    expediteur = c(0x0b5bc4), jourFond = c(0xe3f0fd), jourTexte = c(0x3f5d85),
+    heureRecue = c(0x5d7088), heureEnvoyee = blanc(0.85f),
+    luSurBulle = c(0xbff0a8), echecSurBulle = c(0xffc2b8),
+    interrupteurEteint = c(0xa9c0dc), trouve = c(0xf2c230),
+    danger = c(0xc0281a), succes = c(0x2f8a22), averti = c(0xc07a12), avatarDefaut = c(0x2f7ee0),
+    bandeau = c(0xdcebfc), texteBarre = Color.White, sousTitreBarre = blanc(0.88f), iconeBarre = Color.White,
+    accentBarre = c(0xfff3a0), selection = c(0xbcd9fb),
+)
+
+/**
+ * Sirène : la messagerie verte des années 2000, look Windows 2000 (maquette
+ * Sirene.dc.html). Gris #d4d0c8, reliefs clairs en haut à gauche et sombres en
+ * bas à droite, champs et listes en creux sur blanc, barre de titre verte,
+ * sélection bleu marine #0a246a et texte blanc, bouton Envoyer vert (Retro.kt).
+ */
+private fun sirenePalette() = Palette(
+    theme = Theme.SIRENE,
+    fond = c(GRIS_2000), ecran = c(GRIS_2000), barre = c(GRIS_2000), liste = c(GRIS_2000), fil = c(0xffffff),
+    surface = c(0xffffff), bordBulle = c(0x808080), bordCarte = c(0x808080), filet = c(0xc0c0c0),
+    champ = c(0xffffff), choisi = c(0xc9d3ea), survol = c(0xe4f3e0), traitFin = c(0x808080),
+    menu = c(GRIS_2000), carte = c(0xffffff),
+    texteFort = c(0x000000), texte = c(0x202020), textePale = c(0x505050), apercu = c(0x404040), icone = c(0x202020),
+    accent = c(0x1f6f2a), accentPlein = c(0x2e9a3f), degrade = SolidColor(c(0x2e9a3f)),
+    surAccent = Color.White, titre = c(0x000000),
+    expediteur = c(0xc01818), jourFond = c(0xffffe1), jourTexte = c(0x000000),
+    heureRecue = c(0x6a6a6a), heureEnvoyee = blanc(0.85f),
+    luSurBulle = c(0xb8f5a8), echecSurBulle = c(0xffb4ae),
+    interrupteurEteint = c(0xa0a0a0), trouve = c(0xffe26a),
+    danger = c(0xc01818), succes = c(0x1f8a2f), averti = c(0x8a6200), avatarDefaut = c(0x2e9a3f),
+    bandeau = c(GRIS_2000), texteBarre = Color.White, sousTitreBarre = blanc(0.88f), iconeBarre = Color.White,
+    accentBarre = c(0xffff99), selection = c(0x0a246a), surSelection = Color.White,
+)
+
 /** Le thème et la teinte choisis : un état Compose, gardé dans les SharedPreferences. */
 object Apparence {
     private const val PREFS = "reglages"
@@ -264,12 +342,16 @@ object Apparence {
 
     private val SOMBRE = sombre()
     private val EGA = egaPalette()
+    private val LIVE = livePalette()
+    private val SIRENE = sirenePalette()
     private val VERRES = TEINTES.associate { it.id to verre(it) }
 
     /** La palette du thème en cours (lire [theme] et [teinte] abonne l'appelant). */
     val palette: Palette get() = when (theme) {
         Theme.SOMBRE -> SOMBRE
         Theme.EGA -> EGA
+        Theme.LIVE -> LIVE
+        Theme.SIRENE -> SIRENE
         Theme.VERRE -> VERRES.getValue(teinte.id)
     }
 
@@ -298,7 +380,13 @@ object Apparence {
 object P {
     private val p get() = Apparence.palette
     val ega get() = p.ega
+    val live get() = p.live
+    val sirene get() = p.sirene
     val clair get() = p.clair
+    val retro get() = p.retro
+    val carre get() = p.carre
+    val sec get() = p.sec
+    val plein get() = p.plein
     val fond get() = p.fond
     val ecran get() = p.ecran
     val barre get() = p.barre
@@ -340,6 +428,13 @@ object P {
     val averti get() = p.averti
     /** L'accent par défaut des avatars sans couleur (ACCENT du bureau). */
     val avatarDefaut get() = p.avatarDefaut
+    val bandeau get() = p.bandeau
+    val texteBarre get() = p.texteBarre
+    val sousTitreBarre get() = p.sousTitreBarre
+    val iconeBarre get() = p.iconeBarre
+    val accentBarre get() = p.accentBarre
+    val selection get() = p.selection
+    val surSelection get() = p.surSelection
     /** La police du texte : celle du système, ou l'IBM VGA 8x16 en EGA. */
     val police: FontFamily get() = if (p.ega) POLICE_IBM else FontFamily.Default
 }
@@ -350,25 +445,27 @@ private val POLICE_IBM = FontFamily(Font(R.font.pxplus_ibm_vga_8x16))
 // ---- Les formes : `rayon()` du bureau, des coins carrés en EGA ----
 
 /** Le rayon d'un coin : celui demandé, ou un coin carré en EGA. */
-fun rayon(r: Dp): Dp = if (P.ega) 0.dp else r
+fun rayon(r: Dp): Dp = if (P.carre) 0.dp else r
 
 /** Un rectangle arrondi de rayon [r] (carré en EGA). */
-fun forme(r: Dp): Shape = if (P.ega) RectangleShape else RoundedCornerShape(r)
+fun forme(r: Dp): Shape = if (P.carre) RectangleShape else RoundedCornerShape(r)
 
 /** Un rond (avatar, pastille) : carré en EGA. */
-val formeRonde: Shape get() = if (P.ega) RectangleShape else CircleShape
+val formeRonde: Shape get() = if (P.carre) RectangleShape else CircleShape
 /** Une pilule (jour, réactions, boutons) : carrée en EGA. */
-val formePilule: Shape get() = if (P.ega) RectangleShape else RoundedCornerShape(50)
+val formePilule: Shape get() = if (P.carre) RectangleShape else RoundedCornerShape(50)
 
-/** Les quatre coins d'une bulle (carrés en EGA). */
+/** Les quatre coins d'une bulle (carrés en EGA et Sirène). */
 fun formeBulle(hautGauche: Dp, hautDroit: Dp, basDroit: Dp, basGauche: Dp): Shape =
-    if (P.ega) RectangleShape else RoundedCornerShape(hautGauche, hautDroit, basDroit, basGauche)
+    if (P.carre) RectangleShape else RoundedCornerShape(hautGauche, hautDroit, basDroit, basGauche)
 
 /**
  * Une carte (`verre()` du bureau) : un aplat, son liseré (blanc translucide au
  * verre, gris en EGA, aucun en sombre), coins de rayon [r] (carrés en EGA).
  */
 fun Modifier.carte(r: Dp, fond: Color = P.surface, bord: Color = P.bordCarte): Modifier {
+    // Sirène : un champ en creux (liseré sombre en haut à gauche, clair en bas à droite).
+    if (P.sirene) return background(fond).relief(enfonce = true)
     val f = forme(r)
     return clip(f).background(fond).let { if (bord.alpha > 0f) it.border(1.dp, bord, f) else it }
 }
@@ -379,6 +476,10 @@ fun Modifier.flottant(r: Dp): Modifier {
     return if (P.ega) {
         drawBehind { drawRect(c(EGA_GRIS), topLeft = Offset(3.dp.toPx(), 3.dp.toPx()), size = size) }
             .background(c(EGA_NOIR)).border(1.dp, c(EGA_GRIS_CLAIR), f)
+    } else if (P.sirene) {
+        // Une fenêtre Windows 2000 : grise, en relief, ombre portée nette.
+        drawBehind { drawRect(c(0x404040).copy(alpha = 0.45f), topLeft = Offset(2.dp.toPx(), 2.dp.toPx()), size = size) }
+            .background(P.menu).relief(enfonce = false)
     } else {
         shadow(8.dp, f).clip(f).background(P.menu).let { if (P.bordCarte.alpha > 0f) it.border(1.dp, P.bordCarte, f) else it }
     }
@@ -391,6 +492,15 @@ fun Modifier.flottant(r: Dp): Modifier {
  */
 fun Modifier.fondFenetre(): Modifier {
     val pal = Apparence.palette
+    // Live : le ciel de la maquette (160°, du bleu franc en haut au bleu très pâle en bas).
+    if (pal.live) return drawBehind {
+        drawRect(
+            Brush.linearGradient(
+                0f to c(0x5f9fe8), 0.45f to c(0x9cc7f4), 1f to c(0xd7e9fb),
+                start = Offset.Zero, end = Offset(size.width * 0.36f, size.height),
+            ),
+        )
+    }
     val b = background(pal.fond)
     if (pal.halos.isEmpty()) return b
     return b.drawBehind {
@@ -426,7 +536,9 @@ fun Modifier.fondFenetre(): Modifier {
  */
 @Composable
 fun Interrupteur(actif: Boolean, changer: (Boolean) -> Unit) {
-    val decalage by animateDpAsState(if (actif) 18.dp else 0.dp, label = "interrupteur")
+    val decalage by animateDpAsState(
+        if (actif) 18.dp else 0.dp, if (P.sec) snap() else spring(), label = "interrupteur",
+    )
     Box(
         Modifier.size(44.dp, 26.dp).clip(formePilule)
             .let { if (actif) it.background(P.degrade) else it.background(P.interrupteurEteint) }
@@ -435,14 +547,15 @@ fun Interrupteur(actif: Boolean, changer: (Boolean) -> Unit) {
     ) {
         Box(
             Modifier.padding(start = decalage).size(20.dp)
-                .let { if (P.ega) it else it.shadow(2.dp, CircleShape) }
-                .clip(formeRonde).background(Color.White),
+                .let { if (P.carre) it else it.shadow(2.dp, CircleShape) }
+                .clip(formeRonde).background(if (P.sirene) c(GRIS_2000) else Color.White)
+                .let { if (P.sirene) it.relief(enfonce = false, epaisseur = 1.5.dp) else it },
         )
     }
 }
 
 /** La forme des boutons de Material (pilule, ou carrée en EGA). */
-val formeBouton: Shape get() = if (P.ega) RectangleShape else CircleShape
+val formeBouton: Shape get() = if (P.carre) RectangleShape else CircleShape
 
 /** En EGA, la couleur EGA foncée la plus proche (avatar sans photo, comme `ega_fond`). */
 fun fondAvatar(couleur: Color): Color {
@@ -458,7 +571,8 @@ fun fondAvatar(couleur: Color): Color {
 
 /**
  * Les barres système suivent le thème : transparentes (l'app dessine dessous,
- * de la couleur de l'écran), icônes sombres sur le verre clair, claires sinon.
+ * de la couleur de l'écran), icônes sombres sur les thèmes clairs (Verre, Live,
+ * Sirène), claires sinon.
  */
 @Composable
 private fun BarresSysteme() {
@@ -517,7 +631,7 @@ fun JasetteTheme(contenu: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = couleurs,
         typography = if (P.ega) TYPO_EGA else TYPO,
-        shapes = if (P.ega) FORMES_EGA else FORMES,
+        shapes = if (P.carre) FORMES_EGA else FORMES,
         content = contenu,
     )
 }

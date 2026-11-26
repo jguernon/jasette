@@ -4,6 +4,7 @@ import android.os.Build
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -112,12 +113,12 @@ private val STYLE_BARRE = HazeBlurStyle {
 
 /**
  * Une barre flottante floutée (barre du bas, en-tête et saisie du fil) : le flou des
- * sources de [selection] derrière elle. En EGA ou sans état : [opaque] (l'aplat du thème).
+ * sources de [selection] derrière elle. En EGA, Live, Sirène ou sans état : [opaque] (l'aplat du thème).
  */
 @Composable
 fun Modifier.barreFloutee(selection: HazeSourceSelection, opaque: Color, voile: Color? = null): Modifier {
     val etat = LocalFlou.current
-    if (P.ega || etat == null) return if (voile != null) background(voile.copy(alpha = 0.94f)) else if (opaque.alpha > 0f) background(opaque) else this
+    if (P.plein || etat == null) return if (voile != null) background(voile.copy(alpha = 0.94f)) else if (opaque.alpha > 0f) background(opaque) else this
     if (voile == null) return hazeBlur(HazeInput.Sources(etat, selection), STYLE_BARRE)
     // Le voile d'un Mood : la couleur du haut de son fond, pour que l'en-tête s'y fonde.
     val style = remember(voile) {
@@ -141,7 +142,7 @@ fun rememberApparition(condition: () -> Boolean): State<Float> {
     val actuelle by rememberUpdatedState(condition)
     val a = remember { Animatable(if (condition()) 1f else 0f) }
     LaunchedEffect(Unit) {
-        snapshotFlow { actuelle() }.collectLatest { a.animateTo(if (it) 1f else 0f, tween(180)) }
+        snapshotFlow { actuelle() }.collectLatest { a.animateTo(if (it) 1f else 0f, if (P.sec) snap() else tween(180)) }
     }
     return a.asState()
 }
@@ -154,7 +155,7 @@ fun rememberApparition(condition: () -> Boolean): State<Float> {
  * contenu revient sur [hauteur]. En bas, pareil depuis [basDebut] (px depuis le bas).
  * [hautVisible] et [basVisible] (0 à 1) dosent chaque fondu ; à 0 partout, le calque
  * hors écran est rendu au système. Tout est lu au dessin : aucune recomposition.
- * En EGA : rien (coupure nette).
+ * En EGA et Sirène : rien (coupure nette).
  */
 fun Modifier.fonduBords(
     hauteur: Dp,
@@ -163,7 +164,7 @@ fun Modifier.fonduBords(
     hautDebut: () -> Float = { 0f },
     basDebut: () -> Float = { 0f },
 ): Modifier {
-    if (P.ega) return this
+    if (P.sec) return this
     return graphicsLayer {
         val actif = (hautVisible?.value ?: 0f) > 0f || (basVisible?.value ?: 0f) > 0f
         compositingStrategy = if (actif) CompositingStrategy.Offscreen else CompositingStrategy.Auto
@@ -244,6 +245,8 @@ private val STYLE_PASTILLE = GlassStyle.regular.then {
  */
 @Composable
 fun BoutonNouveau(onClick: () -> Unit) {
+    // Live et Sirène : leur bouton à eux (bleu brillant, vert en relief), voir Retro.kt.
+    if (P.retro) return BoutonNouveauRetro(onClick)
     if (P.ega) {
         FloatingActionButton(onClick = onClick, containerColor = P.accentPlein, contentColor = P.surAccent, shape = RectangleShape) {
             Icon(Icons.Filled.Add, t("Nouveau message"))

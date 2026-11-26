@@ -69,7 +69,7 @@ fun AssociationTelegram(fini: () -> Unit) {
     Scaffold(
         containerColor = P.ecran,
         topBar = {
-            TopAppBar(
+            BarreHaut(
                 navigationIcon = { IconButton(onClick = fini) { Icon(Icons.Filled.Close, t("Fermer")) } },
                 title = { Text(t("Connecter Telegram"), fontWeight = FontWeight.Bold) },
                 colors = barreCouleurs(),
