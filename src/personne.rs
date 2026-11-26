@@ -771,11 +771,10 @@ impl Jasette {
     }
 
     /// Les lignes de la fiche : « Même personne sur », les suggestions, « Lier… ».
-    fn fiche_lignes(&self, groupe: &Groupe, nom: &str, cx: &mut Context<Self>) -> Div {
+    fn fiche_lignes(&self, groupe: &Groupe, _nom: &str, cx: &mut Context<Self>) -> Div {
         let choisie = self.choisie.clone().unwrap_or_default();
         let mut col = div().flex().flex_col().gap(px(4.)).child(Self::titre_fiche(tr("Même personne sur", "Same person on")));
         let seule = groupe.membres.len() == 1;
-        let nom_plie = mots(nom);
         for (i, (id, lien)) in groupe.membres.iter().enumerate() {
             let Some(conv) = self.conv(id) else { continue };
             let detail = match lien {
@@ -787,7 +786,10 @@ impl Jasette {
             let (a, b, c) = (id.clone(), id.clone(), id.clone());
             let mut boutons = div().flex_none().flex().flex_row().gap(px(6.));
             let mut des_boutons = false;
-            if !seule && !conv.name.is_empty() && mots(&conv.name) != nom_plie {
+            // Offert sur toute ligne qui n'est pas déjà la principale : même avec un
+            // nom pareil (« Genevieve » / « Geneviève »), la photo peut différer.
+            let est_principale = self.reglages.personnes.iter().any(|p| p.principal == *id && p.convs.iter().any(|c| c == id));
+            if !seule && !est_principale {
                 des_boutons = true;
                 boutons = boutons.child(Self::bouton_fiche(SharedString::from(format!("fiche-nom-{i}")), tr("Utiliser ce nom et cette photo", "Use this name & picture"), false).on_click(
                     cx.listener(move |this, _, _, cx| {

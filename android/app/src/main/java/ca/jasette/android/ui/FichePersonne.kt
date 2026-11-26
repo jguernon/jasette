@@ -178,7 +178,6 @@ fun FichePersonne(ancre: String, fermer: () -> Unit) {
                 } else {
                     Titre(t("Même personne sur"))
                     val seule = g.membres.size == 1
-                    val nomMots = mots(nom)
                     for ((id, lien) in g.membres) {
                         val c = Depot.conv(id) ?: continue
                         val detail = when (lien) {
@@ -190,7 +189,10 @@ fun FichePersonne(ancre: String, fermer: () -> Unit) {
                             fermer()
                             if (id != ancre) Depot.aOuvrir = id
                         }) {
-                            if (!seule && c.name.isNotEmpty() && mots(c.name) != nomMots) {
+                            // Toute ligne qui n'est pas déjà la principale : même avec un nom
+                            // pareil, la photo peut différer.
+                            val estPrincipale = Marques.personnes.any { it.principal == id && id in it.convs }
+                            if (!seule && !estPrincipale) {
                                 PetitBouton(t("Utiliser ce nom et cette photo"), false) {
                                     Marques.changerPersonnes(choisirPrincipal(Marques.personnes, groupeIds(), id, Personnes.nouvelId()), Marques.personnesRefus)
                                 }
