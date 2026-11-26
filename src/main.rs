@@ -1672,6 +1672,10 @@ struct Reglages {
     /// (marque `sons_conversation`).
     #[serde(default)]
     sons_conversation: String,
+    /// Le volume des sons, un cran de `sons::CRANS_VOLUME` (en %, 100 par
+    /// défaut ; 0 : muets, le jeu reste). Propre à cet appareil, jamais synchronisé.
+    #[serde(default = "sons::volume_defaut")]
+    volume_sons: u32,
     /// « Quoi de neuf ? » (src/notes.rs, PROTOCOLE.md §5.12) : les notes
     /// Instagram des contacts au-dessus de leur avatar dans le Head (marque
     /// `notes_contacts`, vrai par défaut).
@@ -1854,6 +1858,7 @@ impl Default for Reglages {
             cacher_apres_jours: 0,
             presence_en_ligne: true,
             sons_conversation: String::new(),
+            volume_sons: sons::volume_defaut(),
             notes_contacts: true,
             notes_musique: String::new(),
             notes_musique_format: String::new(),
@@ -13273,6 +13278,8 @@ fn t(fr: &'static str) -> &'static str {
         "Bulle" => "Bubble",
         "Bois" => "Wood",
         "Aucun son" => "No sounds",
+        "Muet" => "Muted",
+        "Volume sur cet appareil. Chaque cran relâché fait entendre le son reçu." => "Volume on this device. Each notch you release plays the received sound.",
         "Dans la conversation ouverte : à l'envoi, à la réception et quand on vous écrit." => "In the open conversation: when you send, when you receive and when someone is typing.",
         "Point vert sur les contacts actifs et « … » quand on vous écrit." => "Green dot on active contacts and “…” when someone is typing.",
         "écrit…" => "typing…",
