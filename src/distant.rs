@@ -455,6 +455,12 @@ struct Connexion {
     /// Les trames `marques` reçues (et les coupures), dans l'ordre, en
     /// attendant que l'interface les prenne.
     marques: Mutex<Vec<NouvelleMarques>>,
+    /// Les photos des contacts perso (marque `contacts_perso`) : chemin du
+    /// serveur → copie locale ; et la file du fil qui les télécharge.
+    photos: Mutex<HashMap<String, PathBuf>>,
+    photos_a_prendre: Mutex<Option<Sender<String>>>,
+    /// Une photo de contact perso vient d'arriver (l'interface se redessine).
+    photos_nouvelles: AtomicBool,
 }
 
 static CONNEXIONS: Mutex<Vec<Weak<Connexion>>> = Mutex::new(Vec::new());
@@ -484,8 +490,28 @@ impl Connexion {
             deja_connecte: AtomicBool::new(false),
             vus: Mutex::new(HashMap::new()),
             marques: Mutex::new(Vec::new()),
+            photos: Mutex::new(HashMap::new()),
+            photos_a_prendre: Mutex::new(None),
+            photos_nouvelles: AtomicBool::new(false),
         });
         liste.push(Arc::downgrade(&cx));
+        // Les photos des contacts perso : téléchargées sur leur propre fil (jamais
+        // sur celui de la lecture, qui doit recevoir les morceaux).
+        let (tx_photos, rx_photos) = channel::<String>();
+        *verrou(&cx.photos_a_prendre) = Some(tx_photos);
+        let faible = Arc::downgrade(&cx);
+        let _ = std::thread::Builder::new().name("serveur-photos".into()).spawn(move || {
+            for distant in rx_photos {
+                let Some(cx) = faible.upgrade() else { break };
+                if cx.photo_locale(&distant).is_some() {
+                    continue;
+                }
+                if let Some(local) = cx.telecharger(&distant) {
+                    verrou(&cx.photos).insert(distant, local);
+                    cx.photos_nouvelles.store(true, Ordering::SeqCst);
+                }
+            }
+        });
         let (tx, rx) = channel();
         let a = cx.clone();
         let _ = std::thread::Builder::new().name("serveur".into()).spawn(move || a.boucle(tx));
@@ -708,6 +734,15 @@ impl Connexion {
         } else if let Some(p) = v.get("ping") {
             let _ = canal.ecrire_ligne(&json!({"pong": p}).to_string());
         } else if let Some(m) = v.get("marques") {
+            // Les photos des contacts perso : copiées ici en arrière-plan (au
+            // rejeu aussi : un appareil qui arrive après les reçoit).
+            if let Some(Value::Object(o)) = m.get("contacts_perso")
+                && let Some(tx) = verrou(&self.photos_a_prendre).as_ref()
+            {
+                for p in o.values().filter_map(|e| e.get("photo")?.as_str()).filter(|p| p.starts_with('/')) {
+                    let _ = tx.send(p.to_string());
+                }
+            }
             match NouvelleMarques::lire(m) {
                 Some(n) => verrou(&self.marques).push(n),
                 None => eprintln!("jasette : marques illisibles du serveur"),
@@ -854,8 +889,23 @@ impl Connexion {
         }
     }
 
+    /// La copie locale d'une photo de contact perso du serveur, si elle est là.
+    fn photo_locale(&self, distant: &str) -> Option<PathBuf> {
+        if let Some(p) = verrou(&self.photos).get(distant).filter(|p| p.is_file()) {
+            return Some(p.clone());
+        }
+        let p = self.cache.join(nom_local(distant));
+        p.is_file().then_some(p)
+    }
+
     /// Téléverse un fichier local ; rend son chemin sur le serveur.
     fn televerser(&self, local: &Path) -> Result<String, String> {
+        self.televerser_garde(local, None)
+    }
+
+    /// Téléverse un fichier local ; `garder` : "contact" pour une photo de
+    /// contact perso, gardée par le serveur (PROTOCOLE.md §6.2).
+    fn televerser_garde(&self, local: &Path, garder: Option<&str>) -> Result<String, String> {
         let mut f = fs::File::open(local).map_err(|e| format!("{} : {e}", local.display()))?;
         let taille = f.metadata().map_err(|e| e.to_string())?.len();
         let nom = local.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "fichier".into());
@@ -871,6 +921,9 @@ impl Connexion {
                 let mut put = json!({"id": id, "donnees": B64.encode(&morceau[..n]), "fin": fin});
                 if envoye == n as u64 {
                     put["nom"] = Value::String(nom.clone());
+                    if let Some(g) = garder {
+                        put["garder"] = Value::String(g.to_string());
+                    }
                 }
                 canal.ecrire_ligne(&json!({ "put": put }).to_string()).map_err(|e| e.to_string())?;
                 // Le serveur ne répond qu'à la fin, ou en cas d'erreur.
@@ -1091,6 +1144,30 @@ impl PontDistant {
     pub fn joignable(&self) -> bool {
         self.cx.canal().is_some()
     }
+
+    /// La copie locale d'une photo de contact perso (chemin du serveur).
+    pub fn photo_locale(&self, distant: &str) -> Option<PathBuf> {
+        self.cx.photo_locale(distant)
+    }
+
+    /// Une photo de contact perso est-elle arrivée depuis la dernière fois ?
+    pub fn photos_nouvelles(&self) -> bool {
+        self.cx.photos_nouvelles.swap(false, Ordering::SeqCst)
+    }
+
+    /// Téléverse une photo de contact perso, sur un fil à part ; `fini` reçoit
+    /// son chemin sur le serveur (ou l'erreur).
+    pub fn televerser_photo(&self, local: PathBuf, fini: impl FnOnce(Result<String, String>) + Send + 'static) {
+        let cx = self.cx.clone();
+        let _ = std::thread::Builder::new().name("televersement-photo".into()).spawn(move || {
+            let r = cx.televerser_garde(&local, Some("contact"));
+            if let Ok(distant) = &r {
+                // Déjà ici : pas besoin de la retélécharger.
+                verrou(&cx.photos).insert(distant.clone(), local);
+            }
+            fini(r);
+        });
+    }
 }
 
 impl Drop for PontDistant {
@@ -1185,6 +1262,65 @@ pub fn unir_personnes(dabord: &[Personne], ensuite: &[Personne]) -> Vec<Personne
     nettoyer_personnes(r)
 }
 
+/// Le nom et la photo choisis à la main pour une personne (marque
+/// `contacts_perso`, PROTOCOLE.md §5.5, « Règle des contacts perso »).
+/// `nom` vide : celui du service ; `photo` vide : celle du service (en mode
+/// serveur, un chemin du serveur ; sinon un chemin local). `google` :
+/// enregistré aussi dans les Contacts Google (un téléphone l'applique).
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ContactPerso {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub nom: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub photo: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub google: bool,
+}
+
+/// Comme le serveur : ids de 512 octets au plus ; nom sans espaces autour,
+/// 256 octets au plus, sans saut de ligne (sinon vidé) ; chemin de 1024
+/// octets au plus ; une entrée sans nom ni photo disparaît ; 5000 au plus.
+pub fn nettoyer_contacts_perso(m: BTreeMap<String, ContactPerso>) -> BTreeMap<String, ContactPerso> {
+    let mut r = BTreeMap::new();
+    for (id, mut c) in m {
+        if id.is_empty() || id.len() > 512 {
+            continue;
+        }
+        c.nom = c.nom.trim().to_string();
+        if c.nom.len() > 256 || c.nom.contains(['\0', '\n', '\r']) {
+            c.nom.clear();
+        }
+        if c.photo.len() > 1024 || c.photo.contains('\0') {
+            c.photo.clear();
+        }
+        if c.nom.is_empty() && c.photo.is_empty() {
+            continue;
+        }
+        if r.len() >= 5000 {
+            break;
+        }
+        r.insert(id, c);
+    }
+    r
+}
+
+/// `contacts_perso` d'une trame, avec indulgence (une entrée mal formée est sautée).
+pub fn lire_contacts_perso(v: Option<&Value>) -> BTreeMap<String, ContactPerso> {
+    let Some(Value::Object(o)) = v else { return BTreeMap::new() };
+    nettoyer_contacts_perso(
+        o.iter()
+            .filter_map(|(k, e)| {
+                let e = e.as_object()?;
+                let texte = |c: &str| e.get(c).and_then(Value::as_str).unwrap_or_default().to_string();
+                Some((
+                    k.clone(),
+                    ContactPerso { nom: texte("nom"), photo: texte("photo"), google: e.get("google").and_then(Value::as_bool).unwrap_or(false) },
+                ))
+            })
+            .collect(),
+    )
+}
+
 /// Les quatre listes ordonnées d'ids de conversations (PROTOCOLE.md, §5.5).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Marques {
@@ -1232,6 +1368,8 @@ pub struct Marques {
     pub personnes: Vec<Personne>,
     /// Les paires « Pas la même personne » (marque `personnes_refus`), rangées.
     pub personnes_refus: Vec<(String, String)>,
+    /// Le nom et la photo choisis à la main (marque `contacts_perso`).
+    pub contacts_perso: BTreeMap<String, ContactPerso>,
 }
 
 /// La marque `notes_musique_format` rangée comme dans `Marques` (vide : "artiste").
@@ -1292,6 +1430,7 @@ impl Marques {
             && self.notes_services.is_empty()
             && self.personnes.is_empty()
             && self.personnes_refus.is_empty()
+            && self.contacts_perso.is_empty()
     }
 
     /// Chaque liste de `dabord`, dans son ordre, puis les ids de `ensuite` qui n'y sont pas.
@@ -1326,6 +1465,8 @@ impl Marques {
             notes_services: dabord.notes_services.clone(),
             personnes: unir_personnes(&dabord.personnes, &ensuite.personnes),
             personnes_refus: nettoyer_refus(dabord.personnes_refus.iter().chain(ensuite.personnes_refus.iter()).cloned().collect()),
+            // Comme les moods : les entrées de `dabord` gagnent.
+            contacts_perso: ensuite.contacts_perso.iter().chain(dabord.contacts_perso.iter()).map(|(k, v)| (k.clone(), v.clone())).collect(),
         }
     }
 
@@ -1351,6 +1492,12 @@ impl Marques {
             // Les personnes changées ici (absentes ou différentes chez `autre`).
             personnes: self.personnes.iter().filter(|p| !autre.personnes.contains(p)).cloned().collect(),
             personnes_refus: self.personnes_refus.iter().filter(|p| !autre.personnes_refus.contains(p)).cloned().collect(),
+            contacts_perso: self
+                .contacts_perso
+                .iter()
+                .filter(|(k, v)| autre.contacts_perso.get(*k) != Some(*v))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
         }
     }
 }
@@ -1370,6 +1517,7 @@ pub enum NouvelleMarques {
     /// `avec_sons` : de même pour un serveur d'avant `sons_conversation`.
     /// `avec_notes` : de même pour un serveur d'avant les marques `notes_*`.
     /// `avec_personnes` : de même pour un serveur d'avant `personnes`.
+    /// `avec_contacts_perso` : de même pour un serveur d'avant `contacts_perso`.
     Recues {
         marques: Marques,
         version: u64,
@@ -1385,6 +1533,7 @@ pub enum NouvelleMarques {
         avec_sons: bool,
         avec_notes: bool,
         avec_personnes: bool,
+        avec_contacts_perso: bool,
     },
     /// La connexion est tombée : rien n'est plus en vol.
     Coupure,
@@ -1441,6 +1590,7 @@ impl NouvelleMarques {
                 notes_services: services_notes(v.get("notes_services")),
                 personnes: lire_personnes(v.get("personnes")),
                 personnes_refus: lire_refus(v.get("personnes_refus")),
+                contacts_perso: lire_contacts_perso(v.get("contacts_perso")),
             },
             version: v.get("version")?.as_u64()?,
             id: v.get("id").and_then(Value::as_u64),
@@ -1455,6 +1605,7 @@ impl NouvelleMarques {
             avec_sons: v.get("sons_conversation").is_some_and(|j| j.is_string() || j.is_boolean()),
             avec_notes: v.get("notes_services").is_some_and(Value::is_array),
             avec_personnes: v.get("personnes").is_some_and(Value::is_array),
+            avec_contacts_perso: v.get("contacts_perso").is_some_and(Value::is_object),
         })
     }
 }
@@ -1566,6 +1717,7 @@ impl SuiviMarques {
             "notes_services": services_notes_json(&c.listes.notes_services),
             "personnes": personnes_json(&c.listes.personnes),
             "personnes_refus": refus_json(&c.listes.personnes_refus),
+            "contacts_perso": c.listes.contacts_perso,
             "version": c.version,
             "id": id,
         }}))
@@ -1594,6 +1746,7 @@ impl SuiviMarques {
                 avec_sons,
                 avec_notes,
                 avec_personnes,
+                avec_contacts_perso,
             } => {
                 // Un serveur d'avant `archives` : nos archives restent les nôtres, jamais vidées.
                 let mut marques = marques;
@@ -1639,6 +1792,10 @@ impl SuiviMarques {
                 if !avec_personnes {
                     marques.personnes = c.listes.personnes.clone();
                     marques.personnes_refus = c.listes.personnes_refus.clone();
+                }
+                // Et pour `contacts_perso` (serveur d'avant le crayon de la fiche).
+                if !avec_contacts_perso {
+                    marques.contacts_perso = c.listes.contacts_perso.clone();
                 }
                 (marques, version, id, refus)
             }
@@ -1836,6 +1993,24 @@ mod essais {
             assert_eq!(fs::read(&chemin).unwrap(), fs::read(&fichier).unwrap());
         }
 
+        // Contacts perso : la photo gardée par le serveur (`"garder":"contact"`),
+        // posée dans la marque, puis copiée ici par un appareil qui arrive après.
+        let mut gardee: Option<String> = None;
+        if let Ok(dossier) = std::env::var("JASETTE_ESSAI_DOSSIER") {
+            let photo = Path::new(&dossier).join("visage.jpg");
+            fs::write(&photo, b"\xff\xd8\xff fausse photo de contact").unwrap();
+            let g = google.cx.televerser_garde(&photo, Some("contact")).expect("photo de contact");
+            println!("gardée : {g}");
+            assert!(g.contains("/contacts/") && g.ends_with(".jpg"), "{g}");
+            let marques = json!({"marques": {"contacts_perso": {"123": {"nom": "Maman", "photo": g}}, "version": 0, "id": 1}});
+            assert!(google.envoyer_marques(&marques));
+            let fin = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < fin && !google.recevoir_marques().iter().any(|n| matches!(n, NouvelleMarques::Recues { marques, .. } if marques.contacts_perso.contains_key("123"))) {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            gardee = Some(g);
+        }
+
         // Rejeu pour un service branché en retard.
         drop(messenger);
         let messenger = PontDistant::brancher(&config, "messenger");
@@ -1847,6 +2022,26 @@ mod essais {
         }
         assert!(l.iter().any(|v| v["ev"] == "hello"), "rejeu : {l:?}");
         println!("rejeu : {l:?}");
+        if let Ok(dossier) = std::env::var("JASETTE_ESSAI_DOSSIER") {
+            let photo = Path::new(&dossier).join("visage.jpg");
+            let gardee = gardee.expect("photo gardée");
+            // Un autre appareil (autre cache, connexion neuve) : la photo arrive avec le rejeu.
+            drop((google, messenger));
+            std::thread::sleep(Duration::from_millis(500));
+            unsafe { std::env::set_var("JASETTE_MEDIA", Path::new(&dossier).join("autre-appareil")) };
+            let autre = PontDistant::brancher(&config, "google");
+            let fin = Instant::now() + Duration::from_secs(10);
+            let mut locale = None;
+            while Instant::now() < fin && locale.is_none() {
+                let _ = autre.recevoir_marques();
+                locale = autre.photo_locale(&gardee);
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            let locale = locale.expect("photo copiée au rejeu");
+            assert!(autre.photos_nouvelles());
+            assert_eq!(fs::read(&locale).unwrap(), fs::read(&photo).unwrap());
+            println!("photo copiée : {}", locale.display());
+        }
     }
 
     /// Comme essai_serveur ; pendant les 40 s qui suivent, couper puis
@@ -1895,6 +2090,7 @@ mod essais {
             avec_sons: true,
             avec_notes: true,
             avec_personnes: true,
+            avec_contacts_perso: true,
         }
     }
 
@@ -2252,6 +2448,49 @@ mod essais {
     }
 
     #[test]
+    fn marques_contacts_perso() {
+        // Reçus du serveur, nettoyés (entrée vide retirée, nom sans espaces).
+        let n = NouvelleMarques::lire(&json!({"head": [], "favoris": [], "epingles": [], "archives": [], "privees": [],
+            "contacts_perso": {"123": {"nom": " Maman ", "photo": "/srv/media/contacts/ab.jpg", "google": true}, "m:9": {}, "x": 3},
+            "version": 3}));
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques::default();
+        s.recu(n.unwrap(), &mut c);
+        assert_eq!(c.listes.contacts_perso.len(), 1);
+        let e = &c.listes.contacts_perso["123"];
+        assert_eq!((e.nom.as_str(), e.photo.as_str(), e.google), ("Maman", "/srv/media/contacts/ab.jpg", true));
+        // Changé ici (« Rétablir » et une nouvelle) : l'objet complet part.
+        c.listes.contacts_perso.remove("123");
+        c.listes.contacts_perso.insert("w:1".into(), ContactPerso { nom: "Steph".into(), ..Default::default() });
+        let t = s.changement(&mut c).expect("envoi");
+        assert_eq!(t["marques"]["contacts_perso"], json!({"w:1": {"nom": "Steph"}}));
+        // Un serveur d'avant `contacts_perso` : les nôtres restent.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 4, ..Default::default() };
+        c.listes.contacts_perso.insert("w:1".into(), ContactPerso { nom: "Steph".into(), ..Default::default() });
+        let vieux = NouvelleMarques::lire(&json!({"head": [], "favoris": ["b"], "epingles": [], "archives": [], "privees": [], "version": 4})).unwrap();
+        assert!(s.recu(vieux, &mut c).is_none());
+        assert_eq!(c.listes.contacts_perso["w:1"].nom, "Steph");
+        assert!(!c.listes.vide());
+        // Union : le premier gagne pour un même id, l'autre ajoute les siens.
+        let mut a = Marques::default();
+        a.contacts_perso.insert("k".into(), ContactPerso { nom: "A".into(), ..Default::default() });
+        let mut b = Marques::default();
+        b.contacts_perso.insert("k".into(), ContactPerso { nom: "B".into(), ..Default::default() });
+        b.contacts_perso.insert("j".into(), ContactPerso { photo: "/p.jpg".into(), ..Default::default() });
+        let u = Marques::union(&a, &b);
+        assert_eq!(u.contacts_perso["k"].nom, "A");
+        assert_eq!(u.contacts_perso.len(), 2);
+        // Nettoyage comme le serveur.
+        let mut m = BTreeMap::new();
+        m.insert("a".to_string(), ContactPerso { nom: "x\ny".into(), photo: "/p".into(), google: false });
+        m.insert("b".to_string(), ContactPerso { nom: "é".repeat(200), ..Default::default() });
+        let m = nettoyer_contacts_perso(m);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m["a"].nom, "");
+    }
+
+    #[test]
     fn marques_hors_ligne() {
         // Changé pendant une coupure, personne d'autre : la copie locale part telle quelle.
         let mut s = SuiviMarques::default();
@@ -2283,6 +2522,7 @@ mod essais {
             avec_sons: true,
             avec_notes: true,
             avec_personnes: true,
+            avec_contacts_perso: true,
         };
         let t = s.recu(r, &mut c).expect("renvoi");
         assert_eq!(t["marques"]["favoris"], json!(["z", "a", "y", "x"]));

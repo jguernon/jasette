@@ -1699,6 +1699,9 @@ struct Reglages {
     personnes: Vec<pont::Personne>,
     #[serde(default)]
     personnes_refus: Vec<(String, String)>,
+    /// Le nom et la photo choisis à la main dans la fiche (marque `contacts_perso`).
+    #[serde(default)]
+    contacts_perso: std::collections::BTreeMap<String, pont::ContactPerso>,
     /// L'audience des notes Instagram : 0 abonnés mutuels, 1 amis proches.
     /// Propre à cet appareil.
     #[serde(default)]
@@ -1865,6 +1868,7 @@ impl Default for Reglages {
             notes_services: Vec::new(),
             personnes: Vec::new(),
             personnes_refus: Vec::new(),
+            contacts_perso: Default::default(),
             notes_audience: 0,
             head_grille: String::new(),
             marques_cache: HashMap::new(),
@@ -1986,6 +1990,7 @@ impl Reglages {
                     notes_services: self.notes_services.clone(),
                     personnes: self.personnes.clone(),
                     personnes_refus: self.personnes_refus.clone(),
+                    contacts_perso: self.contacts_perso.clone(),
                 },
                 version: self.marques_version,
                 a_envoyer: self.marques_a_envoyer,
@@ -2012,6 +2017,7 @@ impl Reglages {
         self.notes_services = b.copie.listes.notes_services;
         self.personnes = b.copie.listes.personnes;
         self.personnes_refus = b.copie.listes.personnes_refus;
+        self.contacts_perso = b.copie.listes.contacts_perso;
         self.marques_version = b.copie.version;
         self.marques_a_envoyer = b.copie.a_envoyer;
         self.marques_serveur = b.serveur;
@@ -2407,6 +2413,14 @@ struct Jasette {
     /// « Lier une autre conversation… ».
     fiche: Option<personne::Fiche>,
     fiche_recherche: Entity<InputState>,
+    /// Le champ Nom de la fenêtre du crayon (fiche de la personne).
+    fiche_nom: Entity<InputState>,
+    /// Les copies locales des photos de `contacts_perso`, par clé, et « à refaire ».
+    photos_perso: HashMap<String, PathBuf>,
+    photos_perso_a_faire: bool,
+    /// Les photos de contact perso téléversées au serveur : (clé, case Google,
+    /// chemin du serveur ou erreur), en attendant que l'interface les pose.
+    photos_televersees: Arc<std::sync::Mutex<Vec<(String, bool, Result<String, String>)>>>,
     /// La dernière demande `contacts` au pont Google (refaite toutes les 30 minutes).
     contacts_demandes: Option<Instant>,
     /// Le résumé des services (Comptes, mode client) : l'état de chaque
@@ -2971,6 +2985,15 @@ impl Jasette {
             }
         })
         .detach();
+        // La fenêtre du crayon : Entrée enregistre.
+        let fiche_nom = cx.new(|cx| InputState::new(window, cx).placeholder(t("Nom (vide : celui du service)")));
+        cx.subscribe_in(&fiche_nom, window, |this, _state, ev: &InputEvent, _window, cx| {
+            if let InputEvent::PressEnter { .. } = ev {
+                this.enregistrer_perso(cx);
+            }
+            cx.notify();
+        })
+        .detach();
         // WhatsApp : « Associer avec un numéro de téléphone » (Entrée envoie).
         let telephone_wa = cx.new(|cx| InputState::new(window, cx).placeholder(t("Numéro, ex. : +1 514 555 1234")));
         cx.subscribe_in(&telephone_wa, window, |this, _state, ev: &InputEvent, _window, cx| {
@@ -3182,6 +3205,19 @@ impl Jasette {
                             this.marques_recues(n);
                             change = true;
                         }
+                        // Les photos des contacts perso : arrivées du serveur, ou téléversées.
+                        let televersees: Vec<_> = this.photos_televersees.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
+                        for (cle, google, r) in televersees {
+                            this.photo_perso_televersee(&cle, google, r);
+                            change = true;
+                        }
+                        let arrivees = this.pont.as_ref().is_some_and(|p| p.photos_nouvelles())
+                            | SERVICES_META.iter().any(|s| this.meta(*s).pont.as_ref().is_some_and(|p| p.photos_nouvelles()));
+                        if arrivees || this.photos_perso_a_faire {
+                            this.photos_perso_a_faire = false;
+                            this.maj_photos_perso();
+                            change = true;
+                        }
                         change |= this.prive_tic();
                         // Le cache local : au plus toutes les 5 secondes, hors du fil de l'interface.
                         if this.cache_sale && this.cache_ecrit.elapsed() >= Duration::from_secs(5) {
@@ -3347,6 +3383,10 @@ impl Jasette {
             contacts_tel: Vec::new(),
             fiche: None,
             fiche_recherche,
+            fiche_nom,
+            photos_perso: HashMap::new(),
+            photos_perso_a_faire: true,
+            photos_televersees: Default::default(),
             contacts_demandes: None,
             etats_depuis: HashMap::new(),
             serveur_perdu: None,
@@ -5494,10 +5534,13 @@ impl Jasette {
         self.avatars.get(&format!("{}{}", service_de(&conv.id).prefixe(), conv.parent))
     }
 
-    /// La photo montrée pour une conversation : celle de la conversation
-    /// principale de sa personne (fiche), sinon la sienne.
+    /// La photo montrée pour une conversation : celle choisie à la main
+    /// (crayon de la fiche), sinon celle de la conversation principale de sa
+    /// personne, sinon la sienne.
     fn photo_conv(&self, conv: &Conv) -> Option<&PathBuf> {
-        self.principale_de(conv).and_then(|p| self.photo_propre(p)).or_else(|| self.photo_propre(conv))
+        self.photo_perso(conv)
+            .or_else(|| self.principale_de(conv).and_then(|p| self.photo_propre(p)))
+            .or_else(|| self.photo_propre(conv))
     }
 
     /// La photo propre d'une conversation. Réglage actif : celle du contact du téléphone
@@ -6668,6 +6711,7 @@ impl Jasette {
             self.envoyer_marques(t);
         }
         self.maj_cache_marques();
+        self.photos_perso_a_faire = true;
     }
 
     /// Une nouvelle du serveur à propos des marques : la copie locale suit.
@@ -6687,6 +6731,7 @@ impl Jasette {
             let notes = b.copie.listes.notes_contacts_cachees != avant.copie.listes.notes_contacts_cachees;
             self.reglages.poser_bloc(b);
             self.reglages.garder();
+            self.photos_perso_a_faire = true;
             if presence {
                 // Réglé sur un autre appareil.
                 self.presence_reglee();
@@ -13197,6 +13242,17 @@ fn t(fr: &'static str) -> &'static str {
     }
     match fr {
         "🎤 Message vocal" => "🎤 Voice message",
+        "Changer le nom et la photo" => "Change name & picture",
+        "Changer la photo" => "Change picture",
+        "Nom" => "Name",
+        "Nom (vide : celui du service)" => "Name (empty: the service's)",
+        "Rétablir" => "Restore",
+        "Image illisible" => "Unreadable image",
+        "La photo n'a pas pu être envoyée au serveur Jasette" => "The picture couldn't be sent to the Jasette server",
+        "Aussi dans les Contacts Google" => "Also in Google Contacts",
+        "Le téléphone jumelé l'enregistre dans son carnet, s'il en a la permission." => {
+            "The paired phone saves it in its contacts, if it has permission."
+        }
         "📎 Pièce jointe" => "📎 Attachment",
         "Activités" => "Activities",
         "Ajouter un compte" => "Add an account",

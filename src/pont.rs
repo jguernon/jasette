@@ -23,6 +23,7 @@ pub mod distant;
 #[allow(unused_imports)] // utilisés par l'interface (réglages « serveur Jasette »)
 pub use distant::{ConfigServeur, PORT_PAR_DEFAUT, Verification, code_verification, jumeler, verifier_serveur};
 pub use distant::{CopieMarques, Marques, NouvelleMarques, Personne, SuiviMarques, nettoyer_personnes, nettoyer_refus};
+pub use distant::{ContactPerso, nettoyer_contacts_perso};
 pub use distant::{EtatMcp, commande_mcp, hote_de};
 pub use distant::apercu_lien;
 
@@ -194,6 +195,34 @@ impl Pont {
         match &self.genre {
             Genre::Local { .. } => Vec::new(),
             Genre::Distant(d) => d.recevoir_marques(),
+        }
+    }
+
+    /// La copie locale d'une photo de contact perso du serveur (rien pour un pont local).
+    pub fn photo_locale(&self, distant: &str) -> Option<PathBuf> {
+        match &self.genre {
+            Genre::Local { .. } => None,
+            Genre::Distant(d) => d.photo_locale(distant),
+        }
+    }
+
+    /// Une photo de contact perso est-elle arrivée du serveur depuis la dernière fois ?
+    pub fn photos_nouvelles(&self) -> bool {
+        match &self.genre {
+            Genre::Local { .. } => false,
+            Genre::Distant(d) => d.photos_nouvelles(),
+        }
+    }
+
+    /// Téléverse une photo de contact perso au serveur, sur un fil à part ;
+    /// faux pour un pont local (rien n'est fait).
+    pub fn televerser_photo(&self, local: PathBuf, fini: impl FnOnce(Result<String, String>) + Send + 'static) -> bool {
+        match &self.genre {
+            Genre::Local { .. } => false,
+            Genre::Distant(d) => {
+                d.televerser_photo(local, fini);
+                true
+            }
         }
     }
 

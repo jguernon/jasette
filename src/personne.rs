@@ -14,7 +14,8 @@
 //! `personnes_refus`) sont partagés par le serveur Jasette.
 
 use super::*;
-use pont::Personne;
+use pont::{ContactPerso, Personne};
+use std::collections::BTreeMap;
 
 fn tr(fr: &'static str, en: &'static str) -> &'static str {
     if anglais() { en } else { fr }
@@ -340,6 +341,100 @@ pub(crate) fn choisir_principal(personnes: &mut Vec<Personne>, groupe: &[String]
 }
 
 // ---------------------------------------------------------------------------
+// Le nom et la photo choisis à la main (marque `contacts_perso`)
+// ---------------------------------------------------------------------------
+
+/// L'entrée de `contacts_perso` qui vaut pour `id` (PROTOCOLE.md §5.5,
+/// « Règle des contacts perso ») : la sienne, sinon celle de la principale de
+/// sa personne, sinon celle d'une autre de ses conversations. Rend sa clé.
+pub(crate) fn contact_perso_de<'a>(
+    perso: &'a BTreeMap<String, ContactPerso>,
+    personnes: &[Personne],
+    id: &str,
+) -> Option<(&'a str, &'a ContactPerso)> {
+    if let Some((k, c)) = perso.get_key_value(id) {
+        return Some((k.as_str(), c));
+    }
+    let p = personnes.iter().find(|p| p.convs.iter().any(|c| c == id))?;
+    std::iter::once(&p.principal)
+        .filter(|x| !x.is_empty())
+        .chain(p.convs.iter())
+        .find_map(|x| perso.get_key_value(x.as_str()))
+        .map(|(k, c)| (k.as_str(), c))
+}
+
+/// La clé où enregistrer le nom et la photo de la fiche de `groupe` (l'ancre
+/// d'abord) : celle de l'entrée qui vaut déjà pour l'une de ses conversations,
+/// sinon la principale de sa personne, sinon l'ancre.
+pub(crate) fn cle_contact_perso(perso: &BTreeMap<String, ContactPerso>, personnes: &[Personne], groupe: &[String]) -> String {
+    let Some(ancre) = groupe.first() else { return String::new() };
+    if let Some((k, _)) = groupe.iter().find_map(|id| contact_perso_de(perso, personnes, id)) {
+        return k.to_string();
+    }
+    personnes
+        .iter()
+        .find(|p| p.convs.contains(ancre))
+        .map(|p| p.principal.clone())
+        .filter(|x| !x.is_empty())
+        .unwrap_or_else(|| ancre.clone())
+}
+
+/// Les conversations de la fiche (même numéro compris) reliées à la main dans
+/// une personne, créée au besoin, sans toucher à sa principale : le nom choisi
+/// vaut alors pour toutes. Une conversation déjà à une autre personne y reste.
+pub(crate) fn relier_fiche(personnes: &mut Vec<Personne>, groupe: &[String], id_neuf: String) {
+    let Some(ancre) = groupe.first() else { return };
+    if groupe.len() < 2 {
+        return;
+    }
+    let libres: Vec<String> = groupe.iter().filter(|g| !personnes.iter().any(|p| p.convs.contains(g))).cloned().collect();
+    match personnes.iter().position(|p| p.convs.contains(ancre)).or_else(|| personnes.iter().position(|p| p.convs.iter().any(|c| groupe.contains(c)))) {
+        Some(i) => personnes[i].convs.extend(libres),
+        None => personnes.push(Personne { id: id_neuf, convs: libres, principal: String::new() }),
+    }
+    *personnes = pont::nettoyer_personnes(std::mem::take(personnes));
+}
+
+/// Enregistre le nom (vide : celui du service) sous `cle` ; la photo et la
+/// case Google restent celles de l'entrée, sauf `photo` donnée. Une entrée
+/// sans nom ni photo disparaît (comme « Rétablir »).
+pub(crate) fn poser_contact_perso(perso: &mut BTreeMap<String, ContactPerso>, cle: &str, nom: &str, photo: Option<String>, google: bool) {
+    let mut e = perso.remove(cle).unwrap_or_default();
+    e.nom = nom.trim().to_string();
+    if let Some(p) = photo {
+        e.photo = p;
+    }
+    e.google = google;
+    perso.insert(cle.to_string(), e);
+    *perso = pont::nettoyer_contacts_perso(std::mem::take(perso));
+}
+
+/// « Changer la photo » : `src` recadrée en carré au centre, réduite à 512 px
+/// (au plus), en JPEG, dans `dossier` (nommée par son contenu). Rend son chemin.
+pub(crate) fn photo_carree(src: &std::path::Path, dossier: &std::path::Path) -> Result<PathBuf, String> {
+    let img = image::open(src).map_err(|e| e.to_string())?;
+    let (l, h) = (img.width(), img.height());
+    let cote = l.min(h);
+    if cote == 0 {
+        return Err("image vide".into());
+    }
+    let carre = img.crop_imm((l - cote) / 2, (h - cote) / 2, cote, cote);
+    let cible = cote.min(512);
+    let petite = if cible == cote { carre } else { carre.resize_exact(cible, cible, image::imageops::FilterType::Lanczos3) };
+    let mut octets = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut octets, 88)
+        .encode_image(&petite.to_rgb8())
+        .map_err(|e| e.to_string())?;
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    octets.hash(&mut h);
+    std::fs::create_dir_all(dossier).map_err(|e| e.to_string())?;
+    let chemin = dossier.join(format!("{:016x}.jpg", h.finish()));
+    std::fs::write(&chemin, &octets).map_err(|e| e.to_string())?;
+    Ok(chemin)
+}
+
+// ---------------------------------------------------------------------------
 // L'interface
 // ---------------------------------------------------------------------------
 
@@ -350,6 +445,17 @@ pub(crate) struct Fiche {
     pub ancre: String,
     pub lier: bool,
     pub filtre: Option<Service>,
+    /// La fenêtre du crayon (nom et photo), si elle est ouverte.
+    pub edition: Option<EditionPerso>,
+}
+
+/// La fenêtre du crayon : la photo choisie (déjà recadrée, pas encore
+/// enregistrée), la case « Aussi dans les Contacts Google » et une erreur.
+#[derive(Clone, Default)]
+pub(crate) struct EditionPerso {
+    pub photo: Option<PathBuf>,
+    pub google: bool,
+    pub erreur: Option<String>,
 }
 
 /// La taille du grand avatar.
@@ -365,9 +471,52 @@ impl Jasette {
         self.conv(x).filter(|c| !c.group)
     }
 
-    /// Le nom montré partout pour une conversation : celui de la principale de
-    /// sa personne, sinon le sien. La recherche trouve aussi le nom d'origine.
+    /// L'entrée `contacts_perso` qui vaut pour `conv` (jamais pour un groupe), et sa clé.
+    pub(crate) fn contact_perso(&self, conv: &Conv) -> Option<(&str, &ContactPerso)> {
+        if conv.group || conv.large {
+            return None;
+        }
+        contact_perso_de(&self.reglages.contacts_perso, &self.reglages.personnes, &conv.id)
+    }
+
+    /// La photo choisie à la main pour `conv` (sa copie locale), s'il y en a une.
+    pub(crate) fn photo_perso(&self, conv: &Conv) -> Option<&PathBuf> {
+        let (cle, _) = self.contact_perso(conv)?;
+        self.photos_perso.get(cle)
+    }
+
+    /// Le pont qui passe par le serveur Jasette (mode client), s'il y en a un.
+    pub(crate) fn pont_distant(&self) -> Option<&pont::Pont> {
+        self.pont
+            .as_ref()
+            .filter(|p| !p.local())
+            .or_else(|| SERVICES_META.iter().find_map(|s| self.meta(*s).pont.as_ref().filter(|p| !p.local())))
+    }
+
+    /// Les copies locales des photos de `contacts_perso` : le fichier lui-même
+    /// (mode local, ou photo choisie ici), sinon la copie reçue du serveur.
+    pub(crate) fn maj_photos_perso(&mut self) {
+        let mut r = HashMap::new();
+        for (cle, c) in &self.reglages.contacts_perso {
+            if c.photo.is_empty() {
+                continue;
+            }
+            let p = PathBuf::from(&c.photo);
+            let local = if p.is_file() { Some(p) } else { self.pont_distant().and_then(|x| x.photo_locale(&c.photo)) };
+            if let Some(l) = local {
+                r.insert(cle.clone(), l);
+            }
+        }
+        self.photos_perso = r;
+    }
+
+    /// Le nom montré partout pour une conversation : celui choisi à la main
+    /// (crayon de la fiche), sinon celui de la principale de sa personne,
+    /// sinon le sien. La recherche trouve aussi le nom d'origine.
     pub(crate) fn nom_affiche(&self, conv: &Conv) -> String {
+        if let Some((_, c)) = self.contact_perso(conv).filter(|(_, c)| !c.nom.is_empty()) {
+            return c.nom.clone();
+        }
         let principal = self.principale_de(conv).map(|p| p.name.trim()).filter(|n| !n.is_empty());
         let nom = principal.unwrap_or(conv.name.trim());
         if nom.is_empty() { t("Sans nom").to_string() } else { nom.to_string() }
@@ -446,9 +595,279 @@ impl Jasette {
         self.personnes_changees();
     }
 
+    /// Le numéro de la personne de la fiche (E.164), s'il est connu.
+    fn numero_fiche(&self, groupe: &Groupe) -> Option<String> {
+        let ids = groupe.ids();
+        self.candidats_personne().into_iter().filter(|c| ids.contains(&c.id)).find_map(|c| c.numero)
+    }
+
+    /// Le crayon du grand avatar : ouvre la fenêtre, le nom choisi dans le champ.
+    fn ouvrir_edition(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(f) = self.fiche.as_ref() else { return };
+        let ids = self.groupe_personne(&f.ancre).ids();
+        let (nom, google) = self.perso_fiche(&ids).map(|(_, c)| (c.nom.clone(), c.google)).unwrap_or_default();
+        if let Some(f) = self.fiche.as_mut() {
+            f.edition = Some(EditionPerso { photo: None, google, erreur: None });
+        }
+        self.fiche_nom.update(cx, |s, cx| {
+            s.set_value(nom, window, cx);
+            s.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    /// « Changer la photo » : le sélecteur de fichiers (comme les pièces
+    /// jointes), puis le recadrage carré de 512 px, hors du fil de l'interface.
+    fn choisir_photo_perso(&mut self, cx: &mut Context<Self>) {
+        let choix = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(t("Choisir").into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(chemins))) = choix.await else { return };
+            let Some(src) = chemins.into_iter().next() else { return };
+            let dossier = dossier_medias().join("contacts");
+            let r = cx.background_executor().spawn(async move { photo_carree(&src, &dossier) }).await;
+            let _ = this.update(cx, |this, cx| {
+                if let Some(e) = this.fiche.as_mut().and_then(|f| f.edition.as_mut()) {
+                    match r {
+                        Ok(p) => {
+                            e.photo = Some(p);
+                            e.erreur = None;
+                        }
+                        Err(err) => e.erreur = Some(format!("{} : {err}", t("Image illisible"))),
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// « Enregistrer » : la marque `contacts_perso` (le nom tout de suite ; la
+    /// photo aussi en mode local, sinon une fois téléversée au serveur).
+    pub(crate) fn enregistrer_perso(&mut self, cx: &mut Context<Self>) {
+        let Some(f) = self.fiche.as_ref() else { return };
+        let Some(e) = f.edition.clone() else { return };
+        let ancre = f.ancre.clone();
+        let nom = self.fiche_nom.read(cx).value().trim().to_string();
+        let groupe = self.groupe_personne(&ancre).ids();
+        relier_fiche(&mut self.reglages.personnes, &groupe, nouvel_id());
+        let cle = cle_contact_perso(&self.reglages.contacts_perso, &self.reglages.personnes, &groupe);
+        if cle.is_empty() {
+            return;
+        }
+        let mut photo = None;
+        if let Some(local) = e.photo {
+            let sortie = self.photos_televersees.clone();
+            let (c, google) = (cle.clone(), e.google);
+            let distant = self.pont_distant().is_some_and(|p| {
+                p.televerser_photo(local.clone(), move |r| {
+                    if let Ok(mut v) = sortie.lock() {
+                        v.push((c, google, r));
+                    }
+                })
+            });
+            if !distant {
+                photo = Some(local.to_string_lossy().into_owned());
+            } else {
+                // En attendant le serveur : déjà montrée ici.
+                self.photos_perso.insert(cle.clone(), local);
+            }
+        }
+        // Une photo en route vers le serveur entrera dans la marque à son arrivée
+        // (photo_perso_televersee) ; une entrée sans nom ni photo n'y est jamais.
+        poser_contact_perso(&mut self.reglages.contacts_perso, &cle, &nom, photo, e.google);
+        if let Some(f) = self.fiche.as_mut() {
+            f.edition = None;
+        }
+        self.marques_changees();
+        // La photo en route reste montrée jusqu'au retour du serveur.
+        self.photos_perso_a_faire = false;
+        cx.notify();
+    }
+
+    /// La photo d'un contact perso est arrivée au serveur : son chemin va dans la marque.
+    pub(crate) fn photo_perso_televersee(&mut self, cle: &str, google: bool, r: Result<String, String>) {
+        match r {
+            Ok(distant) => {
+                let e = self.reglages.contacts_perso.get(cle).cloned().unwrap_or_default();
+                poser_contact_perso(&mut self.reglages.contacts_perso, cle, &e.nom, Some(distant), e.google || google);
+                self.marques_changees();
+            }
+            Err(err) => {
+                self.erreur = Some(format!("{} : {err}", t("La photo n'a pas pu être envoyée au serveur Jasette")));
+                self.photos_perso_a_faire = true;
+            }
+        }
+    }
+
+    /// « Rétablir » : plus de nom ni de photo choisis à la main.
+    fn retablir_perso(&mut self, cx: &mut Context<Self>) {
+        let Some(f) = self.fiche.as_ref() else { return };
+        let ids = self.groupe_personne(&f.ancre).ids();
+        while let Some(cle) = self.perso_fiche(&ids).map(|(k, _)| k.to_string()) {
+            self.reglages.contacts_perso.remove(&cle);
+        }
+        if let Some(f) = self.fiche.as_mut() {
+            f.edition = None;
+        }
+        self.marques_changees();
+        cx.notify();
+    }
+
+    /// Le crayon : un petit badge rond (carré en EGA, Live et Sirène) sur le bas du grand avatar.
+    fn crayon_avatar(&self, taille: f32, fond: Hsla, cx: &mut Context<Self>) -> impl IntoElement {
+        let carre = th().ega || retro::retro();
+        let d = (taille * 0.25).max(26.);
+        div()
+            .id("fiche-crayon")
+            .absolute()
+            .right(px(if carre { -4. } else { taille * 0.02 }))
+            .bottom(px(if carre { -4. } else { taille * 0.02 }))
+            .size(px(d))
+            .when(!carre, |b| b.rounded(px(d)))
+            .bg(th().accent)
+            .border_3()
+            .border_color(fond)
+            .when(th().ega, |b| b.shadow(ombre_dure(2.)))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .hover(|s| s.opacity(0.85))
+            .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(t("Changer le nom et la photo")).build(w, cx))
+            .on_click(cx.listener(|this, _, window, cx| {
+                cx.stop_propagation();
+                this.ouvrir_edition(window, cx);
+            }))
+            .child(icone("pencil", d * 0.46, if th().ega { c(EGA_NOIR) } else { blanc(1.) }))
+    }
+
+    /// La fenêtre du crayon : l'aperçu, « Changer la photo », le champ Nom, la
+    /// case Google (mode serveur, personne avec un numéro) et les boutons.
+    fn fenetre_edition(&self, groupe: &Groupe, ancre: &Conv, e: &EditionPerso, cx: &mut Context<Self>) -> AnyElement {
+        let ids = groupe.ids();
+        let existe = self.perso_fiche(&ids).is_some();
+        let saisi = self.fiche_nom.read(cx).value().trim().to_string();
+        let nom = if saisi.is_empty() { self.nom_service_personne(groupe) } else { saisi };
+        let photo = e.photo.clone().or_else(|| self.meilleure_photo(groupe));
+        let offrir_google = self.pont_distant().is_some() && self.numero_fiche(groupe).is_some();
+        let mut boite = div()
+            .id("fiche-edition")
+            .w(px(380.))
+            .max_w_full()
+            .p(px(20.))
+            .flex()
+            .flex_col()
+            .gap(px(14.))
+            .bg(th().menu)
+            .border_1()
+            .border_color(th().trait_fin)
+            .rounded(rayon(20.))
+            .when(th().ega, |d| d.shadow(ombre_dure(6.)))
+            .when(!th().ega && !retro::retro(), |d| d.shadow(ombre_verre()))
+            .on_click(|_, _, cx| cx.stop_propagation())
+            .child(div().text_size(px(17.)).font_weight(FontWeight::BOLD).text_color(th().texte_fort).child(t("Changer le nom et la photo")))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(16.))
+                    .child(avatar(&nom, &ancre.color, false, photo.as_ref(), 84.))
+                    .child(
+                        div().flex().flex_col().gap(px(6.)).child(
+                            Self::bouton_fiche("edition-photo", t("Changer la photo"), false).on_click(cx.listener(|this, _, _, cx| {
+                                this.choisir_photo_perso(cx);
+                            })),
+                        ),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .child(div().text_size(px(12.)).font_weight(FontWeight::BOLD).text_color(th().texte_pale).child(t("Nom")))
+                    .child(champ_surface().px(px(10.)).py(px(1.)).child(Input::new(&self.fiche_nom).appearance(false).cleanable(true))),
+            );
+        if offrir_google {
+            boite = boite.child(div().mx(px(-16.)).child(ligne_interrupteur(
+                "edition-google",
+                t("Aussi dans les Contacts Google"),
+                t("Le téléphone jumelé l'enregistre dans son carnet, s'il en a la permission."),
+                e.google,
+                cx.listener(|this, _, _, cx| {
+                    if let Some(e) = this.fiche.as_mut().and_then(|f| f.edition.as_mut()) {
+                        e.google = !e.google;
+                    }
+                    cx.notify();
+                }),
+            )));
+        }
+        if let Some(err) = &e.erreur {
+            boite = boite.child(div().text_size(px(12.)).text_color(th().danger).child(err.clone()));
+        }
+        let mut pied = div().flex().flex_row().items_center().gap(px(8.)).pt(px(4.));
+        if existe {
+            pied = pied.child(Self::bouton_fiche("edition-retablir", t("Rétablir"), false).on_click(cx.listener(|this, _, _, cx| {
+                this.retablir_perso(cx);
+            })));
+        }
+        pied = pied
+            .child(div().flex_1())
+            .child(Self::bouton_fiche("edition-annuler", t("Annuler"), false).on_click(cx.listener(|this, _, _, cx| {
+                if let Some(f) = this.fiche.as_mut() {
+                    f.edition = None;
+                }
+                cx.notify();
+            })))
+            .child(Self::bouton_fiche("edition-enregistrer", t("Enregistrer"), true).on_click(cx.listener(|this, _, _, cx| {
+                this.enregistrer_perso(cx);
+            })));
+        boite = boite.child(pied);
+        div()
+            .id("fiche-edition-voile")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .bg(hsla(0., 0., 0., if th().sombre || th().ega { 0.45 } else { 0.2 }))
+            .flex()
+            .items_center()
+            .justify_center()
+            .on_click(cx.listener(|this, _, _, cx| {
+                cx.stop_propagation();
+                if let Some(f) = this.fiche.as_mut() {
+                    f.edition = None;
+                }
+                cx.notify();
+            }))
+            .child(boite)
+            .into_any_element()
+    }
+
     /// Le nom de la personne : celui de la conversation principale, sinon
     /// celui de la conversation d'où la fiche est ouverte.
     pub(crate) fn nom_personne(&self, groupe: &Groupe) -> String {
+        let ids = groupe.ids();
+        if let Some(n) = self.perso_fiche(&ids).map(|(_, c)| c.nom.clone()).filter(|n| !n.is_empty()) {
+            return n;
+        }
+        self.nom_service_personne(groupe)
+    }
+
+    /// L'entrée `contacts_perso` de la fiche (l'une de ses conversations), et sa clé.
+    pub(crate) fn perso_fiche(&self, ids: &[String]) -> Option<(&str, &ContactPerso)> {
+        ids.iter().find_map(|id| contact_perso_de(&self.reglages.contacts_perso, &self.reglages.personnes, id))
+    }
+
+    /// Le nom de la personne selon les services (sans le nom choisi à la main).
+    fn nom_service_personne(&self, groupe: &Groupe) -> String {
         let ids = groupe.ids();
         let principal = self
             .reglages
@@ -464,6 +883,16 @@ impl Jasette {
     /// La meilleure photo parmi les conversations de la personne : celle du
     /// plus gros fichier (la plus grande, d'habitude).
     fn meilleure_photo(&self, groupe: &Groupe) -> Option<PathBuf> {
+        let ids = groupe.ids();
+        // La photo choisie à la main l'emporte.
+        if let Some(p) = self.perso_fiche(&ids).and_then(|(cle, _)| self.photos_perso.get(cle)) {
+            return Some(p.clone());
+        }
+        self.meilleure_photo_service(groupe)
+    }
+
+    /// La meilleure photo selon les services (sans celle choisie à la main).
+    fn meilleure_photo_service(&self, groupe: &Groupe) -> Option<PathBuf> {
         // La photo de la principale, si elle en a une, l'emporte.
         let ids = groupe.ids();
         if let Some(p) = ids.iter().filter_map(|id| self.conv(id)).find_map(|c| self.principale_de(c)).and_then(|p| self.photo_propre(p)) {
@@ -574,9 +1003,11 @@ impl Jasette {
         // Le haut : la pensée, le grand avatar, le nom et les noms par service.
         // Pendant « Lier une autre conversation… », l'avatar se fait plus petit.
         let grand_t = if f.lier { 72. } else { GRAND };
+        let crayon = (!f.lier).then(|| self.crayon_avatar(grand_t, fond_feuille, cx));
         let grand = div()
             .relative()
             .child(avatar(&nom, &ancre.color, false, photo.as_ref(), grand_t))
+            .children(crayon)
             .when(en_ligne, |d| {
                 // Le point vert, à la taille du grand avatar (carré en EGA, Live et Sirène).
                 let carre = th().ega || retro::retro();
@@ -671,6 +1102,7 @@ impl Jasette {
                     cx.notify();
                 }))
                 .child(feuille)
+                .children(f.edition.as_ref().map(|e| self.fenetre_edition(&groupe, &ancre, e, cx)))
                 .into_any_element(),
         )
     }
@@ -1173,6 +1605,85 @@ mod essais {
         choisir_principal(&mut p, &g, "w:14185551234@s.whatsapp.net", "p1".into());
         assert_eq!(p[0].principal, "w:14185551234@s.whatsapp.net");
         assert_eq!(p[0].convs.len(), 2);
+    }
+
+    #[test]
+    fn contacts_perso_cle_et_application() {
+        let w = "w:14185551234@s.whatsapp.net";
+        let mut perso: BTreeMap<String, ContactPerso> = BTreeMap::new();
+        let mut p = vec![Personne { id: "p1".into(), convs: vec!["123".into(), w.into(), "m:9".into()], principal: w.into() }];
+        let g: Vec<String> = vec!["123".into(), w.into()];
+        // Rien encore : la clé est la principale.
+        assert!(contact_perso_de(&perso, &p, "123").is_none());
+        assert_eq!(cle_contact_perso(&perso, &p, &g), w);
+        // Posée sur la principale : vaut pour toutes les conversations de la personne.
+        poser_contact_perso(&mut perso, w, "  Maman ", None, false);
+        assert_eq!(perso[w].nom, "Maman");
+        for id in ["123", w, "m:9"] {
+            assert_eq!(contact_perso_de(&perso, &p, id).map(|(k, _)| k), Some(w), "{id}");
+        }
+        // Pas pour une conversation d'une autre personne.
+        assert!(contact_perso_de(&perso, &p, "i:4").is_none());
+        // Une entrée sur la conversation elle-même l'emporte.
+        perso.insert("m:9".into(), ContactPerso { nom: "Steph".into(), ..Default::default() });
+        assert_eq!(contact_perso_de(&perso, &p, "m:9").map(|(_, c)| c.nom.as_str()), Some("Steph"));
+        perso.remove("m:9");
+        // La clé existante est gardée, même ouverte depuis une autre conversation.
+        assert_eq!(cle_contact_perso(&perso, &p, &["m:9".to_string()]), w);
+        // Une photo : le nom reste ; vider le nom garde la photo ; sans rien, l'entrée part.
+        poser_contact_perso(&mut perso, w, "Maman", Some("/m/contacts/a.jpg".into()), true);
+        poser_contact_perso(&mut perso, w, "", None, true);
+        assert_eq!((perso[w].nom.as_str(), perso[w].photo.as_str(), perso[w].google), ("", "/m/contacts/a.jpg", true));
+        poser_contact_perso(&mut perso, w, "", Some(String::new()), false);
+        assert!(perso.is_empty());
+        // Sans personne ni principale : l'ancre.
+        p.clear();
+        assert_eq!(cle_contact_perso(&perso, &p, &g), "123");
+    }
+
+    #[test]
+    fn relier_la_fiche() {
+        let cands = base();
+        let mut p = Vec::new();
+        // Même numéro (Google + WhatsApp) : reliées à la main, sans principale.
+        let g = regrouper("123", &cands, &p, &[], &[]).ids();
+        relier_fiche(&mut p, &g, "p1".into());
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].convs, g);
+        assert_eq!(p[0].principal, "");
+        // Seule : rien à relier.
+        let mut q = Vec::new();
+        relier_fiche(&mut q, &["m:9".to_string()], "p2".into());
+        assert!(q.is_empty());
+        // Une personne existante gagne les conversations libres de la fiche.
+        let mut r = vec![Personne { id: "p3".into(), convs: vec!["123".into(), "m:7".into()], principal: "m:7".into() }];
+        relier_fiche(&mut r, &g, "p4".into());
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].convs.len(), 3);
+        assert_eq!(r[0].principal, "m:7");
+    }
+
+    #[test]
+    fn photo_recadree() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(".cache/essai-photo-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let src = dir.join("large.png");
+        image::RgbImage::from_fn(900, 600, |x, _| if x < 150 || x >= 750 { image::Rgb([255, 0, 0]) } else { image::Rgb([0, 0, 255]) })
+            .save(&src)
+            .unwrap();
+        let p = photo_carree(&src, &dir.join("contacts")).expect("photo");
+        let img = image::open(&p).unwrap();
+        assert_eq!((img.width(), img.height()), (512, 512));
+        // Le centre : les bandes rouges des côtés sont coupées.
+        let px = img.to_rgb8();
+        assert!(px.get_pixel(2, 256)[2] > 200 && px.get_pixel(509, 256)[2] > 200);
+        // Petite : gardée à sa taille, carrée.
+        let petite = dir.join("petite.png");
+        image::RgbImage::new(100, 300).save(&petite).unwrap();
+        let q = image::open(photo_carree(&petite, &dir.join("contacts")).unwrap()).unwrap();
+        assert_eq!((q.width(), q.height()), (100, 100));
+        assert!(photo_carree(&dir.join("absente.png"), &dir).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
