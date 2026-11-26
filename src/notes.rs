@@ -771,7 +771,7 @@ impl Jasette {
         }
         carte = carte
             .child(
-                champ_rond()
+                champ_surface()
                     .flex()
                     .flex_row()
                     .items_center()

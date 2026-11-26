@@ -993,7 +993,7 @@ impl Jasette {
                     .child(div().font_weight(FontWeight::BOLD).text_color(th().texte_fort).child(tr("Lier une autre conversation…", "Link another conversation…"))),
             )
             .child(
-                champ_rond()
+                champ_surface()
                     .flex()
                     .flex_row()
                     .items_center()

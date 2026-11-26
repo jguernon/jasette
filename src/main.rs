@@ -870,6 +870,20 @@ fn verre(opacite: f32, r: f32) -> Div {
 fn champ_rond() -> Div {
     verre(0.7, 999.).when(th().sombre, |d| d.bg(th().champ))
 }
+/// Un champ rond posé sur une surface surélevée (fiche, feuille, modale,
+/// carte « Quoi de neuf ? », ajout d'un service) : la surface y est déjà plus
+/// claire que la liste, le ton de `champ_rond` s'y perdait. Sombre : le ton des
+/// champs de menu et un liseré ; Verre : le fond teinté et un liseré. Live,
+/// Sirène et EGA détachent déjà leurs champs (blanc bordé, creux, liseré).
+fn champ_surface() -> Div {
+    if th().live || th().sirene || th().ega {
+        return champ_rond();
+    }
+    if th().sombre {
+        return champ_rond().bg(th().menu_champ).border_1().border_color(c(0x4a4a4e));
+    }
+    champ_rond().bg(th().fond).border_color(hsla(0., 0., 0., 0.12))
+}
 /// Le dégradé bleu-violet du verre ; en sombre, le bleu plat ; en EGA, le
 /// bleu EGA (#0000AA) des remplissages de Claude.
 fn degrade_accent() -> gpui::Background {
@@ -3847,8 +3861,8 @@ impl Jasette {
                     .flex_row()
                     .items_center()
                     .gap(px(8.))
-                    .child(champ_rond().w(px(110.)).flex_none().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.api_id_tg).appearance(false)))
-                    .child(champ_rond().flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.api_hash_tg).appearance(false)))
+                    .child(champ_surface().w(px(110.)).flex_none().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.api_id_tg).appearance(false)))
+                    .child(champ_surface().flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.api_hash_tg).appearance(false)))
                     .child(bouton_texte("tg-api", t("Enregistrer"), ACCENT).on_click(cx.listener(|this, _, window, cx| {
                         this.tg_enregistrer_api(window, cx);
                         cx.notify();
@@ -11017,7 +11031,7 @@ impl Jasette {
                             .items_center()
                             .gap(px(8.))
                             .child(
-                                champ_rond()
+                                champ_surface()
                                     .flex_1()
                                     .pl(px(14.))
                                     .pr(px(6.))
@@ -11048,7 +11062,7 @@ impl Jasette {
                 );
             }
             Service::Bluesky => {
-                let champ = |e: &Entity<InputState>| champ_rond().w_full().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
+                let champ = |e: &Entity<InputState>| champ_surface().w_full().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
                 if matches!(compte.etat, Etat::Association | Etat::Connexion) {
                     carte = carte.child(attente("Connexion…"));
                 } else {
@@ -11078,7 +11092,7 @@ impl Jasette {
                 }
             }
             Service::Discord => {
-                let champ = |e: &Entity<InputState>| champ_rond().flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
+                let champ = |e: &Entity<InputState>| champ_surface().flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
                 if let Some(nom) = &self.qr_lu_dc {
                     // Lu par le téléphone : Discord y demande de confirmer.
                     let qui = if nom.is_empty() { String::new() } else { format!(" ({nom})") };
@@ -11132,7 +11146,7 @@ impl Jasette {
                 }
             }
             Service::Telegram => {
-                let champ = |e: &Entity<InputState>| champ_rond().flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
+                let champ = |e: &Entity<InputState>| champ_surface().flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
                 let rangee = || div().w_full().flex().flex_row().items_center().gap(px(8.));
                 if self.api_tg != Some(true) {
                     carte = carte.child(self.bloc_api_telegram(cx).px(px(0.)));
@@ -11207,7 +11221,7 @@ impl Jasette {
                                 .flex_row()
                                 .items_center()
                                 .gap(px(8.))
-                                .child(champ_rond().flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.code_x).appearance(false)))
+                                .child(champ_surface().flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.code_x).appearance(false)))
                                 .child(bouton_texte("x-continuer", t("Continuer"), ACCENT).on_click(cx.listener(|this, _, window, cx| {
                                     this.envoyer_code_x(window, cx);
                                     cx.notify();
