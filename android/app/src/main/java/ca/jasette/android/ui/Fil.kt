@@ -743,6 +743,15 @@ private fun Message(
                 ) { qui = true }
             }
         }
+        // Un code de vérification reçu (Codes.kt) : « 📋 482913 », sous la bulle,
+        // avant l'heure (comme au bureau).
+        val aCode = !m.fromMe && remember(m.text) { ca.jasette.android.codeVerification(m.text) } != null
+        if (aCode) {
+            BoutonCode(
+                m,
+                Modifier.padding(start = if (ligne) retraitLigne else 4.dp, top = if (aReactions) 16.dp else 0.dp),
+            )
+        }
         // Sous la bulle, comme au bureau : l'heure et la coche à la fin d'une
         // suite de messages, ou partout avec « Afficher l'heure de chaque message »
         // (toujours sous les pièces seules de mes messages).
@@ -754,7 +763,7 @@ private fun Message(
         } else if (dernier || details || echec || (m.text.isEmpty() && m.fromMe)) {
             Row(
                 Modifier.padding(horizontal = 6.dp)
-                    .padding(top = if (aReactions) 16.dp else 0.dp)
+                    .padding(top = if (aReactions && !aCode) 16.dp else 0.dp)
                     .let { if (echec) it.clickable(onClick = reessayer) else it },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
@@ -768,17 +777,6 @@ private fun Message(
                 t("Échec de l'envoi · Réessayer"), color = P.danger, fontSize = 12.sp,
                 modifier = Modifier.clip(forme(8.dp)).clickable(onClick = reessayer)
                     .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-        }
-        // Un code de vérification reçu (Codes.kt) : « 📋 482913 », sous l'heure.
-        if (!m.fromMe) {
-            val heureMontree = !ligne && (dernier || details || echec)
-            BoutonCode(
-                m,
-                Modifier.padding(
-                    start = if (ligne) retraitLigne else 4.dp,
-                    top = if (aReactions && !heureMontree) 16.dp else 0.dp,
-                ),
             )
         }
     }
