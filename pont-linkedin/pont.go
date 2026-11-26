@@ -220,15 +220,18 @@ func (p *Pont) handlers(gen int) linkedingo.Handlers {
 				return
 			}
 			p.mu.Lock()
-			revient := p.coupe && p.pret
+			etaitCoupe := p.coupe
+			revient := etaitCoupe && p.pret
 			p.coupe = false
 			p.mu.Unlock()
 			if revient {
 				emitState("ready")
 			}
-			// Ce qui a changé pendant la coupure (une requête, si la
-			// dernière date un peu).
-			p.planDelta(gen)
+			// Après une coupure : ce qui a changé entre-temps (une requête).
+			// À la première connexion, la synchronisation vient d'être faite.
+			if etaitCoupe {
+				p.planDelta(gen)
+			}
 		},
 		TransientDisconnect: func(ctx context.Context, err error) {
 			if !p.courant(gen) {
@@ -697,6 +700,7 @@ func (p *Pont) nomDe(c *conv) func(string) string {
 }
 
 func (p *Pont) listConversations(archive bool, count int) {
+	voulu := count
 	if count <= 0 {
 		count = 100
 	}
@@ -729,7 +733,11 @@ func (p *Pont) listConversations(archive bool, count int) {
 	emit("conversations", ev)
 	if !archive {
 		go p.fetchAvatars(items)
-		go p.suiteDemandee(count)
+		// Une page de plus seulement si l'interface en demande plus
+		// (défilement), jamais d'elle-même.
+		if voulu > 0 {
+			go p.suiteDemandee(min(voulu, 300))
+		}
 	}
 }
 
