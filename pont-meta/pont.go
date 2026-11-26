@@ -621,6 +621,9 @@ func isGroupType(tt table.ThreadType) bool {
 	return tt != table.UNKNOWN_THREAD_TYPE && !tt.IsOneToOne()
 }
 
+// L'aperçu d'un fil chiffré dont on n'a encore aucun message.
+const apercuChiffre = "🔒 Conversation chiffrée"
+
 var hiddenFolders = map[string]bool{"hidden": true, "disabled": true, "montage": true, "legacy": true, "blocked": true}
 
 // À appeler avec p.mu.
@@ -662,6 +665,11 @@ func (p *Pont) convOut(id string, c *convState) Conversation {
 	preview, fromMe := c.Snippet, c.SnippetFrom == p.me && p.me != 0
 	if c.LastText != "" && (c.LastTime >= c.LastActivity || preview == "") {
 		preview, fromMe = c.LastText, c.LastFromMe
+	}
+	if preview == "" && c.Type.IsWhatsApp() {
+		// Meta ne donne pas l'aperçu d'un fil chiffré (le site le tire de
+		// ses messages déchiffrés) : sans message reçu ici, un aperçu neutre.
+		preview, fromMe = apercuChiffre, false
 	}
 	t := max(c.LastActivity, c.LastTime)
 	unread := !fromMe && t > c.ReadWM && c.ReadWM >= 0 && t > 0

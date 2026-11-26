@@ -198,3 +198,21 @@ func TestLigneDouteuse(t *testing.T) {
 		}
 	}
 }
+
+// Un fil chiffré sans aperçu de Meta : le dernier message connu ici,
+// sinon un aperçu neutre ; un fil normal sans aperçu reste vide.
+func TestApercuChiffre(t *testing.T) {
+	p := &Pont{convs: map[string]*convState{}, contacts: map[int64]*contact{}, me: 1}
+	c := &convState{Key: 70, Type: table.ENCRYPTED_OVER_WA_ONE_TO_ONE, Folder: "inbox", LastActivity: 100}
+	if co := p.convOut("70", c); co.Preview != apercuChiffre || co.FromMe {
+		t.Errorf("sans message : %+v", co)
+	}
+	c.LastText, c.LastTime, c.LastFromMe = "salut", 90, true
+	if co := p.convOut("70", c); co.Preview != "salut" || !co.FromMe {
+		t.Errorf("avec message : %+v", co)
+	}
+	n := &convState{Key: 71, Type: table.ONE_TO_ONE, Folder: "inbox", LastActivity: 100}
+	if co := p.convOut("71", n); co.Preview != "" {
+		t.Errorf("fil normal : %+v", co)
+	}
+}
