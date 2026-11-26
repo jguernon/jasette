@@ -896,6 +896,12 @@ private fun Saisie(conv: String, actif: Boolean) {
                 }
             }
         }
+        // Les IconButton de Material se gonflent à 48 dp (zone tactile minimale) :
+        // ici, le +, la pastille et le bouton de droite font tous HAUT_SAISIE
+        // (44 dp, déjà une bonne cible), alignés sur la même ligne.
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.material3.LocalMinimumInteractiveComponentSize provides androidx.compose.ui.unit.Dp.Unspecified,
+        ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Bottom,
@@ -1017,6 +1023,7 @@ private fun Saisie(conv: String, actif: Boolean) {
                     if (it) envoi() else BoutonEmojiRapide(rapide, actif) { Depot.envoyer(conv, rapide) }
                 }
             }
+        }
         }
     }
 }
