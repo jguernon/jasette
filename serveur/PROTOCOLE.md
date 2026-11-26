@@ -439,9 +439,28 @@ que le pont parle avec mautrix-go comme le client web) :
 - Les ids : celui du salon Matrix (`!…:reddit.com`, donc `r:!…:reddit.com`
   chez les clients) ; un message : son `event_id` (`$…`). Les pièces
   jointes : `media_id` = l'URI `mxc://…` (téléchargée par
-  `/_matrix/media/v3/download`, qui renvoie vers `i.redd.it`).
+  `/_matrix/media/v3/download`, qui renvoie vers `i.redd.it` ; sur un 401,
+  403 ou 404, une seconde fois par `/_matrix/client/v1/media/download`
+  avec le même Bearer).
+- **Photos** : le serveur Matrix de Reddit n'en donne aucune (ni
+  `avatar_url` dans `m.room.member`, ni profil). Le pont les demande à
+  reddit.com, comme le client web : les personnes par
+  `POST /svc/shreddit/graphql` (opération `ChatRedditors`, ids `t2_…`,
+  jeton CSRF et cookies ; 25 personnes au plus par requête), les
+  subreddits par `GET /r/<nom>/about.json` (`community_icon`, sinon
+  `icon_img`). Seulement pour les personnes des conversations à deux de la
+  liste (60 premières), les auteurs des messages chargés d'un groupe ou
+  d'un salon, et moi ; chaque personne ou subreddit **une fois par jour au
+  plus** (cache `<données>/reddit/photos.json`, 0600, « sans photo »
+  compris) ; **10 requêtes par minute au plus** ; après un refus, une pause
+  de 5 min qui double jusqu'à 1 h. Elles arrivent par `avatar` (conversation
+  à deux ; `sr:<nom>` pour un subreddit), `sender_avatar` et `avatar_moi`.
+  Le journal donne un bilan (Info) par requête, sans adresse ni jeton.
 - Sortes de salons (état `com.reddit.chat.type`) : `direct` et
   `reddit_titled_direct` → conversation à deux ; `private_group` → groupe ;
+  `reddit_modmail` (messagerie de modération d'un subreddit : demande
+  d'adhésion, échange avec l'équipe) → groupe dans la boîte de réception,
+  puisque c'est une conversation qui attend une réponse, pas un salon public ;
   **chat de subreddit** → `large`, `kind: "subreddit"`,
   `parent: "sr:<nom du subreddit en minuscules>"`, `parent_name: "r/<Nom>"`
   (§5.13), jamais dans la boîte de réception. La reconnaissance des chats de
