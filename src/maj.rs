@@ -47,7 +47,7 @@ pub fn code_installe() -> u64 {
     env!("JASETTE_CODE").parse().unwrap_or(0)
 }
 
-/// « 0.1.0 (123) ».
+/// « 1.0.0 (123) ».
 pub fn nom_installe() -> &'static str {
     env!("JASETTE_NOM")
 }
@@ -81,11 +81,11 @@ pub struct Paquet {
 /// La version publiée (`version-linux.json`, écrit par paquets/empaqueter.sh) :
 ///
 /// ```json
-/// {"versionCode": 10123, "versionName": "0.1.0 (123)",
+/// {"versionCode": 10123, "versionName": "1.0.0 (123)",
 ///  "notes": {"fr": "…", "en": "…"},
-///  "deb":   {"url": "https://jonathanguernon.net/jasette/telecharger/jasette_0.1.0_amd64.deb?v=10123",
+///  "deb":   {"url": "https://jonathanguernon.net/jasette/telecharger/jasette_1.0.0_amd64.deb?v=10123",
 ///            "sha256": "…", "taille": 41234567},
-///  "targz": {"url": "https://jonathanguernon.net/jasette/telecharger/jasette-0.1.0-linux-x86_64.tar.gz?v=10123",
+///  "targz": {"url": "https://jonathanguernon.net/jasette/telecharger/jasette-1.0.0-linux-x86_64.tar.gz?v=10123",
 ///            "sha256": "…", "taille": 40123456}}
 /// ```
 #[derive(Clone, Debug, PartialEq)]
@@ -413,7 +413,7 @@ pub fn telecharger(p: &Paquet, dest: &Path, recu: &AtomicU64) -> Result<(), Stri
 // ---------------------------------------------------------------------------
 
 /// Un chemin d'archive sûr : relatif, sans `..`, sans racine. Le premier
-/// élément (le dossier « jasette-0.1.0-linux-x86_64 ») est retiré ; None pour
+/// élément (le dossier « jasette-1.0.0-linux-x86_64 ») est retiré ; None pour
 /// ce dossier lui-même ou un chemin refusé (voir `extraire_tgz`).
 fn chemin_sur(nom: &str) -> Result<Option<PathBuf>, String> {
     if nom.is_empty() || nom.starts_with('/') || nom.contains('\\') || nom.contains('\0') {
@@ -712,10 +712,10 @@ mod essais {
 
     fn json(url_deb: &str) -> String {
         format!(
-            r#"{{"versionCode": 10150, "versionName": "0.1.0 (150)",
+            r#"{{"versionCode": 10150, "versionName": "1.0.0 (150)",
                 "notes": {{"fr": "Nouveautés", "en": "What's new"}},
                 "deb": {{"url": "{url_deb}", "sha256": "{SHA}", "taille": 1234}},
-                "targz": {{"url": "https://jonathanguernon.net/jasette/telecharger/jasette-0.1.0-linux-x86_64.tar.gz?v=10150", "sha256": "{}", "taille": 99}}}}"#,
+                "targz": {{"url": "https://jonathanguernon.net/jasette/telecharger/jasette-1.0.0-linux-x86_64.tar.gz?v=10150", "sha256": "{}", "taille": 99}}}}"#,
             SHA.to_uppercase()
         )
     }
@@ -730,7 +730,7 @@ mod essais {
 
     #[test]
     fn comparaison_des_versions() {
-        let v = lire(&json("https://jonathanguernon.net/jasette/telecharger/jasette_0.1.0_amd64.deb?v=10150"), false).unwrap();
+        let v = lire(&json("https://jonathanguernon.net/jasette/telecharger/jasette_1.0.0_amd64.deb?v=10150"), false).unwrap();
         assert!(plus_recente(Some(&v), 10149));
         assert!(!plus_recente(Some(&v), 10150));
         assert!(!plus_recente(Some(&v), 10200));
@@ -740,9 +740,9 @@ mod essais {
 
     #[test]
     fn lecture_de_version_linux() {
-        let v = lire(&json("https://jonathanguernon.net/jasette/telecharger/jasette_0.1.0_amd64.deb?v=10150"), false).unwrap();
+        let v = lire(&json("https://jonathanguernon.net/jasette/telecharger/jasette_1.0.0_amd64.deb?v=10150"), false).unwrap();
         assert_eq!(v.code, 10150);
-        assert_eq!(v.nom, "0.1.0 (150)");
+        assert_eq!(v.nom, "1.0.0 (150)");
         assert_eq!(v.notes(false), "Nouveautés");
         assert_eq!(v.notes(true), "What's new");
         let deb = v.deb.unwrap();
@@ -785,7 +785,7 @@ mod essais {
         assert!(!adresse_sure("http://127.0.0.1:80@evil.com/x", true));
         assert!(!adresse_sure("http://localhost:8000/x", true));
         // Un version-linux.json qui pointe ailleurs : le paquet est refusé.
-        let v = lire(&json("https://evil.com/jasette_0.1.0_amd64.deb"), false).unwrap();
+        let v = lire(&json("https://evil.com/jasette_1.0.0_amd64.deb"), false).unwrap();
         assert!(v.deb.is_none() && v.targz.is_some());
         assert!(lire(&json("http://127.0.0.1:8000/a.deb"), false).unwrap().deb.is_none());
     }
@@ -837,11 +837,11 @@ mod essais {
         archive(
             &bonne,
             &[
-                ("jasette-0.1.0-linux-x86_64/", b"", b'5', 0o755),
-                ("jasette-0.1.0-linux-x86_64/jasette", b"#!nouveau", b'0', 0o4755),
-                ("jasette-0.1.0-linux-x86_64/jasette-serveur", b"serveur", b'0', 0o755),
-                ("jasette-0.1.0-linux-x86_64/LICENSE", b"AGPL", b'0', 0o666),
-                ("jasette-0.1.0-linux-x86_64/icons/16x16/apps/jasette.png", b"png", b'0', 0o644),
+                ("jasette-1.0.0-linux-x86_64/", b"", b'5', 0o755),
+                ("jasette-1.0.0-linux-x86_64/jasette", b"#!nouveau", b'0', 0o4755),
+                ("jasette-1.0.0-linux-x86_64/jasette-serveur", b"serveur", b'0', 0o755),
+                ("jasette-1.0.0-linux-x86_64/LICENSE", b"AGPL", b'0', 0o666),
+                ("jasette-1.0.0-linux-x86_64/icons/16x16/apps/jasette.png", b"png", b'0', 0o644),
             ],
         );
         let sortie = d.join("sortie");
@@ -882,11 +882,11 @@ mod essais {
         archive(
             &a,
             &[
-                ("jasette-0.1.0-linux-x86_64/jasette", b"nouveau", b'0', 0o755),
-                ("jasette-0.1.0-linux-x86_64/jasette-pont", b"nouveau pont", b'0', 0o755),
-                ("jasette-0.1.0-linux-x86_64/jasette-x", b"nouveau x", b'0', 0o755),
-                ("jasette-0.1.0-linux-x86_64/installer.sh", b"sh", b'0', 0o755),
-                ("jasette-0.1.0-linux-x86_64/LICENSE", b"AGPL", b'0', 0o644),
+                ("jasette-1.0.0-linux-x86_64/jasette", b"nouveau", b'0', 0o755),
+                ("jasette-1.0.0-linux-x86_64/jasette-pont", b"nouveau pont", b'0', 0o755),
+                ("jasette-1.0.0-linux-x86_64/jasette-x", b"nouveau x", b'0', 0o755),
+                ("jasette-1.0.0-linux-x86_64/installer.sh", b"sh", b'0', 0o755),
+                ("jasette-1.0.0-linux-x86_64/LICENSE", b"AGPL", b'0', 0o644),
             ],
         );
         let tmp = dossier_extraction(&install, 10150);

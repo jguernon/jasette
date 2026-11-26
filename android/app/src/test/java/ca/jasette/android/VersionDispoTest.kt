@@ -13,9 +13,9 @@ class VersionDispoTest {
 
     private fun json(
         code: String = "10112",
-        url: String = "https://jonathanguernon.net/jasette/telecharger/jasette-0.1.0.apk?v=10112",
+        url: String = "https://jonathanguernon.net/jasette/telecharger/jasette-1.0.0.apk?v=10112",
         sha256: String = sha,
-        reste: String = """, "versionName": "0.1.0 (112)", "taille": 56623104, "notes": {"fr": "Mise à jour", "en": "Update"}""",
+        reste: String = """, "versionName": "1.0.0 (112)", "taille": 56623104, "notes": {"fr": "Mise à jour", "en": "Update"}""",
     ) = """{"versionCode": $code, "url": "$url", "sha256": "$sha256"$reste}"""
 
     @Test
@@ -24,7 +24,7 @@ class VersionDispoTest {
         assertNotNull(v)
         v!!
         assertEquals(10112L, v.versionCode)
-        assertEquals("0.1.0 (112)", v.versionName)
+        assertEquals("1.0.0 (112)", v.versionName)
         assertEquals(sha, v.sha256)
         assertEquals(56623104L, v.taille)
         assertEquals("Mise à jour", v.notes(anglais = false))

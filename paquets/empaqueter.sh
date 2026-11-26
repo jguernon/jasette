@@ -200,7 +200,7 @@ tar --owner=0 --group=0 --numeric-owner -C "$TRAVAIL/tar" -czf "$TGZ" "$NOM"
 
 # ---- 4b. version-linux.json : la mise à jour dans l'app du bureau ----
 # Le numéro vient du binaire lui-même (build.rs : 10 000 + le nombre de
-# commits, comme le versionCode d'Android) : « jasette 0.1.0 (123) 10123 ».
+# commits, comme le versionCode d'Android) : « jasette 1.0.0 (123) 10123 ».
 LIGNE="$("$BIN/jasette" --version)"
 CODE_LINUX="${LIGNE##* }"
 NOM_LINUX="$(sed 's/^jasette //; s/ [0-9]*$//' <<<"$LIGNE")"

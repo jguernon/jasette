@@ -7,8 +7,8 @@ import org.json.JSONObject
  * (https://jonathanguernon.net/jasette/telecharger/version.json), écrit par
  * paquets/empaqueter.sh à partir de l'APK release signé :
  *
- *     {"versionCode": 10112, "versionName": "0.1.0 (112)",
- *      "url": "https://jonathanguernon.net/jasette/telecharger/jasette-0.1.0.apk?v=10112",
+ *     {"versionCode": 10112, "versionName": "1.0.0 (112)",
+ *      "url": "https://jonathanguernon.net/jasette/telecharger/jasette-1.0.0.apk?v=10112",
  *      "sha256": "…64 chiffres hexadécimaux…", "taille": 56623104,
  *      "notes": {"fr": "…", "en": "…"}}
  *

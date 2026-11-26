@@ -25,10 +25,11 @@ val buildJasette: Int = try {
 // Le versionCode doit augmenter à chaque release, pour que la mise à jour dans
 // l'app (MiseAJour.kt, version.json) et Android la voient plus récente :
 // 10 000 + le numéro de build (112 commits → 10112). Il dépasse les anciens
-// versionCode (1, puis 1000 pour 0.1.0), qui se mettent donc à jour.
+// versionCode (1, puis 1000 pour 0.1.0), qui se mettent donc à jour. Passer de 0.1.0
+// à 1.0.0 ne change pas ce calcul : le versionCode suit les commits, pas la version.
 val codeJasette: Int = 10_000 + buildJasette
 
-// Le versionName reste lisible : « 0.1.0 (112) », la version et le numéro de build.
+// Le versionName reste lisible : « 1.0.0 (112) », la version et le numéro de build.
 val nomJasette: String = if (buildJasette > 0) "$versionJasette ($buildJasette)" else versionJasette
 
 // La clé de signature release (aussi la clé d'importation de Google Play) :

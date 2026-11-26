@@ -2,7 +2,7 @@
 //! le même schéma que l'Android (android/app/build.gradle.kts) :
 //!   JASETTE_BUILD = le nombre de commits git (git rev-list --count HEAD), 0 sans git ;
 //!   JASETTE_CODE  = 10 000 + JASETTE_BUILD (le « versionCode », qui augmente à chaque commit) ;
-//!   JASETTE_NOM   = « 0.1.0 (N) », la version de Cargo.toml et le numéro de build.
+//!   JASETTE_NOM   = « 1.0.0 (N) », la version de Cargo.toml et le numéro de build.
 
 use std::path::Path;
 use std::process::Command;
