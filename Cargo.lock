@@ -3328,6 +3328,7 @@ dependencies = [
  "serde",
  "serde_json",
  "ureq",
+ "zbus 5.19.0",
 ]
 
 [[package]]

@@ -26,3 +26,5 @@ ureq = { version = "2.12", default-features = false, features = ["tls", "gzip"] 
 flate2 = "1"
 # Les sons des conversations (src/sons.rs) : mp3 (symphonia) joués par cpal (ALSA). MIT ou Apache-2.0.
 rodio = { version = "0.23", default-features = false, features = ["playback", "mp3"] }
+# « Ce que j'écoute » (src/musique.rs) : lire Spotify par MPRIS sur D-Bus (déjà dans l'arbre par gpui).
+zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }

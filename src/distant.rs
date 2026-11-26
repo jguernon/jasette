@@ -1093,6 +1093,49 @@ pub struct Marques {
     /// PROTOCOLE.md §5.5) : "bois", "verre" ou "aucun" ; vide, le défaut
     /// ("bulle"). Toujours passé par `jeu_sons`.
     pub sons: String,
+    /// « Afficher les notes de mes contacts » désactivé (marque
+    /// `notes_contacts` à faux, PROTOCOLE.md §5.12). Gardé à l'envers, comme
+    /// `presence_cachee`.
+    pub notes_contacts_cachees: bool,
+    /// « Partager ce que j'écoute sur Spotify » : l'appareil qui publie la
+    /// musique (marque `notes_musique`) ; vide : personne.
+    pub notes_musique: String,
+    /// Ce que dit la note musicale (marque `notes_musique_format`) : "genre"
+    /// ou "titre" ; vide, le défaut ("artiste"). Toujours passé par `format_musique`.
+    pub notes_musique_format: String,
+    /// Les services où « Quoi de neuf ? » publie (marque `notes_services`) ;
+    /// vide : « tout » (`["tout"]` sur le fil). Toujours passé par `services_notes`.
+    pub notes_services: Vec<String>,
+}
+
+/// La marque `notes_musique_format` rangée comme dans `Marques` (vide : "artiste").
+pub fn format_musique(v: Option<&Value>) -> String {
+    match v.and_then(Value::as_str) {
+        Some(f @ ("genre" | "titre")) => f.to_string(),
+        _ => String::new(),
+    }
+}
+
+/// La marque `notes_services` rangée comme dans `Marques::notes_services` :
+/// vide pour « tout » (absente, vide ou contenant "tout"), sinon les noms,
+/// sans doublon (32 au plus, de 32 octets au plus).
+pub fn services_notes(v: Option<&Value>) -> Vec<String> {
+    let Some(Value::Array(a)) = v else { return Vec::new() };
+    let mut r: Vec<String> = Vec::new();
+    for n in a.iter().filter_map(Value::as_str) {
+        if n == "tout" {
+            return Vec::new();
+        }
+        if !n.is_empty() && n.len() <= 32 && !r.iter().any(|x| x == n) && r.len() < 32 {
+            r.push(n.to_string());
+        }
+    }
+    r
+}
+
+/// `notes_services` pour le fil : `["tout"]` si vide.
+pub fn services_notes_json(l: &[String]) -> Value {
+    if l.is_empty() { json!(["tout"]) } else { json!(l) }
 }
 
 /// Un jeu de sons connu, rangé comme dans `Marques::sons` (vide : "bulle").
@@ -1117,6 +1160,10 @@ impl Marques {
             && self.cacher_apres_jours == 0
             && !self.presence_cachee
             && self.sons.is_empty()
+            && !self.notes_contacts_cachees
+            && self.notes_musique.is_empty()
+            && self.notes_musique_format.is_empty()
+            && self.notes_services.is_empty()
     }
 
     /// Chaque liste de `dabord`, dans son ordre, puis les ids de `ensuite` qui n'y sont pas.
@@ -1145,6 +1192,10 @@ impl Marques {
             cacher_apres_jours: dabord.cacher_apres_jours,
             presence_cachee: dabord.presence_cachee,
             sons: dabord.sons.clone(),
+            notes_contacts_cachees: dabord.notes_contacts_cachees,
+            notes_musique: dabord.notes_musique.clone(),
+            notes_musique_format: dabord.notes_musique_format.clone(),
+            notes_services: dabord.notes_services.clone(),
         }
     }
 
@@ -1163,6 +1214,10 @@ impl Marques {
             cacher_apres_jours: self.cacher_apres_jours,
             presence_cachee: self.presence_cachee,
             sons: self.sons.clone(),
+            notes_contacts_cachees: self.notes_contacts_cachees,
+            notes_musique: self.notes_musique.clone(),
+            notes_musique_format: self.notes_musique_format.clone(),
+            notes_services: self.notes_services.clone(),
         }
     }
 }
@@ -1180,6 +1235,7 @@ pub enum NouvelleMarques {
     /// `avec_cacher` : de même pour un serveur d'avant `cacher_apres_jours`.
     /// `avec_presence` : de même pour un serveur d'avant `presence_en_ligne`.
     /// `avec_sons` : de même pour un serveur d'avant `sons_conversation`.
+    /// `avec_notes` : de même pour un serveur d'avant les marques `notes_*`.
     Recues {
         marques: Marques,
         version: u64,
@@ -1193,6 +1249,7 @@ pub enum NouvelleMarques {
         avec_cacher: bool,
         avec_presence: bool,
         avec_sons: bool,
+        avec_notes: bool,
     },
     /// La connexion est tombée : rien n'est plus en vol.
     Coupure,
@@ -1238,6 +1295,15 @@ impl NouvelleMarques {
                 presence_cachee: v.get("presence_en_ligne").and_then(Value::as_bool) == Some(false),
                 // Absent ou inconnu : "bulle" ; un booléen : vrai "bulle", faux "aucun".
                 sons: jeu_sons(v.get("sons_conversation")),
+                // Absent : vrai (afficher).
+                notes_contacts_cachees: v.get("notes_contacts").and_then(Value::as_bool) == Some(false),
+                notes_musique: v
+                    .get("notes_musique")
+                    .and_then(Value::as_str)
+                    .map(|n| n.chars().take(128).collect())
+                    .unwrap_or_default(),
+                notes_musique_format: format_musique(v.get("notes_musique_format")),
+                notes_services: services_notes(v.get("notes_services")),
             },
             version: v.get("version")?.as_u64()?,
             id: v.get("id").and_then(Value::as_u64),
@@ -1250,6 +1316,7 @@ impl NouvelleMarques {
             avec_cacher: v.get("cacher_apres_jours").is_some_and(Value::is_number),
             avec_presence: v.get("presence_en_ligne").is_some_and(Value::is_boolean),
             avec_sons: v.get("sons_conversation").is_some_and(|j| j.is_string() || j.is_boolean()),
+            avec_notes: v.get("notes_services").is_some_and(Value::is_array),
         })
     }
 }
@@ -1316,6 +1383,10 @@ impl SuiviMarques {
             "cacher_apres_jours": c.listes.cacher_apres_jours,
             "presence_en_ligne": !c.listes.presence_cachee,
             "sons_conversation": if c.listes.sons.is_empty() { "bulle" } else { c.listes.sons.as_str() },
+            "notes_contacts": !c.listes.notes_contacts_cachees,
+            "notes_musique": c.listes.notes_musique,
+            "notes_musique_format": if c.listes.notes_musique_format.is_empty() { "artiste" } else { c.listes.notes_musique_format.as_str() },
+            "notes_services": services_notes_json(&c.listes.notes_services),
             "version": c.version,
             "id": id,
         }}))
@@ -1342,6 +1413,7 @@ impl SuiviMarques {
                 avec_cacher,
                 avec_presence,
                 avec_sons,
+                avec_notes,
             } => {
                 // Un serveur d'avant `archives` : nos archives restent les nôtres, jamais vidées.
                 let mut marques = marques;
@@ -1375,6 +1447,13 @@ impl SuiviMarques {
                 // Et pour `sons_conversation`.
                 if !avec_sons {
                     marques.sons = c.listes.sons.clone();
+                }
+                // Et pour les marques `notes_*` (serveur d'avant « Quoi de neuf ? »).
+                if !avec_notes {
+                    marques.notes_contacts_cachees = c.listes.notes_contacts_cachees;
+                    marques.notes_musique = c.listes.notes_musique.clone();
+                    marques.notes_musique_format = c.listes.notes_musique_format.clone();
+                    marques.notes_services = c.listes.notes_services.clone();
                 }
                 (marques, version, id, refus)
             }
@@ -1629,6 +1708,7 @@ mod essais {
             avec_cacher: true,
             avec_presence: true,
             avec_sons: true,
+            avec_notes: true,
         }
     }
 
@@ -1854,6 +1934,38 @@ mod essais {
     }
 
     #[test]
+    fn marques_notes() {
+        // Reçues : services précis, musique sur un appareil, notes des contacts cachées.
+        let n = NouvelleMarques::lire(&json!({"head": [], "favoris": ["b"], "epingles": [], "archives": [], "privees": [],
+            "moods": {}, "emojis": {}, "notes_contacts": false, "notes_musique": "portable",
+            "notes_services": ["instagram", "telegram", "instagram"], "notes_musique_format": "genre", "version": 5}));
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 4, ..Default::default() };
+        assert!(s.recu(n.unwrap(), &mut c).is_none());
+        assert!(c.listes.notes_contacts_cachees);
+        assert_eq!(c.listes.notes_musique, "portable");
+        assert_eq!(c.listes.notes_musique_format, "genre");
+        assert_eq!(c.listes.notes_services, vec!["instagram".to_string(), "telegram".to_string()]);
+        // Recocher « Tout » : ["tout"] sur le fil.
+        c.listes.notes_services.clear();
+        let t = s.changement(&mut c).expect("envoi");
+        assert_eq!(t["marques"]["notes_services"], json!(["tout"]));
+        assert_eq!(t["marques"]["notes_contacts"], json!(false));
+        assert_eq!(format_musique(Some(&json!("klaxon"))), "");
+        assert_eq!(services_notes(Some(&json!(["whatsapp", "tout"]))), Vec::<String>::new());
+        // Un serveur d'avant les notes : les nôtres restent.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 4, ..Default::default() };
+        c.listes.notes_services = vec!["bluesky".into()];
+        c.listes.notes_musique = "bureau".into();
+        let vieux = NouvelleMarques::lire(&json!({"head": [], "favoris": ["b"], "epingles": [], "archives": [], "privees": [],
+            "moods": {}, "emojis": {}, "version": 5})).unwrap();
+        assert!(s.recu(vieux, &mut c).is_none());
+        assert_eq!(c.listes.notes_services, vec!["bluesky".to_string()]);
+        assert_eq!(c.listes.notes_musique, "bureau");
+    }
+
+    #[test]
     fn marques_cacher_apres_jours() {
         // Reçu du serveur.
         let mut s = SuiviMarques::default();
@@ -1943,6 +2055,7 @@ mod essais {
             avec_cacher: true,
             avec_presence: true,
             avec_sons: true,
+            avec_notes: true,
         };
         let t = s.recu(r, &mut c).expect("renvoi");
         assert_eq!(t["marques"]["favoris"], json!(["z", "a", "y", "x"]));

@@ -23,6 +23,8 @@ mod retro;
 mod presence;
 mod ecrit;
 mod sons;
+mod notes;
+mod musique;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -1021,6 +1023,7 @@ fn touche_cache(v: &Value) -> bool {
 /// Le pont d'un service : un processus ici, ou ce service sur le serveur Jasette.
 fn lancer_pont(r: &Reglages, svc: Service) -> Result<Pont, String> {
     pont::regler_presence(r.presence_en_ligne);
+    pont::regler_notes(r.notes_contacts);
     match serveur_actif(r) {
         Some(cfg) => Ok(Pont::distant(cfg, svc.cle())),
         None if svc == Service::GoogleMessages => Pont::lancer(),
@@ -1393,6 +1396,10 @@ enum Section {
     APropos,
     /// La Liste privée (src/prive.rs).
     Prive,
+    /// L'écran « Moi » : « Quoi de neuf ? », l'avatar (src/notes.rs).
+    Moi,
+    /// Réglages > Quoi de neuf (src/notes.rs).
+    QuoiDeNeuf,
 }
 
 /// Les réglages gardés entre deux lancements.
@@ -1477,6 +1484,26 @@ struct Reglages {
     /// (marque `sons_conversation`).
     #[serde(default)]
     sons_conversation: String,
+    /// « Quoi de neuf ? » (src/notes.rs, PROTOCOLE.md §5.12) : les notes
+    /// Instagram des contacts au-dessus de leur avatar dans le Head (marque
+    /// `notes_contacts`, vrai par défaut).
+    #[serde(default = "vrai")]
+    notes_contacts: bool,
+    /// L'appareil qui publie la musique écoutée (marque `notes_musique`) ;
+    /// vide : personne.
+    #[serde(default)]
+    notes_musique: String,
+    /// Ce que dit la note musicale : "genre", "titre" ; vide, "artiste"
+    /// (marque `notes_musique_format`).
+    #[serde(default)]
+    notes_musique_format: String,
+    /// Les services où publier ; vide : « Tout » (marque `notes_services`).
+    #[serde(default)]
+    notes_services: Vec<String>,
+    /// L'audience des notes Instagram : 0 abonnés mutuels, 1 amis proches.
+    /// Propre à cet appareil.
+    #[serde(default)]
+    notes_audience: u8,
     /// La grille du Head : son nombre de colonnes, de 3 à 6 (« 5 ») ; vide = 4.
     /// Une ancienne valeur « colonnes x rangées » (« 8x3 ») donne ses colonnes,
     /// ramenées entre 3 et 6. Propre à cet appareil.
@@ -1631,6 +1658,11 @@ impl Default for Reglages {
             cacher_apres_jours: 0,
             presence_en_ligne: true,
             sons_conversation: String::new(),
+            notes_contacts: true,
+            notes_musique: String::new(),
+            notes_musique_format: String::new(),
+            notes_services: Vec::new(),
+            notes_audience: 0,
             head_grille: String::new(),
             marques_cache: HashMap::new(),
             heures_messages: true,
@@ -1745,6 +1777,10 @@ impl Reglages {
                     cacher_apres_jours: self.cacher_apres_jours,
                     presence_cachee: !self.presence_en_ligne,
                     sons: self.sons_conversation.clone(),
+                    notes_contacts_cachees: !self.notes_contacts,
+                    notes_musique: self.notes_musique.clone(),
+                    notes_musique_format: self.notes_musique_format.clone(),
+                    notes_services: self.notes_services.clone(),
                 },
                 version: self.marques_version,
                 a_envoyer: self.marques_a_envoyer,
@@ -1765,6 +1801,10 @@ impl Reglages {
         self.cacher_apres_jours = b.copie.listes.cacher_apres_jours;
         self.presence_en_ligne = !b.copie.listes.presence_cachee;
         self.sons_conversation = b.copie.listes.sons;
+        self.notes_contacts = !b.copie.listes.notes_contacts_cachees;
+        self.notes_musique = b.copie.listes.notes_musique;
+        self.notes_musique_format = b.copie.listes.notes_musique_format;
+        self.notes_services = b.copie.listes.notes_services;
         self.marques_version = b.copie.version;
         self.marques_a_envoyer = b.copie.a_envoyer;
         self.marques_serveur = b.serveur;
@@ -1998,6 +2038,9 @@ struct Jasette {
     qr_lu_dc: Option<String>,
     besoin_nip: bool,
     nip: Entity<InputState>,
+    /// « Quoi de neuf ? » : le champ de la note, et tout le reste (src/notes.rs).
+    note_saisie: Entity<InputState>,
+    notes: notes::Notes,
     convs: Vec<Conv>,
     archives: Vec<Conv>,
     archives_chargees: bool,
@@ -2635,6 +2678,15 @@ impl Jasette {
             }
         })
         .detach();
+        let note_saisie = cx.new(|cx| InputState::new(window, cx).placeholder(notes::tr("Écrire une note…", "Write a note…")));
+        cx.subscribe_in(&note_saisie, window, |this, _state, ev: &InputEvent, window, cx| {
+            match ev {
+                InputEvent::PressEnter { .. } => this.publier_note(window, cx),
+                InputEvent::Change => cx.notify(),
+                _ => {}
+            }
+        })
+        .detach();
         let nip = cx.new(|cx| InputState::new(window, cx).placeholder(t("NIP Messenger (6 chiffres), puis Entrée")).masked(true));
         cx.subscribe_in(&nip, window, |this, state, ev: &InputEvent, window, cx| {
             if let InputEvent::PressEnter { .. } = ev {
@@ -2777,6 +2829,8 @@ impl Jasette {
                         let mut change = this.vocal.is_some() || this.lecture.is_some();
                         // Les « … » sans nouvelle depuis 6 s s'en vont.
                         change |= this.ecrits_perimes();
+                        // « Quoi de neuf ? » : notes des contacts, musique (toutes les 5 s au plus).
+                        change |= this.notes_tic();
                         let finie = this.lecture.as_mut().is_some_and(|l| !matches!(l.enfant.try_wait(), Ok(None)));
                         if finie {
                             this.lecture = None;
@@ -2935,6 +2989,8 @@ impl Jasette {
             qr_lu_dc: None,
             besoin_nip: false,
             nip,
+            note_saisie,
+            notes: Default::default(),
             plus_anciens: cache.fils.iter().map(|(k, f)| (k.clone(), f.more)).collect(),
             messages: cache.fils.into_iter().map(|(k, f)| (k, f.items)).collect(),
             convs: cache.convs,
@@ -3263,6 +3319,10 @@ impl Jasette {
                 }
             }
             "presence" => self.presence_recue(&v),
+            // « Quoi de neuf ? » (src/notes.rs).
+            "note_moi" => self.note_moi_recue(svc, &v),
+            "note_result" => self.note_resultat_recu(svc, &v),
+            "notes" if svc == Service::Instagram => self.notes_contacts_recues(&v),
             "hello" | "e2ee" => {}
             // Un pont d'avant la recherche globale : il ne la connaît pas, ce n'est pas une panne.
             "error" if v.get("text").and_then(Value::as_str).is_some_and(|t| t.contains("search_messages")) => {}
@@ -5863,11 +5923,15 @@ impl Jasette {
         let trame = self.suivi_marques.recu(n, &mut b.copie);
         if b != avant {
             let presence = b.copie.listes.presence_cachee != avant.copie.listes.presence_cachee;
+            let notes = b.copie.listes.notes_contacts_cachees != avant.copie.listes.notes_contacts_cachees;
             self.reglages.poser_bloc(b);
             self.reglages.garder();
             if presence {
                 // Réglé sur un autre appareil.
                 self.presence_reglee();
+            }
+            if notes {
+                self.notes_reglees();
             }
             // Rendue privée sur un autre appareil : elle quitte l'écran ici aussi.
             self.cacher_privees_ouvertes();
@@ -5951,6 +6015,8 @@ impl Jasette {
                             .when(self.en_ligne(conv), |d| {
                                 d.child(presence::point_presence(mesures.avatar, if choisie { th().choisi } else { th().liste }))
                             })
+                            // La note Instagram du contact, en petite bulle au-dessus (src/notes.rs).
+                            .children(self.bulle_note_head(conv, mesures.avatar, mesures.cellule_w + 10.))
                             .child(
                                 div()
                                     .absolute()
@@ -8719,15 +8785,22 @@ impl Jasette {
             )
             .child(
                 div()
+                    .id("moi-entete")
                     .flex()
                     .flex_row()
                     .items_center()
                     .gap(px(12.))
                     .px(px(10.))
-                    .pb(px(12.))
+                    .py(px(8.))
                     .mb(px(6.))
-                    .border_b_1()
-                    .border_color(ton(blanc(0.7), th().trait_fin))
+                    .rounded(rayon(14.))
+                    .cursor_pointer()
+                    .when(section == Section::Moi, |d| d.bg(ton(blanc(0.85), th().choisi)).shadow(ombre_flottante()))
+                    .when(section != Section::Moi, |d| d.hover(|st| st.bg(ton(blanc(0.5), th().survol))))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.section = Some(Section::Moi);
+                        cx.notify();
+                    }))
                     .child(
                         div()
                             .id("moi-avatar")
@@ -8735,7 +8808,9 @@ impl Jasette {
                             .cursor_pointer()
                             .hover(|s| s.opacity(0.85))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.menu_avatar = !this.menu_avatar;
+                                cx.stop_propagation();
+                                this.section = Some(Section::Moi);
+                                this.menu_avatar = true;
                                 cx.notify();
                             }))
                             .child(self.mon_avatar("J", 40.))
@@ -8766,11 +8841,16 @@ impl Jasette {
                                     .truncate()
                                     .text_size(px(12.))
                                     .text_color(th().texte_pale)
-                                    .child(self.reglages.email.clone().unwrap_or_else(|| t("Compte local").into())),
+                                    .child(
+                                        // Ma note actuelle (« Quoi de neuf ? »), sinon le compte.
+                                        self.note_actuelle()
+                                            .map(|n| n.text.clone())
+                                            .or_else(|| self.reglages.email.clone())
+                                            .unwrap_or_else(|| t("Compte local").into()),
+                                    ),
                             ),
                     ),
             )
-            .when(self.menu_avatar, |d| d.child(self.menu_avatar_vue(cx)))
             .child(
                 item("s-comptes", Section::Comptes, t("Comptes"), "at-sign", ACCENT_2, Some(comptes_actifs)).on_click(
                     cx.listener(|this, _, _, cx| {
@@ -8795,6 +8875,12 @@ impl Jasette {
                     cx.notify();
                 },
             )))
+            .child(item("s-qdn", Section::QuoiDeNeuf, notes::tr("Quoi de neuf", "What's up"), "message-circle", 0x14b8a6, None).on_click(
+                cx.listener(|this, _, _, cx| {
+                    this.section = Some(Section::QuoiDeNeuf);
+                    cx.notify();
+                }),
+            ))
             .child(item("s-apparence", Section::Apparence, t("Apparence"), "palette", ROSE, None).on_click(
                 cx.listener(|this, _, _, cx| {
                     this.section = Some(Section::Apparence);
@@ -8848,6 +8934,8 @@ impl Jasette {
             Section::Serveur => self.serveur_vue(cx),
             Section::Prive => self.reglages_prive(cx),
             Section::Sons => self.reglages_sons(cx),
+            Section::Moi => self.moi_vue(cx),
+            Section::QuoiDeNeuf => self.reglages_quoi_de_neuf(cx),
             Section::Notifications => carte_section("Notifications")
                 .child(
                     groupe()
@@ -11751,8 +11839,8 @@ fn ligne_info(nom: &'static str, valeur: String) -> impl IntoElement {
 
 fn ligne_interrupteur(
     id: &'static str,
-    titre: &'static str,
-    detail: &'static str,
+    titre: impl Into<SharedString>,
+    detail: impl Into<SharedString>,
     actif: bool,
     clic: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
@@ -11774,8 +11862,8 @@ fn ligne_interrupteur(
                 .flex()
                 .flex_col()
                 .gap(px(2.))
-                .child(div().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(titre))
-                .child(div().text_size(px(12.)).text_color(th().texte_pale).child(detail)),
+                .child(div().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(titre.into()))
+                .child(div().text_size(px(12.)).text_color(th().texte_pale).child(detail.into())),
         )
         .child(
             div()

@@ -38,6 +38,14 @@ pub fn regler_presence(oui: bool) {
     PRESENCE.store(oui, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// « Afficher les notes de mes contacts » : passé aux ponts locaux à leur
+/// lancement (`JASETTE_NOTES`, PROTOCOLE.md §5.12), puis par `notes_contacts`.
+static NOTES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn regler_notes(oui: bool) {
+    NOTES.store(oui, std::sync::atomic::Ordering::Relaxed);
+}
+
 enum Genre {
     /// Un processus enfant sur cette machine.
     Local { enfant: Mutex<Child>, entree: Mutex<ChildStdin>, nouvelles: Mutex<Receiver<Value>> },
@@ -95,6 +103,7 @@ impl Pont {
             cmd.env("JASETTE_META_SERVICE", s);
         }
         cmd.env("JASETTE_PRESENCE", if PRESENCE.load(std::sync::atomic::Ordering::Relaxed) { "1" } else { "0" });
+        cmd.env("JASETTE_NOTES", if NOTES.load(std::sync::atomic::Ordering::Relaxed) { "1" } else { "0" });
         // En développement, les photos téléchargées restent dans .cache du projet.
         if std::env::var_os("JASETTE_MEDIA").is_none() {
             let projet = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".cache");
