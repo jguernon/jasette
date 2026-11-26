@@ -147,6 +147,21 @@ impl Mood {
     }
 }
 
+/// Un emoji bien centré dans un rond : une boîte carrée à sa taille, avec une
+/// hauteur de ligne égale à la taille (la hauteur de ligne par défaut, plus
+/// haute, et les métriques de la police d'emojis le poussaient vers le bas).
+pub(crate) fn emoji_centre(e: &str, taille: f32) -> Div {
+    div()
+        .size(px(taille * 1.25))
+        .flex()
+        .items_center()
+        .justify_center()
+        .font_family(POLICE_EMOJI)
+        .text_size(px(taille))
+        .line_height(px(taille * 1.25))
+        .child(e.to_string())
+}
+
 impl Jasette {
     /// Le mood de la conversation ouverte (aucun en EGA).
     pub(crate) fn mood_fil(&self) -> Option<&'static Mood> {
@@ -176,13 +191,11 @@ impl Jasette {
             .border_1()
             .border_color(th().surface_bord)
             .shadow(ombre_flottante())
-            .font_family(POLICE_EMOJI)
-            .text_size(px(24.))
             .hover(|s| s.bg(th().survol))
-            // La pression : le bouton pâlit et l'emoji rapetisse sous le clic.
-            .active(|s| s.opacity(0.6).text_size(px(19.)))
+            // La pression : le bouton pâlit sous le clic.
+            .active(|s| s.opacity(0.6))
             .on_click(cx.listener(|this, _, _, cx| this.envoyer_emoji_rapide(cx)))
-            .child(e.to_string())
+            .child(emoji_centre(e, 22.))
             .into_any_element()
     }
 
@@ -518,10 +531,8 @@ impl Jasette {
             let choisi = f.emoji.as_deref() == Some(e.as_str());
             rangee = rangee.child(
                 pastille(format!("emoji-rapide-{i}").into(), choisi)
-                    .font_family(POLICE_EMOJI)
-                    .text_size(px(22.))
                     .on_click(choisir(Some(e.clone())))
-                    .child(e),
+                    .child(emoji_centre(&e, 21.)),
             );
         }
         rangee = rangee.child(
@@ -649,9 +660,7 @@ impl Jasette {
                     .border_1()
                     .border_color(th().accent)
                     .shadow(ombre_flottante())
-                    .font_family(POLICE_EMOJI)
-                    .text_size(px(19.))
-                    .child(e.to_string()),
+                    .child(emoji_centre(e, 17.)),
                 None => rond(div()).bg(degrade_accent()).shadow(ombre_flottante()).child(icone("arrow-up", 16., blanc(1.))),
             })
         };

@@ -1042,15 +1042,37 @@ private fun BoutonEmojiRapide(emoji: String, actif: Boolean, envoyer: () -> Unit
             },
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            emoji, fontSize = 24.sp,
-            modifier = Modifier.graphicsLayer {
+        EmojiCentre(
+            emoji, 24f,
+            Modifier.graphicsLayer {
                 scaleX = echelle
                 scaleY = echelle
                 alpha = if (actif) 1f else 0.45f
             },
         )
     }
+}
+
+/**
+ * Un emoji vraiment centré dans son rond : sans le rembourrage de la police
+ * et avec une hauteur de ligne égale à la taille, coupée en haut et en bas
+ * (sinon il tombe un peu bas).
+ */
+@Composable
+internal fun EmojiCentre(emoji: String, taille: Float, modifier: Modifier = Modifier) {
+    Text(
+        emoji,
+        modifier = modifier,
+        style = androidx.compose.ui.text.TextStyle(
+            fontSize = taille.sp,
+            lineHeight = taille.sp,
+            platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false),
+            lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+                trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
+            ),
+        ),
+    )
 }
 
 /** La vignette d'une pièce choisie, avant l'envoi, avec son ✕. */

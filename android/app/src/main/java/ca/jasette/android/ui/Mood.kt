@@ -246,7 +246,7 @@ private fun RangeeEmojiRapide(emoji: String?, choisir: (String?) -> Unit, autre:
             Pastille(emoji == null, { choisir(null) }) {
                 Text(t("Aucun"), color = P.texteFort, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 8.dp))
             }
-            for (e in liste) Pastille(emoji == e, { choisir(e) }) { Text(e, fontSize = 24.sp) }
+            for (e in liste) Pastille(emoji == e, { choisir(e) }) { EmojiCentre(e, 24f) }
             Pastille(false, autre) {
                 Text(t("Autre…"), color = P.texteFort, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 8.dp))
             }
@@ -269,7 +269,7 @@ private fun MiniSaisie(emoji: String?) {
         Spacer(Modifier.width(6.dp))
         if (emoji != null) {
             Box(Modifier.size(36.dp).carte(18.dp, bord = P.accent), contentAlignment = Alignment.Center) {
-                Text(emoji, fontSize = 19.sp)
+                EmojiCentre(emoji, 19f)
             }
         } else {
             Box(Modifier.size(36.dp).clip(formeRonde).background(P.degrade), contentAlignment = Alignment.Center) {
