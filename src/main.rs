@@ -5687,16 +5687,26 @@ impl Jasette {
                     .child(icone("ellipsis", 22., ton(th().texte_fort, th().icone))),
             )
             .child(div().flex_1())
+            // L'engrenage : les Réglages ; mon avatar, en dessous : mon profil
+            // (« Quoi de neuf ? », l'avatar), comme « Moi » sur Android.
             .child(
-                Self::bouton_rail("r-reglages", en_reglages)
+                Self::bouton_rail("r-reglages", en_reglages && self.section != Some(Section::Moi))
                     .on_click(cx.listener(|this, _, _, cx| {
                         // En arrivant dans les Réglages : la liste des comptes, pas
                         // un écran d'ajout resté ouvert d'une visite précédente.
-                        if this.section.is_none() {
+                        if this.section.is_none() || this.section == Some(Section::Moi) {
                             this.ajout_compte = false;
                             this.ajout_service = None;
+                            this.section = Some(Section::Comptes);
                         }
-                        this.section = Some(this.section.unwrap_or(Section::Comptes));
+                        cx.notify();
+                    }))
+                    .child(icone("settings", 22., ton(th().texte_fort, th().icone))),
+            )
+            .child(
+                Self::bouton_rail("r-moi", self.section == Some(Section::Moi))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.section = Some(Section::Moi);
                         cx.notify();
                     }))
                     .child(self.mon_avatar(&initiale, 36.)),
