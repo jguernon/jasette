@@ -93,8 +93,24 @@ object Depot {
     val messages = mutableStateMapOf<String, List<Msg>>()
     /** Y a-t-il des messages plus anciens à charger ? */
     val plusAnciens = mutableStateMapOf<String, Boolean>()
-    /** conv → photo (fichier local). */
+    /** conv → photo (fichier local). Aussi l'icône d'un espace parent (« d:g81 », §5.13). */
     val avatars = mutableStateMapOf<String, String>()
+    /**
+     * La photo des auteurs dans les groupes et les espaces (`sender_avatar`,
+     * §5.13) : préfixe du service + `sender_id` → fichier local.
+     */
+    val avatarsAuteurs = mutableStateMapOf<String, String>()
+
+    /**
+     * La photo d'une conversation : la sienne, sinon l'icône de son espace
+     * parent (`avatars[préfixe + parent]`, §5.13) ; null : les initiales.
+     */
+    fun avatarDe(c: Conv): String? = avatars[c.id]
+        ?: c.parent.takeIf { it.isNotEmpty() }?.let { avatars[c.service.prefixe + it] }
+
+    /** La photo de l'auteur de [m] (groupe ou espace), ou null. */
+    fun avatarAuteur(m: Msg): String? =
+        m.senderId.takeIf { it.isNotEmpty() }?.let { avatarsAuteurs[Service.de(m.conv).prefixe + it] }
     /** media_id → fichier téléchargé. */
     val medias = mutableStateMapOf<String, String>()
     val echecs = mutableStateMapOf<String, Boolean>()
@@ -383,6 +399,7 @@ object Depot {
         messages.clear()
         plusAnciens.clear()
         avatars.clear()
+        avatarsAuteurs.clear()
         medias.clear()
         echecs.clear()
         vignettes.clear()
@@ -952,6 +969,13 @@ object Depot {
                     CacheConvs.noterListes()
                 }
             }
+            // La photo d'un auteur (§5.13) : « service » dit lequel ; à défaut, le pont qui l'envoie.
+            "sender_avatar" -> {
+                val id = v.chaine("id")
+                val path = v.chaine("path")
+                val s = Service.deCle(v.chaine("service")) ?: service
+                if (id.isNotEmpty() && path.isNotEmpty()) avatarsAuteurs[s.prefixe + id] = path
+            }
             "avatars_groupe" -> {
                 // Pas de mosaïque (encore) : la photo du premier membre qui en a une.
                 val conv = v.chaine("conv")
@@ -1268,6 +1292,25 @@ object Depot {
         attention.remove(id)
         if (convs.any { it.id == id && (it.unread || it.mentions > 0) }) {
             remplacerConvs(convs.map { if (it.id == id) it.copy(unread = false, mentions = 0) else it })
+        }
+    }
+
+    /**
+     * « Tout marquer comme lu » (§5.13) : chaque espace de [ids] est marqué lu
+     * ici tout de suite, et reçoit un `read` ordinaire (avec `msg` si l'on
+     * connaît son dernier message ; sinon le pont prend le dernier qu'il connaît).
+     */
+    fun marquerTousLus(ids: Collection<String>) {
+        val lus = ids.toSet()
+        if (lus.isEmpty()) return
+        for (id in lus) {
+            val cmd = JSONObject().put("cmd", "read").put("conv", id)
+            messages[id]?.lastOrNull { !it.local }?.let { cmd.put("msg", it.id) }
+            commande(cmd)
+            attention.remove(id)
+        }
+        if (convs.any { it.id in lus && (it.unread || it.mentions > 0) }) {
+            remplacerConvs(convs.map { if (it.id in lus) it.copy(unread = false, mentions = 0) else it })
         }
     }
 

@@ -390,7 +390,7 @@ fun Fil(
                     val premier = avant == null || avant.fromMe != m.fromMe || avant.sender != m.sender
                     val dernier = apres == null || apres.fromMe != m.fromMe || apres.sender != m.sender
                     Message(
-                        m, groupe = conv?.group == true, nomConv = entete?.name ?: "", premier = premier, dernier = dernier,
+                        m, groupe = conv?.group == true || conv?.large == true, nomConv = entete?.name ?: "", premier = premier, dernier = dernier,
                         surligne = if (recherche) q else "", courant = m.id == courant,
                         reagir = { coords -> reaction = m to coords },
                     ) { plein = it }
@@ -541,6 +541,9 @@ private val EMOJIS = (
     ).split(" ").filter { it.isNotBlank() }
 
 
+/** La taille de la photo de l'auteur d'un message (groupes et espaces). */
+private val PHOTO_AUTEUR = 28.dp
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun Message(
@@ -574,8 +577,20 @@ private fun Message(
     }
     val reessayer = { Depot.reessayer(m.conv, m.tmpId) }
     val aReactions = m.reactions.isNotEmpty()
+    // Dans un groupe ou un espace, en bulles : la photo de l'auteur (§5.13) à gauche
+    // de la première bulle d'une suite, une place vide alignée pour les suivantes.
+    val photoAuteur = groupe && !m.fromMe && !ligne
+    Row(Modifier.fillMaxWidth().padding(top = if (premier) 8.dp else 2.dp, bottom = if (aReactions) 20.dp else 0.dp)) {
+    if (photoAuteur) {
+        if (premier) {
+            AvatarAuteur(m.sender.ifEmpty { nomConv }, Depot.avatarAuteur(m), PHOTO_AUTEUR)
+        } else {
+            Spacer(Modifier.width(PHOTO_AUTEUR))
+        }
+        Spacer(Modifier.width(6.dp))
+    }
     Column(
-        Modifier.fillMaxWidth().padding(top = if (premier) 8.dp else 2.dp, bottom = if (aReactions) 20.dp else 0.dp),
+        Modifier.weight(1f),
         horizontalAlignment = alignement,
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
@@ -723,6 +738,7 @@ private fun Message(
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
+    }
     }
     if (qui) QuiAReagi(m) { qui = false }
 }

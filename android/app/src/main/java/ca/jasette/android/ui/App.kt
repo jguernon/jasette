@@ -61,7 +61,7 @@ import ca.jasette.android.ContactTrouve
 import ca.jasette.android.Contacts
 import ca.jasette.android.Conv
 import ca.jasette.android.Depot
-import ca.jasette.android.Sorte
+import ca.jasette.android.espaceDe
 import ca.jasette.android.Marques
 import ca.jasette.android.Service
 import ca.jasette.android.t
@@ -139,8 +139,8 @@ fun App(activite: Activity, prive: Boolean = false) {
     var anciennesMontrees by remember { mutableStateOf(false) }
     LaunchedEffect(vue) { if (vue != Vue.Tout) anciennesMontrees = false }
 
-    // Groupes : le serveur Discord ouvert (l'id de son parent, ex. « g123 »), ou null :
-    // la liste des services. Gardé ici : il survit à l'ouverture d'un salon sur téléphone.
+    // Groupes : l'espace parent ouvert (son id préfixé, unique entre services :
+    // « d:g123 », « w:4101@g.us »), ou null : la liste des services. Gardé ici : il survit à l'ouverture d'un salon sur téléphone.
     var espaceGroupes by remember { mutableStateOf<String?>(null) }
 
     fun choisirVue(v: Vue) {
@@ -159,10 +159,10 @@ fun App(activite: Activity, prive: Boolean = false) {
         } else if (aOuvrir != null) {
             pile = listOf(Ecran.Liste)
             // Un grand espace (§5.13) s'ouvre depuis l'onglet Groupes, dans son
-            // serveur Discord : il n'est jamais dans la boîte de réception.
+            // espace parent s'il en a un : il n'est jamais dans la boîte de réception.
             val espace = Depot.convs.firstOrNull { it.id == aOuvrir && it.large }
             vue = if (espace != null) Vue.Groupes else Vue.Tout
-            espaceGroupes = espace?.takeIf { it.kind == Sorte.SERVEUR && it.parent.isNotEmpty() }?.parent
+            espaceGroupes = espace?.let { espaceDe(it, Depot.groupes) }
             ouverte = aOuvrir
             Depot.aOuvrir = null
         }

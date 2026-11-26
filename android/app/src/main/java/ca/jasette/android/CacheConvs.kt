@@ -205,7 +205,9 @@ object CacheConvs {
                 val c = convs.filter { it.service == s }.take(MAX_CONVS)
                 val a = archives.filter { it.service == s }.take(MAX_CONVS)
                 if (c.isEmpty() && a.isEmpty()) continue
-                val av = (c + a).mapNotNull { x -> Depot.avatars[x.id]?.let { x.id to it } }
+                // Avec l'icône des espaces parents (§5.13), gardée sous l'id préfixé du parent.
+                val cles = (c + a).map { it.id } + c.filter { it.parent.isNotEmpty() }.map { s.prefixe + it.parent }
+                val av = cles.distinct().mapNotNull { k -> Depot.avatars[k]?.let { k to it } }
                 listesAEcrire.add(s to JSONObject().apply {
                     put("convs", JSONArray(c.map { it.json() }))
                     put("archives", JSONArray(a.map { it.json() }))

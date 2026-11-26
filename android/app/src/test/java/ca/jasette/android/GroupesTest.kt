@@ -102,66 +102,106 @@ class GroupesTest {
     }
 
     @Test
-    fun serveursDiscord() {
+    fun parentsGeneriquesPourToutService() {
         val convs = listOf(
-            conv("d:g2:1", "général", kind = "server", parent = "g2", parentName = "Zorg", unread = true, mentions = 1),
-            conv("d:g1:1", "général", kind = "server", parent = "g1", parentName = "Atelier", unread = true),
-            conv("d:g1:2", "annonces", kind = "server", parent = "g1", parentName = "Atelier"),
+            conv("d:g2:1", "général", kind = "server", parent = "g2", parentName = "Zorg", unread = true, mentions = 1, time = 50),
+            conv("d:g1:1", "général", kind = "server", parent = "g1", parentName = "Atelier", unread = true, time = 10),
+            conv("d:g1:2", "annonces", kind = "server", parent = "g1", parentName = "Atelier", mentions = 2, time = 20),
+            // Un salon sans parent : une ligne simple, rangée avec les parents par activité.
+            conv("d:7", "seul", kind = "server", time = 30),
             // Un groupe privé Discord n'est pas `large` : jamais dans Groupes.
-            conv("d:9", "Amis", large = false),
+            conv("d:9", "Amis", large = false, time = 99),
         )
         val l = lignesService(Service.DISCORD, convs)
-        assertEquals(2, l.size)
-        val a = (l[0] as LigneGroupes.Serveur).e
-        assertEquals("Atelier", a.nom)
-        assertEquals("d:g1", a.id)
-        assertEquals(2, a.salons.size)
-        assertEquals(1, a.nonLus)
-        assertEquals(1, (l[1] as LigneGroupes.Serveur).e.mentions)
+        assertEquals(3, l.size)
+        val zorg = (l[0] as LigneGroupes.Parent).e
+        assertEquals("Zorg", zorg.nom)
+        assertEquals("d:g2", zorg.id)
+        assertEquals(LigneGroupes.Espace(convs[3]), l[1])
+        val atelier = (l[2] as LigneGroupes.Parent).e
+        assertEquals("d:g1", atelier.id)
+        assertEquals(2, atelier.salons.size)
+        assertEquals(1, atelier.nonLus)
+        assertEquals(2, atelier.mentions)
         assertEquals(2, espacesNonLus(Service.DISCORD, convs))
     }
 
     @Test
-    fun whatsappCommunautesPuisChaines() {
+    fun communauteWhatsappEnTeteDeSesGroupes() {
         val convs = listOf(
-            conv("w:c1@g.us", "Quartier", kind = "community"),
-            conv("w:a@g.us", "Annonces", kind = "community_group", parent = "c1@g.us", announce = true, time = 1),
+            conv("w:c1@g.us", "Quartier", kind = "community", time = 1),
+            conv("w:a@g.us", "Annonces", kind = "community_group", parent = "c1@g.us", announce = true, time = 2),
             conv("w:b@g.us", "Jardin", kind = "community_group", parent = "c1@g.us", time = 9),
-            conv("w:d@g.us", "Orphelin", kind = "community_group", parent = "c2@g.us", parentName = "École", time = 3),
-            conv("w:n@newsletter", "Nouvelles", kind = "newsletter"),
-            conv("w:p@g.us", "Famille", large = false),
+            conv("w:d@g.us", "Orphelin", kind = "community_group", parent = "c2@g.us", time = 3),
+            conv("w:n@g.us", "Seul", kind = "community_group", time = 5),
+            conv("w:p@g.us", "Famille", large = false, time = 20),
         )
         val l = lignesService(Service.WHATSAPP, convs)
-        assertEquals(
-            listOf(
-                LigneGroupes.Entete("École"),
-                LigneGroupes.Espace(convs[3], retrait = true),
-                LigneGroupes.Espace(convs[0]),
-                LigneGroupes.Espace(convs[1], retrait = true),
-                LigneGroupes.Espace(convs[2], retrait = true),
-                LigneGroupes.Titre("Chaînes"),
-                LigneGroupes.Espace(convs[4]),
-            ),
-            l,
-        )
+        assertEquals(3, l.size)
+        val quartier = (l[0] as LigneGroupes.Parent).e
+        // Sans parent_name : le nom de la conversation parente ; elle est en tête, sans ligne à part.
+        assertEquals("Quartier", quartier.nom)
+        assertEquals("w:c1@g.us", quartier.id)
+        assertEquals(convs[0], quartier.tete)
+        assertEquals(listOf(convs[1], convs[2]), quartier.salons)
+        assertEquals(LigneGroupes.Espace(convs[4]), l[1])
+        // Parent absent de la liste et sans nom : « Communauté » (traduit à l'affichage).
+        val orphelin = (l[2] as LigneGroupes.Parent).e
+        assertEquals("", orphelin.nom)
+        assertEquals("Communauté", orphelin.generique)
+        assertEquals("Serveur", EspaceParent(Service.DISCORD, "g1", "", listOf(conv("d:g1:1", kind = "server", parent = "g1"))).generique)
+        // Ouvrir depuis une notification : l'espace du parent, préfixé et unique par service.
+        assertEquals("w:c1@g.us", espaceDe(convs[1], convs))
+        assertEquals("w:c1@g.us", espaceDe(convs[0], convs))
+        assertEquals(null, espaceDe(convs[4], convs))
+        assertEquals("w:c1@g.us", parentDe("w:c1@g.us", convs)?.id)
+        assertEquals(null, parentDe("d:c1@g.us", convs))
     }
 
     @Test
-    fun telegramCanauxPuisSupergroupes() {
+    fun telegramSansParentParActivite() {
         val convs = listOf(
-            conv("t:2", "Super", kind = "supergroup"),
-            conv("t:1", "Canal", kind = "channel"),
-            conv("t:3", "Inconnu", kind = "autre_chose"),
+            conv("t:2", "Super", kind = "supergroup", time = 1),
+            conv("t:1", "Canal", kind = "channel", time = 3),
+            conv("t:3", "Inconnu", kind = "autre_chose", time = 2),
         )
         val l = lignesService(Service.TELEGRAM, convs)
-        assertEquals(
-            listOf(
-                LigneGroupes.Titre("Canaux"), LigneGroupes.Espace(convs[1]),
-                LigneGroupes.Titre("Supergroupes"), LigneGroupes.Espace(convs[0]),
-                LigneGroupes.Titre("Autres"), LigneGroupes.Espace(convs[2]),
-            ),
-            l,
-        )
+        assertEquals(listOf(LigneGroupes.Espace(convs[1]), LigneGroupes.Espace(convs[2]), LigneGroupes.Espace(convs[0])), l)
         assertTrue(lignesService(Service.SIGNAL, convs).isEmpty())
+    }
+
+    @Test
+    fun toutMarquerCommeLu() {
+        val convs = listOf(
+            conv("d:g1:1", kind = "server", parent = "g1", unread = true),
+            conv("d:g1:2", kind = "server", parent = "g1"),
+            conv("d:g1:3", kind = "server", parent = "g1", mentions = 2),
+            conv("d:g2:1", kind = "server", parent = "g2", unread = true),
+            conv("d:5", kind = "server", unread = true),
+            conv("d:6", large = false, unread = true),
+            conv("d:g1:9", kind = "server", parent = "g1", unread = true),
+            conv("t:1", kind = "channel", unread = true),
+            conv("w:c@g.us", kind = "community", unread = true),
+            conv("w:x@g.us", kind = "community_group", parent = "c@g.us", unread = true),
+        )
+        val privee = { id: String -> id == "d:g1:9" }
+        // La section Discord : seulement ses espaces non lus (ou mentionnés), sans les privées.
+        assertEquals(
+            listOf("d:g1:1", "d:g1:3", "d:g2:1", "d:5"),
+            aMarquerLus(Service.DISCORD, convs, privee = privee).map { it.id },
+        )
+        // Un parent : ses salons seulement, pas ceux d'un autre parent.
+        assertEquals(listOf("d:g1:1", "d:g1:3"), aMarquerLus(Service.DISCORD, convs, "d:g1", privee).map { it.id })
+        // Une communauté : elle-même et ses groupes.
+        assertEquals(listOf("w:c@g.us", "w:x@g.us"), aMarquerLus(Service.WHATSAPP, convs, "w:c@g.us").map { it.id })
+        assertTrue(aMarquerLus(Service.SIGNAL, convs).isEmpty())
+    }
+
+    @Test
+    fun auteurGardeParLeCache() {
+        val m = msg("d:g1:2").copy(senderId = "4242")
+        assertEquals(m, Msg.de(JSONObject(m.json().toString())))
+        assertEquals("4242", Msg.de(JSONObject("""{"id":"1","conv":"d:1","sender_id":"4242"}""")).senderId)
+        assertEquals("", Msg.de(JSONObject("""{"id":"1","conv":"d:1"}""")).senderId)
     }
 }

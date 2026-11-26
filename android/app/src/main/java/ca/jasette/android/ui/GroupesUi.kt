@@ -22,10 +22,12 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,10 +52,11 @@ import ca.jasette.android.LigneGroupes
 import ca.jasette.android.Marques
 import ca.jasette.android.Service
 import ca.jasette.android.Sorte
+import ca.jasette.android.aMarquerLus
 import ca.jasette.android.espacesNonLus
 import ca.jasette.android.lignesService
+import ca.jasette.android.parentDe
 import ca.jasette.android.rangerSalons
-import ca.jasette.android.serveurs
 import ca.jasette.android.t
 
 /**
@@ -87,9 +90,11 @@ object GroupesReplies {
 
 /**
  * L'onglet Groupes (PROTOCOLE.md §5.13) : les grands espaces (`large`), une
- * section repliable par service. Discord : ses serveurs ; un serveur
- * ([espace], l'id de son parent) ouvre la liste de ses salons, par catégorie.
- * Un espace ou un salon touché s'ouvre dans le fil habituel ([ouvrir]).
+ * section repliable par service, rangée par les règles génériques (aucune
+ * propre à un service) : une ligne par parent (serveur, communauté…), une
+ * par espace sans parent. Un parent ([espace], son id préfixé : « d:g81 »,
+ * « w:4101@g.us ») ouvre la liste de ses salons, par catégorie. Un espace ou
+ * un salon touché s'ouvre dans le fil habituel ([ouvrir]).
  */
 @Composable
 fun Groupes(
@@ -103,8 +108,10 @@ fun Groupes(
     reglages: (SectionReglages?) -> Unit,
 ) {
     val tous = Depot.groupes
-    // Le serveur ouvert : retrouvé à chaque fois (ses salons changent) ; disparu, on revient.
-    val serveur = espace?.let { p -> serveurs(Service.DISCORD, tous).firstOrNull { it.parent == p } }
+    // Le parent ouvert : retrouvé à chaque fois (ses salons changent).
+    val ouvert = espace?.let { parentDe(it, tous) }
+    // « Tout marquer comme lu » : la sélection à confirmer (nom de la section ou du parent, espaces).
+    var aConfirmer by remember { mutableStateOf<Pair<String, List<Conv>>?>(null) }
     BackHandler(enabled = espace != null) { ouvrirEspace(null) }
     Scaffold(
         containerColor = P.ecran,
@@ -118,12 +125,31 @@ fun Groupes(
                     }
                 },
                 title = {
-                    Text(
-                        serveur?.nom ?: t("Groupes"), fontWeight = FontWeight.Bold, fontSize = 22.sp,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    )
+                    if (ouvert != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TuileParent(ouvert, 32.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                nomParent(ouvert), fontWeight = FontWeight.Bold, fontSize = 20.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    } else {
+                        Text(
+                            t("Groupes"), fontWeight = FontWeight.Bold, fontSize = 22.sp,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 },
                 actions = {
+                    if (ouvert != null) {
+                        val lus = aMarquerLus(ouvert.service, tous, ouvert.id)
+                        if (lus.isNotEmpty()) {
+                            IconButton(onClick = { aConfirmer = nomParent(ouvert) to lus }) {
+                                Icon(Icones.toutLu, t("Tout marquer comme lu"), tint = P.iconeBarre)
+                            }
+                        }
+                    }
                     // Sur grand écran, les réglages sont en bas du rail.
                     if (!large) {
                         IconButton(onClick = { reglages(null) }) { Icon(Icons.Filled.Settings, t("Réglages"), tint = P.iconeBarre) }
@@ -145,9 +171,14 @@ fun Groupes(
             contentPadding = margesBas,
         ) {
             if (espace != null) {
-                // Les salons d'un serveur Discord, par catégorie (sans catégorie en tête).
-                val salons = serveur?.salons.orEmpty()
-                if (salons.isEmpty()) {
+                // Les salons d'un parent, par catégorie (sans catégorie en tête) ;
+                // la conversation parente (communauté) d'abord.
+                val salons = ouvert?.salons.orEmpty()
+                val tete = ouvert?.tete
+                if (tete != null) {
+                    item(key = tete.id) { RangeeEspace(tete, tete.id == choisie, false, retiree) { ouvrir(tete.id) } }
+                }
+                if (salons.isEmpty() && tete == null) {
                     item { Text(t("Aucun salon"), color = P.textePale, modifier = Modifier.fillMaxWidth().padding(32.dp)) }
                 }
                 for ((section, liste) in rangerSalons(salons)) {
@@ -172,16 +203,18 @@ fun Groupes(
                 for (s in services) {
                     val replie = GroupesReplies.replie(ctx, s)
                     item(key = "service:${s.cle}") {
-                        EnteteService(s, espacesNonLus(s, tous), replie) { GroupesReplies.basculer(ctx, s) }
+                        val lus = aMarquerLus(s, tous)
+                        EnteteService(
+                            s, espacesNonLus(s, tous), replie,
+                            marquerLus = if (lus.isEmpty()) null else ({ aConfirmer = s.titre to lus }),
+                        ) { GroupesReplies.basculer(ctx, s) }
                     }
                     if (replie) continue
                     val lignes = lignesService(s, tous)
                     items(lignes, key = { l -> cleLigne(s, l) }) { l ->
                         when (l) {
-                            is LigneGroupes.Titre -> TitreSection(t(l.texte))
-                            is LigneGroupes.Entete -> TitreSection(l.nom)
-                            is LigneGroupes.Espace -> RangeeEspace(l.c, l.c.id == choisie, l.retrait, retiree) { ouvrir(l.c.id) }
-                            is LigneGroupes.Serveur -> RangeeServeur(l.e) { ouvrirEspace(l.e.parent) }
+                            is LigneGroupes.Espace -> RangeeEspace(l.c, l.c.id == choisie, false, retiree) { ouvrir(l.c.id) }
+                            is LigneGroupes.Parent -> RangeeParent(l.e) { ouvrirEspace(l.e.id) }
                         }
                     }
                 }
@@ -190,19 +223,49 @@ fun Groupes(
             item { Spacer(Modifier.size(24.dp)) }
         }
     }
+    aConfirmer?.let { (nom, lus) ->
+        ConfirmerToutLu(nom, lus.size, fermer = { aConfirmer = null }) {
+            aConfirmer = null
+            Depot.marquerTousLus(lus.map { it.id })
+        }
+    }
+}
+
+/** Le nom d'un parent : le sien, sinon « Serveur » ou « Communauté ». */
+private fun nomParent(e: EspaceParent): String = e.nom.ifEmpty { t(e.generique) }
+
+/** La confirmation de « Tout marquer comme lu » (§5.13), dans les couleurs du thème. */
+@Composable
+private fun ConfirmerToutLu(nom: String, n: Int, fermer: () -> Unit, confirmer: () -> Unit) {
+    val texte = if (n == 1) {
+        t("Le salon non lu de %s sera marqué comme lu.").replace("%s", nom)
+    } else {
+        t("Les %d salons non lus de %s seront marqués comme lus.").replace("%d", "$n").replace("%s", nom)
+    }
+    AlertDialog(
+        onDismissRequest = fermer,
+        containerColor = P.menu,
+        title = { Text(t("Tout marquer comme lu ?"), color = P.texteFort) },
+        text = { Text(texte, color = P.texte) },
+        confirmButton = {
+            TextButton(shape = formeBouton, onClick = confirmer) { Text(t("Tout marquer comme lu"), color = P.accent) }
+        },
+        dismissButton = { TextButton(shape = formeBouton, onClick = fermer) { Text(t("Annuler"), color = P.texte) } },
+    )
 }
 
 /** Une clé stable et unique pour chaque ligne (LazyColumn). */
 private fun cleLigne(s: Service, l: LigneGroupes): String = when (l) {
-    is LigneGroupes.Titre -> "t:${s.cle}:${l.texte}"
-    is LigneGroupes.Entete -> "e:${s.cle}:${l.nom}"
     is LigneGroupes.Espace -> l.c.id
-    is LigneGroupes.Serveur -> "g:${l.e.id}"
+    is LigneGroupes.Parent -> "p:${l.e.id}"
 }
 
-/** L'en-tête repliable d'un service : son logo, son nom, ses espaces non lus, la flèche. */
+/**
+ * L'en-tête repliable d'un service : son logo, son nom, ses espaces non lus,
+ * « Tout marquer comme lu » ([marquerLus], absent sans non-lus), la flèche.
+ */
 @Composable
-private fun EnteteService(s: Service, nonLus: Int, replie: Boolean, basculer: () -> Unit) {
+private fun EnteteService(s: Service, nonLus: Int, replie: Boolean, marquerLus: (() -> Unit)?, basculer: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = basculer).padding(start = 16.dp, end = 12.dp, top = 14.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -215,7 +278,13 @@ private fun EnteteService(s: Service, nonLus: Int, replie: Boolean, basculer: ()
         )
         if (nonLus > 0) {
             Pastille(if (nonLus > 99) "99+" else "$nonLus")
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(4.dp))
+        }
+        if (marquerLus != null) {
+            IconButton(onClick = marquerLus, modifier = Modifier.size(36.dp)) {
+                Icon(Icones.toutLu, t("Tout marquer comme lu"), tint = P.textePale, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(2.dp))
         }
         Icon(
             Icons.Filled.KeyboardArrowDown, if (replie) t("Déplier") else t("Replier"), tint = P.textePale,
@@ -313,21 +382,21 @@ private fun RangeeEspace(c: Conv, choisie: Boolean, retrait: Boolean, retiree: (
     }
 }
 
-/** Un serveur Discord : ses initiales (ou sa photo), son nom, ses salons non lus et ses mentions. */
+/** Un parent (serveur, communauté…) : son icône (ou ses initiales), son nom, ses salons non lus et ses mentions. */
 @Composable
-private fun RangeeServeur(e: EspaceParent, onClick: () -> Unit) {
+private fun RangeeParent(e: EspaceParent, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TuileServeur(e, 46.dp)
+        TuileParent(e, 46.dp)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                e.nom, color = P.texteFort, fontWeight = if (e.nonLus > 0) FontWeight.Bold else FontWeight.SemiBold,
+                nomParent(e), color = P.texteFort, fontWeight = if (e.nonLus > 0) FontWeight.Bold else FontWeight.SemiBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = Taille.liste(15f),
             )
-            val n = e.salons.size
+            val n = e.tous.size
             val detail = (if (n == 1) t("1 salon") else "$n ${t("salons")}") +
                 if (e.nonLus > 0) " · ${e.nonLus} ${t("non lus")}" else ""
             Text(detail, color = P.textePale, fontSize = Taille.liste(13f), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -344,23 +413,26 @@ private fun RangeeServeur(e: EspaceParent, onClick: () -> Unit) {
     }
 }
 
-/** La tuile d'un serveur : sa photo si le pont en a envoyé une (`avatar` de `d:g<guild>`), sinon ses initiales. */
+/**
+ * La tuile d'un parent : son icône si le pont en a envoyé une (`avatar` du
+ * parent, gardé sous son id préfixé « d:g81 »), sinon ses initiales.
+ */
 @Composable
-private fun TuileServeur(e: EspaceParent, taille: Dp) {
+private fun TuileParent(e: EspaceParent, taille: Dp) {
     val photo = Depot.avatars[e.id]
     val cadre = Modifier.cadreAvatar(taille)
     if (photo != null) {
         ImageFichier(photo, cadre.background(P.surface), cote = 256, pixels = if (P.retro) PIXELS_RETRO else 0)
         return
     }
-    val lettres = e.nom.split(Regex("\\s+")).mapNotNull { m -> m.firstOrNull { it.isLetterOrDigit() } }.take(2)
+    val lettres = nomParent(e).split(Regex("\\s+")).mapNotNull { m -> m.firstOrNull { it.isLetterOrDigit() } }.take(2)
         .joinToString("").uppercase().ifEmpty { "#" }
     Box(cadre.background(fondAvatar(P.avatarDefaut)), contentAlignment = Alignment.Center) {
         Text(lettres, color = Color.White, fontSize = (taille.value * 0.36f).sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
-/** Un salon d'un serveur Discord : #, son nom, ses mentions ou son point de non-lus. Appui long : le menu. */
+/** Un salon d'un parent : l'icône de sa sorte, son nom, ses mentions ou son point de non-lus. Appui long : le menu. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RangeeSalon(c: Conv, choisie: Boolean, retiree: (String) -> Unit, onClick: () -> Unit) {

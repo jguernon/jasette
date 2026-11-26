@@ -227,6 +227,8 @@ data class Msg(
     val mentionsMe: Boolean = false,
     /** Il répond à un de mes messages (`reply_to_me`, §5.13). */
     val replyToMe: Boolean = false,
+    /** L'id de l'auteur chez le service, sans préfixe (`sender_id`, §5.13) ; sa photo : Depot.avatarsAuteurs. */
+    val senderId: String = "",
 ) {
     /** Un envoi local pas encore confirmé par le pont. */
     val local get() = id == tmpId
@@ -258,6 +260,7 @@ data class Msg(
         apercu?.let { o.put("link_preview", it.json()) }
         if (mentionsMe) o.put("mentions_me", true)
         if (replyToMe) o.put("reply_to_me", true)
+        if (senderId.isNotEmpty()) o.put("sender_id", senderId)
         return o
     }
 
@@ -293,6 +296,7 @@ data class Msg(
                 apercu = LienApercu.de(o.optJSONObject("link_preview")),
                 mentionsMe = o.optBoolean("mentions_me"),
                 replyToMe = o.optBoolean("reply_to_me"),
+                senderId = o.chaine("sender_id"),
             )
         }
     }

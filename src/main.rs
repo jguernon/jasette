@@ -1350,12 +1350,16 @@ struct Msg {
     /// L'aperçu du lien fourni par le service (PROTOCOLE.md, §5.9).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     link_preview: Option<apercu::Apercu>,
-    /// Me mentionne, ou répond à un de mes messages (§5.13) : un grand
-    /// espace revient alors dans la boîte de réception.
+    /// Me mentionne, ou répond à un de mes messages (§5.13) : une pastille
+    /// « @ » dans l'onglet Groupes.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     mentions_me: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     reply_to_me: bool,
+    /// L'id de l'auteur chez le service (sans préfixe) : sa photo arrive par
+    /// `sender_avatar` (§5.13).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    sender_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -2252,6 +2256,8 @@ struct Jasette {
     echecs: HashSet<String>,
     ouvrir_apres: HashSet<String>,
     avatars: HashMap<String, PathBuf>,
+    /// Les photos des auteurs (« préfixe du service + sender_id », §5.13).
+    auteurs: HashMap<String, PathBuf>,
     /// Les conversations marquées absentes (service déconnecté, pas prêt ou
     /// absent), refaites depuis `marques_cache` : montrées grisées.
     fantomes: Vec<Conv>,
@@ -2259,6 +2265,9 @@ struct Jasette {
     /// dernière lecture : la pastille « @ » de l'onglet Groupes (ils ne
     /// reviennent jamais dans la boîte de réception).
     attention: HashSet<String>,
+    /// « Tout marquer comme lu ? » : le nom de ce qu'on marque (service ou
+    /// parent) et les espaces à marquer (onglet Groupes, §5.13).
+    confirmer_tout_lu: Option<(String, Vec<String>)>,
     /// L'onglet Groupes : le serveur Discord ouvert (id de conversation de
     /// son parent, préfixé : « d:g<guilde> »).
     serveur_ouvert: Option<String>,
@@ -2448,6 +2457,9 @@ fn est_numero(s: &str) -> bool {
 fn hors_boite(c: &Conv) -> bool {
     c.large
 }
+
+/// La photo d'un auteur à côté de ses messages, dans un groupe ou un espace.
+const PHOTO_AUTEUR: f32 = 28.;
 
 fn service_de(id: &str) -> Service {
     SERVICES_META.into_iter().find(|s| id.starts_with(s.prefixe())).unwrap_or(Service::GoogleMessages)
@@ -3174,8 +3186,10 @@ impl Jasette {
             echecs: HashSet::new(),
             ouvrir_apres: HashSet::new(),
             avatars: cache.avatars,
+            auteurs: HashMap::new(),
             fantomes: Vec::new(),
             attention: HashSet::new(),
+            confirmer_tout_lu: None,
             serveur_ouvert: None,
             fantomes_faits: false,
             photos_numeros: HashMap::new(),
@@ -3948,11 +3962,11 @@ impl Jasette {
     }
 
     /// Ouvrir un grand espace d'ailleurs (notification) : par l'onglet
-    /// Groupes, au serveur Discord qui le contient.
+    /// Groupes, au parent (serveur, communauté…) qui le contient.
     fn vers_espace(&mut self, id: &str) {
         if let Some(c) = self.conv(id).filter(|c| c.large) {
-            self.serveur_ouvert =
-                (c.kind == "server" && !c.parent.is_empty()).then(|| format!("{}{}", service_de(&c.id).prefixe(), c.parent));
+            let cle = groupes::cle_parent(c);
+            self.serveur_ouvert = (!cle.is_empty()).then_some(cle);
             self.vue = Vue::Groupes;
         }
     }
@@ -4371,6 +4385,15 @@ impl Jasette {
                         self.reglages.avatar_source = "google".into();
                         self.reglages.garder();
                     }
+                }
+            }
+            "sender_avatar" => {
+                let svc = v.get("service").and_then(Value::as_str).unwrap_or_default();
+                let svc = std::iter::once(Service::GoogleMessages).chain(SERVICES_META).find(|s| s.cle() == svc);
+                if let (Some(svc), Some(id), Some(path)) =
+                    (svc, v.get("id").and_then(Value::as_str), v.get("path").and_then(Value::as_str))
+                {
+                    self.auteurs.insert(format!("{}{id}", svc.prefixe()), carre(PathBuf::from(path)));
                 }
             }
             "avatar" => {
@@ -4859,6 +4882,7 @@ impl Jasette {
             link_preview: None,
             mentions_me: false,
             reply_to_me: false,
+            sender_id: String::new(),
         });
         self.descendre = true;
         tmp
@@ -5195,7 +5219,8 @@ impl Jasette {
     /// L'avatar d'une conversation : sa photo, sinon (groupe) la mosaïque de
     /// ses membres, sinon les initiales.
     fn avatar_conv(&self, conv: &Conv, nom: &str, taille: f32) -> AnyElement {
-        let photo = self.photo_conv(conv);
+        // Un salon sans image propre prend l'icône de son parent (serveur…).
+        let photo = self.photo_conv(conv).or_else(|| self.icone_parent(conv));
         if conv.group
             && photo.is_none()
             && let Some(membres) = self.mosaiques.get(&conv.id)
@@ -5203,6 +5228,14 @@ impl Jasette {
             return mosaique(membres, taille);
         }
         avatar(nom, &conv.color, conv.group, photo, taille)
+    }
+
+    /// L'icône du parent d'un grand espace (événement `avatar` du parent).
+    fn icone_parent(&self, conv: &Conv) -> Option<&PathBuf> {
+        if conv.parent.is_empty() {
+            return None;
+        }
+        self.avatars.get(&format!("{}{}", service_de(&conv.id).prefixe(), conv.parent))
     }
 
     /// La photo d'une conversation. Réglage actif : celle du contact du téléphone
@@ -6924,7 +6957,7 @@ impl Jasette {
                 inset: false,
             }]
         };
-        let groupe = self.conv(&id).is_some_and(|c| c.group);
+        let groupe = self.conv(&id).is_some_and(|c| c.group || c.large);
         // Live et Sirène : sans bulles, un en-tête par suite, le texte en retrait.
         let ligne_retro = retro::retro();
         let retrait = if th().live { 14. } else { 10. };
@@ -7018,6 +7051,20 @@ impl Jasette {
                 .when(!m.from_me || ligne_retro, |d| d.items_start())
                 // Sans bulles : tout en retrait sous l'en-tête (qui sort de ce retrait).
                 .when(ligne_retro, |d| d.pl(px(retrait)).gap(px(2.)));
+            // Groupes et espaces : la photo de l'auteur (ou son initiale) à gauche
+            // de la première bulle d'une suite ; les suivantes s'alignent.
+            if groupe && !ligne_retro && !m.from_me {
+                ligne = ligne.relative().pl(px(PHOTO_AUTEUR + 6.));
+                if premier && !flou {
+                    let photo = (!m.sender_id.is_empty())
+                        .then(|| self.auteurs.get(&format!("{}{}", service_de(&id).prefixe(), m.sender_id)))
+                        .flatten();
+                    let haut = if m.sender.is_empty() { 0. } else { 18. };
+                    ligne = ligne.child(
+                        div().absolute().left(px(0.)).top(px(haut)).child(avatar(&m.sender, "", false, photo, PHOTO_AUTEUR)),
+                    );
+                }
+            }
             if !flou {
                 // Le survol d'un message montre le bouton 🙂 (réagir).
                 let survole = mid.clone();
@@ -11423,7 +11470,7 @@ impl Render for Jasette {
                                 .child("Jasette"),
                         ),
                 )
-                .child(div().flex_1().min_h(px(0.)).child(contenu)),
+                .child(div().relative().flex_1().min_h(px(0.)).child(contenu).children(self.modale_tout_lu(cx))),
         )
     }
 }
@@ -12698,6 +12745,7 @@ fn t(fr: &'static str) -> &'static str {
         "Désarchiver" => "Unarchive",
         "Supprimer la conversation" => "Delete conversation",
         "Confirmer la suppression" => "Confirm delete",
+        "Tout marquer comme lu" => "Mark all as read",
         "Archivée par le service : désarchive-la dans son app." => "Archived by the service: unarchive it in its app.",
         "Grille du Head" => "Head grid",
         "Grosseur du texte des messages" => "Message text size",

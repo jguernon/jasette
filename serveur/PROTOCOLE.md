@@ -1223,6 +1223,58 @@ tout reste comme avant) :
   `@everyone`, `@here`, un de mes rôles ; Telegram : mention ou
   `@moi` ; WhatsApp : mention de mon numéro ou de mon LID) ;
 - `reply_to_me` (booléen) : il répond à un de mes messages.
+- `sender_id` (chaîne) : l'id de l'auteur chez le service, sans préfixe
+  (Discord : salons et groupes privés). Sa photo arrive à part, par
+  `sender_avatar`.
+
+**Images** (événements facultatifs ; `path` est réécrit en mode serveur
+comme toute clé `path`, §6) :
+
+- `{"ev":"avatar","conv":"<parent>","path":…}` : l'icône d'un **parent**
+  (serveur Discord `g<guild>`…), comme l'avatar d'une conversation ; le
+  client préfixe `conv` comme d'habitude. Les clients la montrent sur la
+  ligne du parent, dans son en-tête, et pour ses salons sans image propre.
+  Sans icône : l'initiale du nom.
+- `{"ev":"sender_avatar","service":"discord","id":"<sender_id>","path":…}` :
+  la photo d'un auteur, montrée à côté de ses messages dans un espace ou un
+  groupe. Le pont Discord la télécharge **paresseusement** : seulement
+  pour les messages chargés ou reçus, une fois par adresse, au plus 20 par
+  minute (en plus du rythme du CDN) ; une photo déjà sur le disque est
+  redonnée sans réseau avec chaque page d'historique. L'avatar propre au
+  serveur (`member.avatar`) d'abord, sinon celui du compte ; sans avatar,
+  rien : les clients mettent l'initiale.
+
+**Comment un pont fait apparaître des espaces dans Groupes** : les clients
+ne connaissent aucun service en particulier dans l'onglet Groupes ; tout
+repose sur les champs ci-dessus. Un pont (Telegram, WhatsApp, Messenger,
+un futur pont Reddit…) qui les émet y apparaît sans changer les clients.
+
+1. `large: true` : la conversation va dans Groupes, dans la section de son
+   service (une par service, repliable).
+2. Sans `parent` : une ligne à elle dans la section (photo, nom, aperçu),
+   avec l'icône de sa sorte (`kind`).
+3. Avec `parent` : les conversations du même `parent` se rangent sous
+   **une ligne de parent** (nom `parent_name`, icône par l'événement
+   `avatar` du parent, nombre de non-lus et de mentions). La toucher ouvre
+   le parent : ses salons rangés par `section` / `section_order` / `order`
+   / nom. Si le parent est lui-même une conversation de la liste (une
+   communauté WhatsApp), elle passe en tête de ses salons, sans ligne à
+   part.
+4. Les mentions (`mentions`, `mentions_me`, `reply_to_me`) se comptent sur
+   le salon et sur le parent, une fois chacune.
+
+**Tout marquer comme lu** : l'en-tête de chaque section de service et
+l'en-tête d'un parent ouvert portent un bouton « enveloppe ouverte »
+(caché sans non-lus). Il ouvre une confirmation (« Tout marquer comme
+lu ? » ; « Les 12 salons non lus de Discord seront marqués comme lus. » ou
+« Les 4 salons non lus de *Pixel Nord*… »). Confirmé, le client marque lus
+tout de suite, chez lui, les espaces non lus (ou avec mentions) de la
+section ou du parent, et envoie un `read` ordinaire pour **chacun
+d'eux seulement** (jamais pour un espace déjà lu). Les ponts les étalent :
+Discord les passe au rythme REST (400 ms entre requêtes ; pas d'ack groupé,
+`/read-states/ack-bulk` n'est pas dans discordgo) et n'ack qu'un salon qui
+a des non-lus ; Telegram ne fait rien pour un dialogue sans non-lu ni
+mention, et sinon espace ses `read` d'au moins 400 ms.
 
 **Règle de la boîte de réception** (côté clients ; le serveur ne filtre
 rien) : « la boîte de réception, c'est le chat ».
@@ -1243,12 +1295,10 @@ rien) : « la boîte de réception, c'est le chat ».
    l'onglet Groupes (au bureau : le serveur Discord qui le contient).
 
 **Présentation** : une section repliable par service (badge du service,
-nombre d'espaces non lus ; l'état replié est gardé sur l'appareil).
-Discord : la liste des serveurs (`parent`) ; un serveur ouvre ses salons
-rangés par catégorie (`#`) ; un salon ouvre le fil. WhatsApp : les
-communautés et leurs groupes, puis les chaînes. Telegram : canaux
-(haut-parleur) et supergroupes. Messenger et Instagram : leurs canaux et
-discussions de communauté.
+nombre d'espaces non lus ; l'état replié est gardé sur l'appareil), puis
+les règles génériques ci-dessus : Discord montre ses serveurs, WhatsApp
+ses communautés, Messenger les Groupes Facebook de ses discussions de
+communauté, Telegram ses canaux et supergroupes (sans parent).
 
 **Préchargement** : le serveur ne précharge **jamais** les messages d'une
 conversation `large` (§5.8) ; l'historique n'est demandé qu'à l'ouverture.

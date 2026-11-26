@@ -86,7 +86,7 @@ private fun initiales(nom: String): String? {
  */
 @Composable
 fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false, presence: Boolean = false, fondPoint: Color = P.fond) {
-    val photo = ca.jasette.android.Contacts.photoPour(conv, grande = taille >= 48.dp) ?: Depot.avatars[conv.id]
+    val photo = ca.jasette.android.Contacts.photoPour(conv, grande = taille >= 48.dp) ?: Depot.avatarDe(conv)
         ?: ca.jasette.android.CacheMarques.avatar(conv.id)
     Box(Modifier.size(taille)) {
         // Rond, carré (EGA), cadre vert brillant (Live) ou carré en creux (Sirène).
@@ -119,6 +119,27 @@ fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false
                 Modifier.align(Alignment.BottomEnd).size(b).border(2.dp, P.fond, formeLogo(b))
                     .padding(1.dp).clip(formeLogo(b)),
             )
+        }
+    }
+}
+
+/**
+ * La petite photo de l'auteur d'un message dans un groupe ou un espace
+ * (`sender_avatar`, §5.13) ; sans photo, l'initiale de [nom].
+ */
+@Composable
+fun AvatarAuteur(nom: String, photo: String?, taille: Dp) {
+    val cadre = Modifier.cadreAvatar(taille)
+    if (photo != null) {
+        ImageFichier(photo, cadre.background(P.surface), cote = 128, pixels = if (P.retro) PIXELS_RETRO else 0)
+        return
+    }
+    Box(cadre.background(fondAvatar(P.avatarDefaut)), contentAlignment = Alignment.Center) {
+        val i = nom.firstOrNull { it.isLetterOrDigit() }?.uppercase()
+        if (i != null) {
+            Text(i, color = Color.White, fontSize = (taille.value * 0.42f).sp, fontWeight = FontWeight.SemiBold)
+        } else {
+            Icon(Icons.Filled.Person, null, tint = Color.White, modifier = Modifier.size(taille * 0.6f))
         }
     }
 }
@@ -268,6 +289,10 @@ object Icones {
     /** Material « tag » (#) : un salon de serveur Discord. */
     val diese by lazy {
         icone("tag", "M20,10V8h-4V4h-2v4h-4V4H8v4H4v2h4v4H4v2h4v4h2v-4h4v4h2v-4h4v-2h-4v-4H20zM14,14h-4v-4h4V14z")
+    }
+    /** Material « drafts » (enveloppe ouverte) : « Tout marquer comme lu » (§5.13). */
+    val toutLu by lazy {
+        icone("drafts", "M21.99,8c0,-0.72 -0.37,-1.35 -0.94,-1.7L12,1 2.95,6.3C2.38,6.65 2,7.28 2,8v10c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2l-0.01,-10zM12,13L3.74,7.84 12,3l8.26,4.84L12,13z")
     }
     val pleinEcran by lazy {
         icone("view_agenda", "M3,13h18v8H3V13zM3,3h18v8H3V3z")
