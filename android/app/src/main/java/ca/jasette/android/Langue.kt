@@ -489,4 +489,35 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Autre…" to "Other…",
     "Un bouton à droite de la zone d'écriture l'envoie d'un appui quand le champ est vide." to
         "A button right of the message box sends it in one tap when the box is empty.",
+    // La mise à jour dans l'app (MiseAJour.kt, ui/MiseAJourUi.kt).
+    "À propos" to "About",
+    "Version installée" to "Installed version",
+    "Chercher une mise à jour" to "Check for updates",
+    "Jasette est à jour." to "Jasette is up to date.",
+    "Jasette %s est disponible" to "Jasette %s is available",
+    "Mettre à jour" to "Update",
+    "réseau mobile" to "mobile data",
+    "Téléchargement…" to "Downloading…",
+    "Vérification de l'empreinte SHA-256 et de la signature…" to "Checking the SHA-256 fingerprint and the signature…",
+    "Android demande de confirmer l'installation." to "Android is asking you to confirm the installation.",
+    "Pour installer la mise à jour, Android doit permettre à Jasette d'installer des apps. Active « Autoriser cette source » pour Jasette, puis reviens ici." to
+        "To install the update, Android must allow Jasette to install apps. Turn on “Allow from this source” for Jasette, then come back here.",
+    "Ouvrir les réglages" to "Open settings",
+    "Version de développement (debug, installée par adb) : elle ne se met pas à jour elle-même." to
+        "Development version (debug, installed with adb): it doesn't update itself.",
+    "La version release %s est publiée sur jonathanguernon.net/jasette. Pour l'utiliser : désinstalle cette version de développement, puis installe l'APK du site. Les mises à jour suivantes se feront dans l'app." to
+        "Release version %s is published on jonathanguernon.net/jasette. To use it: uninstall this development version, then install the APK from the site. Later updates will happen in the app.",
+    "Impossible de joindre jonathanguernon.net. Réessaie plus tard." to "Can't reach jonathanguernon.net. Try again later.",
+    "Le téléchargement a échoué. Vérifie ta connexion et réessaie." to "The download failed. Check your connection and try again.",
+    "Le fichier téléchargé ne correspond pas à son empreinte SHA-256. Rien n'a été installé." to
+        "The downloaded file doesn't match its SHA-256 fingerprint. Nothing was installed.",
+    "Le fichier téléchargé n'est pas un APK valide. Rien n'a été installé." to "The downloaded file isn't a valid APK. Nothing was installed.",
+    "Le fichier téléchargé n'est pas Jasette. Rien n'a été installé." to "The downloaded file isn't Jasette. Nothing was installed.",
+    "Le fichier téléchargé n'est pas plus récent que la version installée." to "The downloaded file isn't newer than the installed version.",
+    "Cette mise à jour n'est pas signée par le même certificat que la Jasette installée : Android la refuserait. Rien n'a été installé." to
+        "This update isn't signed with the same certificate as the installed Jasette: Android would refuse it. Nothing was installed.",
+    "L'installation n'a pas pu commencer." to "The installation couldn't start.",
+    "Android refuse cette mise à jour : elle n'est pas signée par le même certificat que la Jasette installée." to
+        "Android refuses this update: it isn't signed with the same certificate as the installed Jasette.",
+    "L'installation a échoué." to "The installation failed.",
 )

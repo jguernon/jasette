@@ -44,8 +44,19 @@ sortent dans `.cache/paquets/` :
 
 ```sh
 paquets/empaqueter.sh            # tout ; --sans-apk pour Linux seulement
+paquets/empaqueter.sh --apk-seul # l'APK release et version.json seulement
 android/compiler.sh --release    # l'APK seul, signé avec signing/ (jamais dans git)
 ```
+
+**Mise à jour dans l'app Android.** `empaqueter.sh` écrit aussi
+`version.json` (versionCode, versionName, adresse et SHA-256 de l'APK release
+signé, notes de `paquets/notes-maj.json`), publié avec l'APK dans
+`jasette/telecharger/` du site. L'app le lit au démarrage (au plus toutes les
+6 heures) ou par Réglages > À propos > « Chercher une mise à jour » ; elle
+télécharge l'APK seulement quand on touche « Mettre à jour », vérifie son
+SHA-256 et son certificat, puis l'installe (`MiseAJour.kt`). Le versionCode
+vaut 10 000 + le nombre de commits git : chaque release est plus récente que la
+précédente. Une version debug (adb) ne se met pas à jour elle-même.
 
 Signal demande `libsignal_ffi.a` : voir `pont-signal/build.sh` et
 `android/build-libsignal.sh`.

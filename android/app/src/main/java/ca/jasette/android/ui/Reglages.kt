@@ -176,6 +176,10 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
             Text(t("Icône de l'app"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             ChoixIcone()
 
+            Spacer(Modifier.height(12.dp))
+            Text(t("À propos"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            AProposMiseAJour()
+
         }
     }
 }

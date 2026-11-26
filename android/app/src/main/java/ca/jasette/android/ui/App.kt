@@ -718,6 +718,8 @@ private fun Bannieres(reglages: () -> Unit) {
                 )
             }
         }
+        // Une nouvelle version de Jasette (MiseAJourUi.kt).
+        CarteMiseAJour()
         // Mode client sans aucun service connecté sur le serveur.
         if (Depot.serveur != null && aucunCompte()) {
             Bandeau(couleur = P.accent, onClick = reglages) {

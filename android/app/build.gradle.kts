@@ -11,13 +11,25 @@ val versionJasette: String = rootProject.file("../Cargo.toml").readLines()
     .first { it.startsWith("version = ") }
     .substringAfter('"').substringBefore('"')
 
-// Le versionCode (Google Play exige qu'il augmente à chaque envoi) se déduit de
-// la version : X.Y.Z → X·1 000 000 + Y·1 000 + Z (0.1.0 → 1000). Il dépasse
-// l'ancien versionCode 1 des APK déjà distribués, qui se mettent donc à jour.
-val codeJasette: Int = versionJasette.split('.', '-').take(3)
-    .map { it.toIntOrNull() ?: 0 }
-    .plus(listOf(0, 0, 0))
-    .let { (x, y, z) -> x * 1_000_000 + y * 1_000 + z }
+// Le numéro de build : le nombre de commits git (git rev-list --count HEAD).
+// Il augmente à chaque commit, même quand la version de Cargo.toml ne change pas.
+// Sans git (sources sans .git), 0.
+val buildJasette: Int = try {
+    providers.exec {
+        commandLine("git", "-C", rootProject.file("..").path, "rev-list", "--count", "HEAD")
+    }.standardOutput.asText.get().trim().toInt()
+} catch (e: Exception) {
+    0
+}
+
+// Le versionCode doit augmenter à chaque release, pour que la mise à jour dans
+// l'app (MiseAJour.kt, version.json) et Android la voient plus récente :
+// 10 000 + le numéro de build (112 commits → 10112). Il dépasse les anciens
+// versionCode (1, puis 1000 pour 0.1.0), qui se mettent donc à jour.
+val codeJasette: Int = 10_000 + buildJasette
+
+// Le versionName reste lisible : « 0.1.0 (112) », la version et le numéro de build.
+val nomJasette: String = if (buildJasette > 0) "$versionJasette ($buildJasette)" else versionJasette
 
 // La clé de signature release (aussi la clé d'importation de Google Play) :
 // ../signing/jasette-release.properties (storeFile, storePassword, keyAlias,
@@ -37,7 +49,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = codeJasette
-        versionName = versionJasette
+        versionName = nomJasette
         // Les ponts ne sont compilés que pour arm64 (les téléphones).
         ndk { abiFilters += "arm64-v8a" }
     }
@@ -104,6 +116,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     // Les codes QR de l'association WhatsApp et Signal (zxing core : l'encodeur seul, sans caméra).
     implementation("com.google.zxing:core:3.5.3")
+    // Les tests unitaires (JVM) : VersionDispo (version.json, comparaison des versions).
+    // org.json réel : celui d'android.jar n'est qu'un bouchon hors de l'appareil.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20250517")
     // Le flou derrière les barres (Haze) et le bouton + en verre liquide (haze-glass), Compose 1.12.
     implementation("dev.chrisbanes.haze:haze:2.1.0")
     implementation("dev.chrisbanes.haze:haze-blur:2.1.0")

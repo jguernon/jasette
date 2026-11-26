@@ -27,6 +27,8 @@ class MainActivity : ComponentActivity() {
         Depot.demarrer(this)
         if (Build.VERSION.SDK_INT >= 33) demandeNotifs.launch(Manifest.permission.POST_NOTIFICATIONS)
         lireIntent(intent)
+        // version.json du site, au plus toutes les 6 heures (jamais en debug).
+        MiseAJour.auDemarrage(this)
         setContent { JasetteTheme { App(this) } }
     }
 

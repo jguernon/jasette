@@ -11,6 +11,9 @@
     <!-- Les contacts du téléphone (photos, « Nouveau message ») : demandée seulement
          quand l'utilisateur en a besoin, jamais au démarrage. Ils ne quittent pas le téléphone. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- La mise à jour dans l'app (MiseAJour.kt) : installer l'APK release publié
+         sur jonathanguernon.net/jasette, après vérification de son SHA-256 et de sa signature. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".JasetteApp"
@@ -125,6 +128,11 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/fichiers" />
         </provider>
+
+        <!-- Le statut de la session d'installation d'une mise à jour (MiseAJour.kt). -->
+        <receiver
+            android:name=".MiseAJourRecepteur"
+            android:exported="false" />
 
         <service
             android:name=".PontService"

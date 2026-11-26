@@ -3,10 +3,15 @@
 #   jasette_<version>_amd64.deb              Linux (Debian, Ubuntu…), tout dans /usr/lib/jasette
 #   jasette-<version>-linux-x86_64.tar.gz    Linux, sans installation (ou ./installer.sh dans ~/.local)
 #   jasette-<version>.apk                    Android, signé release (si ../signing/ existe)
+#   version.json                             la mise à jour dans l'app Android (MiseAJour.kt) :
+#                                            versionCode, versionName, adresse et SHA-256 de cet APK,
+#                                            notes de paquets/notes-maj.json
 #   SHA256SUMS
 #
 #   paquets/empaqueter.sh            tout
 #   paquets/empaqueter.sh --sans-apk Linux seulement
+#   paquets/empaqueter.sh --apk-seul l'APK et version.json seulement (SHA256SUMS refait avec
+#                                    les paquets Linux déjà là)
 #
 # Tout ce qui est compilé ou copié reste dans .cache/ (jamais ~/.cache ni /tmp) :
 # .cache/paquets-build/ (binaires, arborescences), .cache/paquets/ (le résultat).
@@ -23,7 +28,9 @@ TRAVAIL="$C/paquets-build"
 BIN="$TRAVAIL/bin"
 SORTIE="$C/paquets"
 APK=1
+LINUX=1
 [[ "${1:-}" == "--sans-apk" ]] && APK=0
+[[ "${1:-}" == "--apk-seul" ]] && LINUX=0
 
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$PROJET/Cargo.toml" | head -1)"
 [[ -n "$VERSION" ]] || { echo "version introuvable dans Cargo.toml" >&2; exit 1; }
@@ -31,6 +38,9 @@ echo "== Jasette $VERSION"
 
 mkdir -p "$BIN" "$SORTIE" "$C/gotmp"
 cd "$PROJET"
+
+# --apk-seul : les étapes 1 à 4 (Linux) sont sautées.
+if [[ $LINUX == 1 ]]; then
 
 # ---- 1. Le bureau (Rust), en release, strippé ----
 echo "== jasette (cargo build --release)"
@@ -181,17 +191,59 @@ TGZ="$SORTIE/$NOM.tar.gz"
 find "$TRAVAIL/tar" -type d -exec chmod 755 {} +
 tar --owner=0 --group=0 --numeric-owner -C "$TRAVAIL/tar" -czf "$TGZ" "$NOM"
 
-# ---- 5. L'APK Android, signé release ----
+fi # LINUX
+
+# ---- 5. L'APK Android, signé release, et son version.json ----
 if [[ $APK == 1 ]]; then
 	echo "== APK"
 	"$PROJET/android/compiler.sh" --release
-	cp "$C/jasette-$VERSION-release.apk" "$SORTIE/jasette-$VERSION.apk"
+	APK_SORTIE="$SORTIE/jasette-$VERSION.apk"
+	cp "$C/jasette-$VERSION-release.apk" "$APK_SORTIE"
+
+	# Les outils du SDK (lecture seule de l'APK) : apksigner et aapt2 du build-tools le plus récent.
+	SDK="$(sed -n 's/^sdk.dir=//p' "$PROJET/android/local.properties" 2>/dev/null)"
+	SDK="${SDK:-${ANDROID_HOME:-$HOME/Android/Sdk}}"
+	OUTILS="$(ls -d "$SDK"/build-tools/*/ | sort -V | tail -1)"
+	# Un APK non signé (ou signé par la clé de débogage) ne doit jamais partir dans version.json.
+	CERT="$("$OUTILS/apksigner" verify --print-certs "$APK_SORTIE" | sed -n 's/^Signer #1 certificate DN: //p')"
+	[[ -n "$CERT" ]] || { echo "APK non signé : version.json non écrit" >&2; exit 1; }
+	if [[ "$CERT" == *"Android Debug"* ]]; then
+		echo "APK signé par la clé de débogage : version.json non écrit" >&2; exit 1
+	fi
+	BADGE="$("$OUTILS/aapt2" dump badging "$APK_SORTIE" | sed -n 1p)"
+	CODE="$(sed -n "s/.* versionCode='\([0-9]*\)'.*/\1/p" <<<"$BADGE")"
+	NOM="$(sed -n "s/.* versionName='\([^']*\)'.*/\1/p" <<<"$BADGE")"
+	[[ -n "$CODE" && -n "$NOM" ]] || { echo "versionCode illisible dans l'APK" >&2; exit 1; }
+	SHA="$(sha256sum "$APK_SORTIE" | cut -d' ' -f1)"
+	TAILLE_APK="$(stat -c %s "$APK_SORTIE")"
+	# L'adresse publique de l'APK (jasette/telecharger/ du site) ; ?v= contourne les caches.
+	URL="https://jonathanguernon.net/jasette/telecharger/jasette-$VERSION.apk?v=$CODE"
+	python3 -I - "$SORTIE/version.json" "$CODE" "$NOM" "$URL" "$SHA" "$TAILLE_APK" "$ICI/notes-maj.json" <<'PY'
+import json, os, sys
+sortie, code, nom, url, sha, taille, notes = sys.argv[1:]
+n = {"fr": "", "en": ""}
+if os.path.isfile(notes):
+    with open(notes, encoding="utf-8") as f:
+        lu = json.load(f)
+    n = {"fr": str(lu.get("fr", "")).strip(), "en": str(lu.get("en", "")).strip()}
+v = {"versionCode": int(code), "versionName": nom, "url": url, "sha256": sha,
+     "taille": int(taille), "notes": n}
+with open(sortie + ".tmp", "w", encoding="utf-8") as f:
+    json.dump(v, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+os.replace(sortie + ".tmp", sortie)
+PY
+	chmod 644 "$SORTIE/version.json"
+	echo "== version.json"
+	cat "$SORTIE/version.json"
 fi
 
 # ---- 6. Les sommes ----
 cd "$SORTIE"
 rm -f SHA256SUMS
-sha256sum -- *.deb *.tar.gz $(ls ./*.apk 2>/dev/null | sed 's|^\./||') > SHA256SUMS
+shopt -s nullglob
+sha256sum -- *.deb *.tar.gz *.apk > SHA256SUMS
+shopt -u nullglob
 echo "== $SORTIE"
 ls -la "$SORTIE"
 cat SHA256SUMS

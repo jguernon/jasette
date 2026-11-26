@@ -13,5 +13,6 @@ class JasetteApp : Application() {
         CacheMarques.charger(this)
         Apercus.charger(this)
         ca.jasette.android.ui.Apparence.charger(this)
+        MiseAJour.charger(this)
     }
 }
