@@ -650,9 +650,16 @@ pas, et le client garde les siens pour lui.
   refus entre elle et chaque conversation de la fiche. Un refus l'emporte
   sur un numéro commun ; un lien à la main l'emporte sur un refus (lier
   efface les refus en cause).
-- `principal` : « Utiliser ce nom » sur une ligne : le nom de cette
-  conversation devient celui de la personne. Sans `principal`, la fiche
-  prend le nom de la conversation d'où on l'a ouverte.
+- `principal` : « Utiliser ce nom et cette photo » sur une ligne : le nom
+  et l'avatar de cette conversation (sa photo telle que le client la connaît,
+  contact du téléphone compris) deviennent ceux de la personne, et toutes ses
+  conversations les montrent partout (listes, Head, en-tête du fil,
+  notifications, recherche, Nouveau message, partage) ; le logo du service
+  reste en pastille. Sans photo à la principale, chacune garde la sienne.
+  La recherche trouve aussi le nom d'origine. Une conversation déliée
+  reprend les siens. Les groupes ne sont jamais touchés. Sans `principal`,
+  rien ne change, et la fiche prend le nom de la conversation d'où on l'a
+  ouverte.
 - Le serveur ne fait **aucune** correspondance : il garde, nettoie, unit et
   diffuse les deux listes.
 
