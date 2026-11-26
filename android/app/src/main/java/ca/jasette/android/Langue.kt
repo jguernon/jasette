@@ -494,6 +494,7 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Afficher qui est en ligne et qui écrit" to "Show who's online and typing",
     "Point vert sur les contacts actifs et « … » quand on vous écrit." to "Green dot on active contacts and “…” when someone is typing.",
     "écrit…" to "typing…",
+    "écrit" to "typing",
     "Sons" to "Sounds",
     "Bulle" to "Bubble",
     "Bois" to "Wood",

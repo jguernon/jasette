@@ -93,7 +93,7 @@ fun BulleEcrit(e: Ecrit, groupe: Boolean) {
 fun ApercuEcrit(taille: TextUnit, couleur: Color, modifier: Modifier = Modifier) {
     val carre = P.ega || P.retro
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        Text(t("écrit…"), color = couleur, fontSize = taille, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(t("écrit"), color = couleur, fontSize = taille, fontWeight = FontWeight.SemiBold, maxLines = 1)
         Spacer(Modifier.width(4.dp))
         for (i in 0 until 3) {
             val s = sautPoint(i)

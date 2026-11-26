@@ -13276,6 +13276,7 @@ fn t(fr: &'static str) -> &'static str {
         "Dans la conversation ouverte : à l'envoi, à la réception et quand on vous écrit." => "In the open conversation: when you send, when you receive and when someone is typing.",
         "Point vert sur les contacts actifs et « … » quand on vous écrit." => "Green dot on active contacts and “…” when someone is typing.",
         "écrit…" => "typing…",
+        "écrit" => "typing",
         "Actif maintenant" => "Active now",
         "Cacher les conversations plus anciennes de la boîte de réception" => "Hide older conversations from the inbox",
         "Selon leur dernier message. Les épinglées et les non lues restent ; Favoris, Archives et la recherche les montrent toujours." => "Based on their last message. Pinned and unread ones stay; Favorites, Archives and search always show them.",

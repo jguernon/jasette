@@ -145,6 +145,7 @@ pub(crate) fn apercu_ecrit(taille: f32) -> Div {
         .text_size(px(taille))
         .text_color(th().accent)
         .font_weight(FontWeight::SEMIBOLD)
-        .child(t("écrit…"))
+        // Sans « … » : les points animés le remplacent.
+        .child(t("écrit"))
         .child(points)
 }
