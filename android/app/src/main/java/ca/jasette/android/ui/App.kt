@@ -823,7 +823,7 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
                 item(key = "puces") {
                     PucesServices(choix, Depot.services.filter { Depot.etat(it).associe }) { choix = choix.avecFiltre(it) }
                 }
-                item(key = "groupe") {
+                if (choix.groupeOffert || choix.groupe) item(key = "groupe") {
                     LigneCreerGroupe(choix, Depot.services.filter { Depot.etat(it).associe }) {
                         choix = choix.basculerGroupe()
                         if (!choix.groupe) nomGroupe = ""

@@ -23,18 +23,22 @@ data class ChoixNouveau(
 
     /**
      * Une puce (null : « Tout ») peut-elle être touchée ? Une fois une personne
-     * choisie, seulement celle de son service ; en mode groupe, jamais celle
-     * d'un service qui ne sait pas créer de groupe.
+     * choisie, seulement celle de son service.
      */
     fun pucePermise(s: Service?): Boolean {
         val v = verrou
-        return if (v != null) s == v else !(groupe && s != null && !creeGroupes(s))
+        return v == null || s == v
     }
 
-    fun avecFiltre(s: Service?): ChoixNouveau = if (pucePermise(s)) copy(filtre = s) else this
+    /** Choisit une puce ; « Tout » ou un service sans groupes fait sortir du mode groupe. */
+    fun avecFiltre(s: Service?): ChoixNouveau {
+        if (!pucePermise(s)) return this
+        val c = copy(filtre = s)
+        return if (c.groupe && !c.groupeOffert) c.copy(groupe = false, choisis = emptyList()) else c
+    }
 
-    /** « Créer un groupe » est-il offert pour la puce choisie ? */
-    val groupeOffert: Boolean get() = filtre?.let { creeGroupes(it) } ?: true
+    /** « Créer un groupe » : seulement sur la puce d'un service qui sait créer des groupes (jamais « Tout »). */
+    val groupeOffert: Boolean get() = filtre?.let { creeGroupes(it) } ?: false
 
     /** Entre en mode groupe, ou en sort (les personnes choisies sont oubliées). */
     fun basculerGroupe(): ChoixNouveau = when {

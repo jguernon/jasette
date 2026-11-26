@@ -10,16 +10,15 @@ class NouveauGroupeTest {
     @Test
     fun pucesEtGroupe() {
         var c = ChoixNouveau()
-        assertTrue(c.filtre == null && c.groupeOffert)
+        assertTrue("pas de groupe sur « Tout »", c.filtre == null && !c.groupeOffert)
         c = c.avecFiltre(Service.X)
         assertFalse("X ne crée pas de groupe", c.groupeOffert)
         assertSame(c, c.basculerGroupe())
-        c = c.avecFiltre(null).basculerGroupe()
+        c = c.avecFiltre(Service.WHATSAPP).basculerGroupe()
         assertTrue(c.groupe)
-        // En mode groupe : les puces X et Bluesky sont désactivées.
-        assertFalse(c.pucePermise(Service.BLUESKY))
-        assertTrue(c.pucePermise(Service.WHATSAPP))
-        assertTrue(!c.montre(Service.X) && c.montre(Service.SIGNAL))
+        assertTrue(!c.montre(Service.X) && c.montre(Service.WHATSAPP))
+        // « Tout » fait sortir du mode groupe.
+        assertFalse(c.avecFiltre(null).groupe)
         // La première personne fixe le service.
         c = c.basculer("w:15145550101@s.whatsapp.net", "Ana")
         assertEquals(Service.WHATSAPP, c.filtre)
@@ -36,7 +35,7 @@ class NouveauGroupeTest {
         c = c.basculer("w:+15145550103", "")
         assertTrue(c.choisis.isEmpty() && c.pucePermise(null) && c.pucePermise(Service.SIGNAL))
         // Sortir du mode groupe oublie tout le monde.
-        c = c.basculer("m:100", "Cy").basculerGroupe()
+        c = c.avecFiltre(Service.MESSENGER).basculer("m:100", "Cy").basculerGroupe()
         assertTrue(!c.groupe && c.choisis.isEmpty())
     }
 

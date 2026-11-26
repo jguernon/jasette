@@ -125,12 +125,7 @@ fun LigneCreerGroupe(choix: ChoixNouveau, connectes: List<Service>, basculer: ()
             }
             if (choix.groupe) Icon(Icons.Filled.Close, t("Fermer"), tint = P.textePale, modifier = Modifier.size(20.dp))
         }
-        val explication = when {
-            choix.verrou != null -> t("Un groupe reste sur un seul service")
-            choix.groupe -> connectes.filter { !choix.creeGroupes(it) }.map { it.court }.takeIf { it.isNotEmpty() }
-                ?.let { "${it.joinToString(", ")} : ${t("Pas encore offert pour ce service")}" }
-            else -> null
-        }
+        val explication = if (choix.verrou != null) t("Un groupe reste sur un seul service") else null
         if (explication != null) {
             Text(
                 explication, color = P.textePale, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,

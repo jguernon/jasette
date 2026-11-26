@@ -56,27 +56,29 @@ impl ChoixNouveau {
     }
 
     /// Une puce (None : « Tout ») peut-elle être touchée ? Une fois une
-    /// personne choisie, seulement celle de son service ; en mode groupe,
-    /// jamais celle d'un service qui ne sait pas créer de groupe.
+    /// personne choisie, seulement celle de son service.
     pub fn puce_permise(&self, s: Option<Service>) -> bool {
-        match self.verrou() {
-            Some(v) => s == Some(v),
-            None => !(self.groupe && s.is_some_and(|s| !s.cree_groupes())),
-        }
+        self.verrou().is_none_or(|v| s == Some(v))
     }
 
-    /// Choisit une puce ; vrai si le filtre a changé.
+    /// Choisit une puce ; vrai si le filtre a changé. Une puce sans groupes
+    /// (ou « Tout ») fait sortir du mode groupe.
     pub fn choisir_filtre(&mut self, s: Option<Service>) -> bool {
         if !self.puce_permise(s) || self.filtre == s {
             return false;
         }
         self.filtre = s;
+        if self.groupe && !self.groupe_offert() {
+            self.groupe = false;
+            self.choisis.clear();
+        }
         true
     }
 
-    /// « Créer un groupe » est-il offert pour la puce choisie ?
+    /// « Créer un groupe » n'est offert que sur la puce d'un seul service
+    /// qui sait créer des groupes (jamais sur « Tout »).
     pub fn groupe_offert(&self) -> bool {
-        self.filtre.is_none_or(Service::cree_groupes)
+        self.filtre.is_some_and(Service::cree_groupes)
     }
 
     /// Entre en mode groupe, ou en sort (les personnes choisies sont oubliées).
@@ -251,17 +253,11 @@ impl Jasette {
         col = col.child(rangee);
         haut += 38.;
         // Une courte explication quand des puces sont désactivées.
-        let explication = if choix.verrou().is_some() {
-            Some(t("Un groupe reste sur un seul service").to_string())
-        } else if choix.groupe {
-            let sans: Vec<&str> =
-                tous_services().filter(|s| self.service_connecte(*s) && !s.cree_groupes()).map(|s| s.court()).collect();
-            (!sans.is_empty()).then(|| format!("{} : {}", sans.join(", "), t("Pas encore offert pour ce service")))
-        } else {
-            None
-        };
+        let explication = choix.verrou().is_some().then(|| t("Un groupe reste sur un seul service").to_string());
         // « Créer un groupe » : une rangée qui bascule le mode groupe.
         let offert = choix.groupe_offert();
+        // Seulement sur la puce d'un service qui sait créer des groupes.
+        if offert || choix.groupe {
         col = col.child(
             div()
                 .id("nv-groupe")
@@ -329,6 +325,7 @@ impl Jasette {
                 .when(choix.groupe, |d| d.child(icone("x", 16., th().texte_pale))),
         );
         haut += 44.;
+        }
         if let Some(e) = explication {
             col = col.child(div().px(px(8.)).pt(px(2.)).h(px(20.)).truncate().text_size(px(12.)).text_color(th().texte_pale).child(e));
             haut += 20.;
@@ -592,18 +589,15 @@ mod essais {
     #[test]
     fn puces_et_groupe() {
         let mut c = ChoixNouveau::default();
-        assert!(c.filtre.is_none() && c.groupe_offert());
+        assert!(c.filtre.is_none() && !c.groupe_offert(), "pas de groupe sur « Tout »");
         assert!(c.choisir_filtre(Some(Service::X)));
         assert!(!c.groupe_offert(), "X ne crée pas de groupe");
         c.basculer_groupe();
         assert!(!c.groupe);
-        assert!(c.choisir_filtre(None));
+        assert!(c.choisir_filtre(Some(Service::WhatsApp)));
         c.basculer_groupe();
         assert!(c.groupe);
-        // En mode groupe : les puces X et Bluesky sont désactivées.
-        assert!(!c.puce_permise(Some(Service::Bluesky)));
-        assert!(c.puce_permise(Some(Service::WhatsApp)));
-        assert!(!c.montre(Service::X) && c.montre(Service::Signal));
+        assert!(!c.montre(Service::X) && c.montre(Service::WhatsApp));
         // La première personne fixe le service.
         assert!(c.basculer("w:15145550101@s.whatsapp.net", "Ana"));
         assert!(c.filtre == Some(Service::WhatsApp));
@@ -619,7 +613,12 @@ mod essais {
         assert!(!c.pret());
         assert!(c.basculer("w:+15145550103", ""));
         assert!(c.choisis.is_empty() && c.puce_permise(None) && c.puce_permise(Some(Service::Signal)));
+        // « Tout » (ou un service sans groupes) fait sortir du mode groupe.
+        assert!(c.choisir_filtre(None));
+        assert!(!c.groupe);
         // Sortir du mode groupe oublie tout le monde.
+        c.choisir_filtre(Some(Service::Messenger));
+        c.basculer_groupe();
         c.basculer("m:100", "Cy");
         c.basculer_groupe();
         assert!(!c.groupe && c.choisis.is_empty());
