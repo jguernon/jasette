@@ -149,6 +149,21 @@ const GROUPES_EMOJI: [(&str, &str); 10] = [
 /// alors sur Adwaita Sans, qui a des versions noir et blanc de bien des emojis.
 const POLICE_EMOJI: &str = "Jasette Emoji";
 
+/// Le débordement des services dans la colonne de gauche : `n` services,
+/// `hauteur` la place libre pour eux (px), `tuile` la hauteur d'une tuile
+/// écart compris, `marge` l'air gardé au-dessus de l'engrenage. Rend le
+/// nombre de tuiles à montrer et s'il faut « ••• » : tout tient, tous et pas
+/// de « ••• » ; sinon autant qu'il en tient moins une, la dernière place
+/// allant au « ••• ». Une hauteur pas encore mesurée (≤ 0 et rien de connu)
+/// montre tout.
+fn tuiles_rail(n: usize, hauteur: f32, tuile: f32, marge: f32) -> (usize, bool) {
+    if n == 0 || tuile <= 0. {
+        return (n, false);
+    }
+    let places = ((hauteur - marge) / tuile).floor().max(0.) as usize;
+    if n <= places { (n, false) } else { (places.saturating_sub(1), true) }
+}
+
 /// Le repli des glyphes absents de la police du texte : la police d'émojis
 /// embarquée. Posé sur la racine de la fenêtre (hérité par tout le texte) et
 /// sur les morceaux de `texte_liens` : un émoji que `est_emoji` ne reconnaît
@@ -2256,6 +2271,11 @@ struct Jasette {
     mood_feuille: Option<mood::FeuilleMood>,
     /// Le menu du clic droit sur l'icône d'un service, dans le rail.
     menu_rail: Option<Service>,
+    /// La hauteur réelle du rail au dernier dessin (0 : pas encore mesurée),
+    /// pour savoir combien de services y tiennent (`tuiles_rail`).
+    haut_rail: Rc<std::cell::Cell<f32>>,
+    /// La modale de tous les services (le « ••• » du rail, en débordement).
+    modale_services: bool,
     /// La vue Favoris en mode « réorganiser » (flèches sur chaque rangée).
     reorganiser: bool,
     /// Live et Sirène : les groupes « En ligne » et « Hors ligne » repliés.
@@ -3220,6 +3240,8 @@ impl Jasette {
             menu_conv: false,
             mood_feuille: None,
             menu_rail: None,
+            haut_rail: Rc::new(std::cell::Cell::new(0.)),
+            modale_services: false,
             reorganiser: false,
             retro_replie: [false; 2],
             confirmer_suppression: false,
@@ -5805,12 +5827,23 @@ impl Jasette {
 
     fn rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let en_reglages = self.section.is_some();
+        // Les services connectés, et combien tiennent dans la hauteur mesurée
+        // au dernier dessin : les boutons fixes au-dessus du trait, l'engrenage
+        // et mon avatar en dessous restent toujours visibles.
+        let services = self.services_rail();
+        let fixes = if self.prive.deverrouille { 6. } else { 5. };
+        // py 14 × 2, les boutons fixes et les deux du bas (44 px), le trait
+        // (1 + 2 × 4), les écarts de 8 px entre tous ces enfants et le vide flexible.
+        let occupe = 28. + (fixes + 2.) * 44. + 9. + 8. * (fixes + 3.);
+        let (n_montres, plus) = if self.haut_rail.get() > 0. {
+            tuiles_rail(services.len(), self.haut_rail.get() - occupe, 52., 12.)
+        } else {
+            (services.len(), false)
+        };
+        let montres = &services[..n_montres];
+        let haut_rail = self.haut_rail.clone();
         let non_lus = self.non_lus();
         let non_lus_groupes = self.non_lus_groupes();
-        let gm_probleme = !matches!(self.etat, Etat::Pret | Etat::Demarrage);
-        // Chaque pastille compte ce qu'elle montre : la tuile Google, ses
-        // conversations seulement (jamais celles des autres services).
-        let non_lus_gm = self.non_lus_service(Service::GoogleMessages);
         let initiale = self
             .reglages
             .email
@@ -5912,56 +5945,23 @@ impl Jasette {
                     .child(icone("images", 22., ton(th().texte_fort, th().icone))),
             )
             .child(div().w(px(32.)).h(px(1.)).my(px(4.)).bg(ton(blanc(0.8), c(0x38383a))))
-            .when(self.etat != Etat::NonAssocie, |d| d.child(
-                Self::bouton_rail("r-gm", !en_reglages && self.vue == Vue::Service(Service::GoogleMessages))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.section = None;
-                        this.galerie = None;
-                        this.vue = Vue::Service(Service::GoogleMessages);
-                        cx.notify();
-                    }))
-                    .on_mouse_down(MouseButton::Right, cx.listener(|this, _, _, cx| {
-                        this.menu_rail = Some(Service::GoogleMessages);
-                        cx.stop_propagation();
-                        cx.notify();
-                    }))
-                    .child(logo_gris(Service::GoogleMessages, 32., self.reglages.service_cache(Service::GoogleMessages)))
-                    .when(matches!(self.etat, Etat::Association | Etat::Connexion | Etat::Reconnexion), |d| {
-                        d.child(pastille_chargement("chargement-google"))
-                    })
-                    .when(gm_probleme && !matches!(self.etat, Etat::Association | Etat::Connexion | Etat::Reconnexion), |d| {
-                        d.child(pastille_alerte())
-                    })
-                    .when(!gm_probleme && non_lus_gm > 0, |d| d.child(pastille_nombre(non_lus_gm, ton(c(DANGER), th().accent))))
-                    .children(self.menu_rail_vue(Service::GoogleMessages, cx)),
-            ))
-            .children(SERVICES_META.into_iter().filter(|s| self.meta(*s).deja_connu(*s)).map(|svc| {
-                let etat = self.meta(svc).etat;
-                let cache = self.reglages.service_cache(svc);
-                let non_lus_svc = if cache { self.non_lus_service(svc) } else { 0 };
-                Self::bouton_rail(svc.id_rail(), !en_reglages && self.vue == Vue::Service(svc))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.section = None;
-                        this.galerie = None;
-                        this.vue = Vue::Service(svc);
-                        cx.notify();
-                    }))
-                    .on_mouse_down(MouseButton::Right, cx.listener(move |this, _, _, cx| {
-                        this.menu_rail = Some(svc);
-                        cx.stop_propagation();
-                        cx.notify();
-                    }))
-                    .child(logo_gris(svc, 32., cache))
-                    .when(matches!(etat, Etat::Association | Etat::Connexion | Etat::Reconnexion), |d| {
-                        d.child(pastille_chargement(svc.id_chargement()))
-                    })
-                    .when(matches!(etat, Etat::TelephoneHorsLigne), |d| d.child(pastille_alerte()))
-                    // Caché de la boîte : ses non-lues restent sur son icône.
-                    .when(cache && non_lus_svc > 0 && !matches!(etat, Etat::TelephoneHorsLigne), |d| {
-                        d.child(pastille_nombre(non_lus_svc, ton(c(DANGER), th().accent)))
-                    })
-                    .children(self.menu_rail_vue(svc, cx))
-            }))
+            .children(montres.iter().map(|svc| self.tuile_rail(*svc, en_reglages, cx)))
+            // Débordement : les services qui ne tiennent pas passent dans une
+            // modale ; « ••• » prend la dernière place (jamais sinon).
+            .when(plus, |d| {
+                let caches = &services[montres.len()..];
+                let actif = !en_reglages && caches.iter().any(|s| self.vue == Vue::Service(*s));
+                let n: usize = caches.iter().map(|s| self.non_lus_service(*s)).sum();
+                d.child(
+                    Self::bouton_rail("r-plus-services", actif || self.modale_services)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.modale_services = true;
+                            cx.notify();
+                        }))
+                        .child(icone("ellipsis", 22., ton(th().texte_fort, th().icone)))
+                        .when(n > 0, |d| d.child(pastille_nombre(n, ton(c(DANGER), th().accent)))),
+                )
+            })
             .child(div().flex_1())
             // L'engrenage : les Réglages ; mon avatar, en dessous : mon profil
             // (« Quoi de neuf ? », l'avatar), comme « Moi » sur Android.
@@ -5989,6 +5989,177 @@ impl Jasette {
                     // Ma note « Quoi de neuf ? » : une bulle de pensée sur l'avatar.
                     .children(self.bulle_note_avatar()),
             )
+            // La hauteur réelle du rail (fenêtre redimensionnée, barre de menus de
+            // Sirène…) : mesurée à chaque dessin, un nouveau dessin si elle change.
+            .relative()
+            .child(
+                gpui::canvas(
+                    move |bornes, fenetre, _| {
+                        let h = f32::from(bornes.size.height);
+                        if (haut_rail.get() - h).abs() > 0.5 {
+                            haut_rail.set(h);
+                            fenetre.refresh();
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full(),
+            )
+    }
+
+    /// Les services de la colonne de gauche, dans son ordre : Google, puis
+    /// les autres comptes connus.
+    fn services_rail(&self) -> Vec<Service> {
+        let mut l = Vec::new();
+        if self.etat != Etat::NonAssocie {
+            l.push(Service::GoogleMessages);
+        }
+        l.extend(SERVICES_META.into_iter().filter(|s| self.meta(*s).deja_connu(*s)));
+        l
+    }
+
+    /// La tuile d'un service dans la colonne de gauche.
+    fn tuile_rail(&self, svc: Service, en_reglages: bool, cx: &mut Context<Self>) -> gpui::Stateful<Div> {
+        let etat = self.etat_de(svc);
+        let cache = self.reglages.service_cache(svc);
+        let charge = matches!(etat, Etat::Association | Etat::Connexion | Etat::Reconnexion);
+        // Google : ses non-lus toujours (sa tuile ne compte que les siens), une
+        // alerte pour tout souci. Les autres : leurs non-lus seulement s'ils
+        // sont cachés de la boîte, une alerte si le téléphone est hors ligne.
+        let (alerte, non_lus) = if svc == Service::GoogleMessages {
+            let probleme = !matches!(etat, Etat::Pret | Etat::Demarrage);
+            (probleme && !charge, if probleme { 0 } else { self.non_lus_service(svc) })
+        } else {
+            let hors = matches!(etat, Etat::TelephoneHorsLigne);
+            (hors, if cache && !hors { self.non_lus_service(svc) } else { 0 })
+        };
+        Self::bouton_rail(svc.id_rail(), !en_reglages && self.vue == Vue::Service(svc))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.section = None;
+                this.galerie = None;
+                this.vue = Vue::Service(svc);
+                cx.notify();
+            }))
+            .on_mouse_down(MouseButton::Right, cx.listener(move |this, _, _, cx| {
+                this.menu_rail = Some(svc);
+                cx.stop_propagation();
+                cx.notify();
+            }))
+            .child(logo_gris(svc, 32., cache))
+            .when(charge, |d| d.child(pastille_chargement(svc.id_chargement())))
+            .when(alerte, |d| d.child(pastille_alerte()))
+            .when(non_lus > 0, |d| d.child(pastille_nombre(non_lus, ton(c(DANGER), th().accent))))
+            .children(self.menu_rail_vue(svc, cx))
+    }
+
+    /// La modale du « ••• » du rail : tous les services connectés, comme
+    /// Réglages > Comptes (logo, nom, compte, état, non-lus). Un clic ouvre la
+    /// vue du service, comme sa tuile.
+    fn modale_services(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.modale_services {
+            return None;
+        }
+        // Défilante, jamais plus haute que la fenêtre (mesurée par le rail).
+        let haut = self.haut_rail.get();
+        let haut_liste = if haut > 0. { (haut - 90.).clamp(120., 420.) } else { 420. };
+        let mut liste = div().id("modale-services-liste").flex().flex_col().gap(px(2.)).max_h(px(haut_liste)).overflow_y_scroll();
+        for svc in self.services_rail() {
+            let etat = self.etat_de(svc);
+            let n = self.non_lus_service(svc);
+            let actif = self.section.is_none() && self.vue == Vue::Service(svc);
+            let compte = if svc == Service::GoogleMessages { None } else { self.meta(svc).nom.clone() };
+            liste = liste.child(
+                div()
+                    .id(SharedString::from(format!("modale-service-{}", svc.id_rail())))
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(12.))
+                    .px(px(10.))
+                    .py(px(8.))
+                    .rounded(rayon(12.))
+                    .cursor_pointer()
+                    .when(actif, |d| d.bg(th().choisi))
+                    .when(!actif, |d| d.hover(|s| s.bg(th().survol)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.modale_services = false;
+                        this.section = None;
+                        this.galerie = None;
+                        this.vue = Vue::Service(svc);
+                        cx.notify();
+                    }))
+                    .child(logo_gris(svc, 36., self.reglages.service_cache(svc)))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .child(div().text_size(px(14.5)).font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(svc.nom()))
+                            .children(compte.map(|c| div().truncate().text_size(px(12.5)).text_color(th().texte).child(c)))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .items_center()
+                                    .gap(px(6.))
+                                    .child(div().size(px(8.)).rounded(rayon(4.)).bg(c(etat.couleur())))
+                                    .child(div().text_size(px(12.5)).text_color(th().texte_pale).child(t(etat.texte()))),
+                            ),
+                    )
+                    .when(n > 0, |d| {
+                        d.child(
+                            div()
+                                .flex_none()
+                                .px(px(7.))
+                                .py(px(1.))
+                                .rounded(rayon(999.))
+                                .bg(th().accent)
+                                .text_size(px(12.))
+                                .text_color(blanc(1.))
+                                .child(if n > 99 { "99+".to_string() } else { n.to_string() }),
+                        )
+                    }),
+            );
+        }
+        Some(
+            div()
+                .id("modale-services")
+                .absolute()
+                .inset_0()
+                .occlude()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(hsla(0., 0., 0., 0.35))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.modale_services = false;
+                    cx.notify();
+                }))
+                .child(
+                    groupe()
+                        .id("modale-services-carte")
+                        .when(!th().sombre && !th().ega, |d| d.bg(blanc(0.97)))
+                        .w(px(380.))
+                        .px(px(14.))
+                        .py(px(14.))
+                        .gap(px(8.))
+                        .on_click(|_, _, cx| cx.stop_propagation())
+                        .child(
+                            div()
+                                .px(px(10.))
+                                .text_size(px(16.))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(th().texte_fort)
+                                .child(t("Services")),
+                        )
+                        .child(liste),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Le menu du clic droit sur l'icône d'un service : le montrer ou le cacher
@@ -11755,6 +11926,8 @@ impl Jasette {
         .when(th().sirene, |d| d.child(self.barre_etat_sirene()))
         // La feuille « Mood » de la conversation ouverte.
         .children(self.feuille_mood(cx))
+        // Le « ••• » du rail : tous les services.
+        .children(self.modale_services(cx))
         // La fiche de la personne (src/personne.rs).
         .children(self.fiche_vue(cx))
         .when_some(self.apercu.clone(), |d, chemin| {
@@ -13324,5 +13497,24 @@ mod essais_reglages {
             assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
         }
         let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+#[cfg(test)]
+mod essais_rail {
+    use super::tuiles_rail;
+
+    /// Le rail : tout ce qui tient, sinon les tuiles qui tiennent moins une et « ••• ».
+    #[test]
+    fn debordement_des_services() {
+        // 9 services × 52 px + 12 de marge = 480 px : tout tient, pas de « ••• ».
+        assert_eq!(tuiles_rail(9, 480., 52., 12.), (9, false));
+        assert_eq!(tuiles_rail(9, 2000., 52., 12.), (9, false));
+        // Un pixel de moins : 8 places, 7 services et « ••• » (les deux derniers partent).
+        assert_eq!(tuiles_rail(9, 479., 52., 12.), (7, true));
+        // Fenêtre très basse : « ••• » seul.
+        assert_eq!(tuiles_rail(4, 60., 52., 12.), (0, true));
+        assert_eq!(tuiles_rail(4, -100., 52., 12.), (0, true));
+        assert_eq!(tuiles_rail(0, 10., 52., 12.), (0, false));
     }
 }

@@ -4,6 +4,8 @@ import ca.jasette.android.nomAffiche
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -204,20 +206,56 @@ fun Rail(vue: Vue, enReglages: Boolean, choisir: (Vue) -> Unit, reglages: () -> 
             )
         }
         HorizontalDivider(Modifier.width(32.dp).padding(vertical = 8.dp), color = P.choisi)
-        for (s in servicesConnectes()) {
-            val v = Vue.DuService(s)
-            NavigationRailItem(
-                selected = !enReglages && vue == v,
-                onClick = { choisir(v) },
-                icon = {
-                    IconeNav(!enReglages && vue == v) {
-                        AvecPastille(nonLus(v)) { LogoService(s, 30.dp, gris = ServicesCaches.cache(s)) }
-                    }
-                },
-                colors = couleurs,
-            )
+        // Les services : autant qu'il en tient dans la hauteur réelle (rotation, Fold
+        // plié ou déplié), l'engrenage et mon avatar toujours visibles en bas, sans
+        // défilement. Quand tout ne tient pas, les derniers laissent leur place à
+        // « ••• », qui ouvre la liste de tous les services (RailTuiles.kt).
+        val services = servicesConnectes()
+        var feuilleServices by remember { mutableStateOf(false) }
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val calcul = tuilesRail(services.size, maxHeight.value, TUILE_RAIL, MARGE_RAIL)
+            Column(
+                Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                for (s in services.take(calcul.montres)) {
+                    val v = Vue.DuService(s)
+                    NavigationRailItem(
+                        selected = !enReglages && vue == v,
+                        onClick = { choisir(v) },
+                        icon = {
+                            IconeNav(!enReglages && vue == v) {
+                                AvecPastille(nonLus(v)) { LogoService(s, 30.dp, gris = ServicesCaches.cache(s)) }
+                            }
+                        },
+                        colors = couleurs,
+                    )
+                }
+                if (calcul.plus) {
+                    val caches = services.drop(calcul.montres)
+                    // La vue d'un service caché est ouverte : le « ••• » est choisi.
+                    val choisi = !enReglages && caches.any { vue == Vue.DuService(it) }
+                    NavigationRailItem(
+                        selected = choisi,
+                        onClick = { feuilleServices = true },
+                        icon = {
+                            IconeNav(choisi) {
+                                AvecPastille(nonLusCaches(services.map { nonLus(Vue.DuService(it)) }, calcul.montres)) {
+                                    TuilePlus(30.dp)
+                                }
+                            }
+                        },
+                        colors = couleurs,
+                    )
+                }
+            }
         }
-        Spacer(Modifier.weight(1f))
+        if (feuilleServices) {
+            FeuilleServices(vue = if (enReglages) null else vue, choisir = { choisir(it); feuilleServices = false }) {
+                feuilleServices = false
+            }
+        }
         NavigationRailItem(
             selected = enReglages,
             onClick = reglages,
@@ -227,6 +265,70 @@ fun Rail(vue: Vue, enReglages: Boolean, choisir: (Vue) -> Unit, reglages: () -> 
         // Mon avatar, en bas à gauche comme au bureau.
         BoutonAvatarMoi(36.dp)
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+/** La hauteur d'une tuile du rail (NavigationRailItem sans étiquette, 56 dp) et son écart. */
+private const val TUILE_RAIL = 60f
+/** L'air gardé entre la dernière tuile et l'engrenage. */
+private const val MARGE_RAIL = 12f
+
+/** Le « ••• » du rail : une tuile de la taille des logos, dans le style du thème. */
+@Composable
+private fun TuilePlus(taille: androidx.compose.ui.unit.Dp) {
+    Box(
+        Modifier.size(taille).clip(formeLogo(taille)).background(P.choisi)
+            .let { if (P.sirene) it.relief(enfonce = false, epaisseur = 1.dp) else it },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("•••", color = P.texteFort, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+    }
+}
+
+/**
+ * Tous les services connectés, dans une feuille du bas (le « ••• » du rail) :
+ * comme Réglages > Comptes, logo, nom, compte, état et non-lus. Toucher un
+ * service ouvre sa vue, comme sa tuile du rail.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun FeuilleServices(vue: Vue?, choisir: (Vue) -> Unit, fermer: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = fermer, containerColor = P.menu) {
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding()
+                .padding(bottom = 12.dp),
+        ) {
+            Text(
+                t("Services"), color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 18.sp,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            )
+            for (s in servicesConnectes()) {
+                val v = Vue.DuService(s)
+                val etat = Depot.etat(s)
+                Row(
+                    Modifier.fillMaxWidth().background(if (vue == v) P.choisi else androidx.compose.ui.graphics.Color.Transparent)
+                        .clickable { choisir(v) }.padding(horizontal = 20.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    LogoService(s, 40.dp, gris = ServicesCaches.cache(s))
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(s.titre, color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                        Depot.noms[s]?.let { Text(it, color = P.texte, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            PastilleEtat(etat)
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (s == Service.GOOGLE && Depot.smsActif) t("SMS du téléphone") else etat.texte,
+                                color = P.textePale, fontSize = 13.sp,
+                            )
+                        }
+                    }
+                    val n = nonLus(v)
+                    if (n > 0) Pastille(if (n > 99) "99+" else "$n")
+                }
+            }
+        }
     }
 }
 
