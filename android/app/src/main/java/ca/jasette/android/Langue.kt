@@ -462,6 +462,7 @@ private val ANGLAIS: Map<String, String> = mapOf(
     // Pièces jointes, réactions, coches.
     "Appareil photo" to "Camera",
     "Copier le texte" to "Copy text",
+    "Copier le code" to "Copy code",
     "Copier le lien" to "Copy link",
     "Aperçus des liens" to "Link previews",
     "Jasette va chercher l'image et le titre des liens (par le serveur Jasette s'il y en a un). Les aperçus envoyés par le service restent affichés." to

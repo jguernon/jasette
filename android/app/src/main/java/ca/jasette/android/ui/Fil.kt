@@ -770,9 +770,55 @@ private fun Message(
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
+        // Un code de vérification reçu (Codes.kt) : « 📋 482913 », sous l'heure.
+        if (!m.fromMe) {
+            val heureMontree = !ligne && (dernier || details || echec)
+            BoutonCode(
+                m,
+                Modifier.padding(
+                    start = if (ligne) retraitLigne else 4.dp,
+                    top = if (aReactions && !heureMontree) 16.dp else 0.dp,
+                ),
+            )
+        }
     }
     }
     if (qui) QuiAReagi(m) { qui = false }
+}
+
+/**
+ * Le bouton d'un code de vérification reçu (Codes.kt, comme src/codes.rs au
+ * bureau) : l'icône de copie et le code ; un toucher copie le code seul (sans
+ * tirets) et dit « Copié » un instant.
+ */
+@Composable
+private fun BoutonCode(m: Msg, modifier: Modifier = Modifier) {
+    val code = remember(m.text) { ca.jasette.android.codeVerification(m.text) } ?: return
+    val pressePapiers = LocalClipboardManager.current
+    var copie by remember(m.id) { mutableStateOf(false) }
+    LaunchedEffect(copie) {
+        if (copie) {
+            kotlinx.coroutines.delay(1600)
+            copie = false
+        }
+    }
+    val teinte = if (copie) P.succes else P.texte
+    Row(
+        modifier.clip(forme(999.dp))
+            .background(P.surface)
+            .border(1.dp, P.traitFin, forme(999.dp))
+            .clickable {
+                pressePapiers.setText(AnnotatedString(code))
+                copie = true
+            }
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .semantics { contentDescription = "${t("Copier le code")} $code" },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Icon(if (copie) Icons.Filled.Check else Icones.copier, null, tint = teinte, modifier = Modifier.size(14.dp))
+        Text(if (copie) "${t("Copié")} $code" else code, color = teinte, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    }
 }
 
 /**

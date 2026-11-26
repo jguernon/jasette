@@ -28,6 +28,8 @@ mod pop;
 mod musique;
 mod groupes;
 mod personne;
+mod selection;
+mod codes;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -2427,6 +2429,12 @@ struct Jasette {
     survol_bulle: Option<String>,
     appui: Option<(String, u64)>,
     appui_seq: u64,
+    /// Où l'appui a commencé : un glissement (sélection du texte) l'annule.
+    appui_depart: Option<gpui::Point<Pixels>>,
+    /// Le message dont on vient de copier le texte (« Copié » dans la barre).
+    texte_copie: Option<String>,
+    /// Le message dont on vient de copier le code de vérification (src/codes.rs).
+    code_copie: Option<String>,
     reaction_cible: Option<String>,
     /// La page elle-même, focalisée quand rien d'autre ne l'est : Ctrl+F et Échap y arrivent toujours.
     focus_page: gpui::FocusHandle,
@@ -3351,6 +3359,9 @@ impl Jasette {
             survol_bulle: None,
             appui: None,
             appui_seq: 0,
+            appui_depart: None,
+            texte_copie: None,
+            code_copie: None,
             reaction_cible: None,
             focus_page: cx.focus_handle(),
             prive: prive::EtatPrive::charger(),
@@ -7548,6 +7559,9 @@ impl Jasette {
                         d.child(div().pb(px(2.)).child(self.coches(m, k, th().texte_pale, cx)))
                     });
                 ligne = ligne.child(self.bulle_reactive(m, texte.into_any_element(), flou, cx));
+                if let Some(b) = self.bouton_code(orig, cx) {
+                    ligne = ligne.child(b);
+                }
                 if let Some(carte) = self.carte_apercu(orig) {
                     ligne = ligne.child(carte);
                 }
@@ -7644,6 +7658,10 @@ impl Jasette {
                     )
                 });
                 ligne = ligne.child(self.bulle_reactive(m, bulle.into_any_element(), flou, cx));
+                // Un code de vérification reçu : « 📋 482913 », sous la bulle.
+                if !flou && let Some(b) = self.bouton_code(orig, cx) {
+                    ligne = ligne.child(b);
+                }
                 // L'aperçu du lien, sous la bulle, dès qu'il est là.
                 if !flou && let Some(carte) = self.carte_apercu(orig) {
                     ligne = ligne.child(carte);
@@ -7788,8 +7806,21 @@ impl Jasette {
         } else {
             Vec::new()
         };
+        // Le fond de la sélection (src/selection.rs) : sur ma bulle (accent), un
+        // blanc voilé ; sur la reçue, l'accent ; en EGA, le cyan plein de la palette.
+        let fond_selection = if th().ega {
+            c(0x00aaaa)
+        } else if m.from_me && !retro::retro() {
+            blanc(0.38)
+        } else {
+            alpha(th().accent, 0.45)
+        };
+        let id_sel = SharedString::from(format!("sel-{}", m.id));
         if liens.is_empty() {
-            return texte_surligne(m.text.clone(), couleur, None, plage).into_any_element();
+            let st = texte_surligne(m.text.clone(), couleur, None, plage);
+            let d = st.layout().clone();
+            return selection::texte_selectionnable(id_sel, m.text.clone(), d, st.into_any_element(), fond_selection)
+                .into_any_element();
         }
         // Sur ma bulle (accent), le blanc souligné ; sur la reçue, l'accent lisible du thème.
         let couleur_lien = if retro::retro() {
@@ -7803,16 +7834,20 @@ impl Jasette {
         };
         let plages: Vec<Range<usize>> = liens.iter().map(|(r, _)| r.clone()).collect();
         let urls: Vec<String> = liens.into_iter().map(|(_, u)| u).collect();
-        gpui::InteractiveText::new(
-            SharedString::from(format!("t-{}", m.id)),
-            texte_liens(m.text.clone(), couleur, None, plage, &plages, couleur_lien),
-        )
-        .on_click(plages, move |i, _, _| {
-            if let Some(u) = urls.get(i) {
-                ouvrir_adresse(u);
-            }
-        })
-        .into_any_element()
+        let st = texte_liens(m.text.clone(), couleur, None, plage, &plages, couleur_lien);
+        let d = st.layout().clone();
+        let interactif = gpui::InteractiveText::new(SharedString::from(format!("t-{}", m.id)), st)
+            .on_click(plages, move |i, window, cx| {
+                // Un glissement qui finit sur le lien sélectionne, il n'ouvre pas.
+                if gpui_base::TextSelection::has_selection(window, cx) {
+                    return;
+                }
+                if let Some(u) = urls.get(i) {
+                    ouvrir_adresse(u);
+                }
+            })
+            .into_any_element();
+        selection::texte_selectionnable(id_sel, m.text.clone(), d, interactif, fond_selection).into_any_element()
     }
 
     /// Les aperçus à chercher pour la conversation ouverte : la vignette des
@@ -8005,6 +8040,71 @@ impl Jasette {
         Some(carte.child(texte).into_any_element())
     }
 
+    /// Le texte complet d'un message (la bulle peut l'avoir montré sans son adresse).
+    fn texte_original(&self, m: &Msg) -> String {
+        self.choisie
+            .as_ref()
+            .and_then(|c| self.messages.get(c))
+            .and_then(|l| l.iter().find(|x| x.id == m.id))
+            .map(|x| x.text.clone())
+            .unwrap_or_else(|| m.text.clone())
+    }
+
+    /// Un code de vérification reçu (src/codes.rs) : un petit bouton sous la
+    /// bulle, « 📋 482913 », qui copie le code seul ; « Copié » un instant.
+    fn bouton_code(&self, m: &Msg, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if m.from_me || m.text.is_empty() {
+            return None;
+        }
+        let code = codes::code_verification(&m.text)?;
+        let fait = self.code_copie.as_deref() == Some(m.id.as_str());
+        let id = m.id.clone();
+        let ega = th().ega;
+        let teinte = if fait { th().succes } else if ega { c(EGA_CYAN_VIF) } else { th().texte };
+        let valeur = code.clone();
+        Some(
+            div()
+                .id(SharedString::from(format!("code-{}", m.id)))
+                .ml(px(4.))
+                .flex_none()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(5.))
+                .px(px(9.))
+                .py(px(3.))
+                .rounded(rayon(999.))
+                .border_1()
+                .border_color(if ega { c(EGA_GRIS) } else { th().trait_fin })
+                .bg(if ega { c(EGA_NOIR) } else { ton(blanc(0.8), th().surface) })
+                .text_size(px(12.))
+                .text_color(teinte)
+                .cursor_pointer()
+                .hover(|s| s.bg(th().survol))
+                .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(t("Copier le code")).build(w, cx))
+                .child(icone(if fait { "check" } else { "copy" }, 13., teinte))
+                .child(div().font_weight(FontWeight::SEMIBOLD).child(if fait { format!("{} {code}", t("Copié")) } else { code }))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(valeur.clone()));
+                    this.code_copie = Some(id.clone());
+                    cx.notify();
+                    let id = id.clone();
+                    cx.spawn(async move |this, cx| {
+                        cx.background_executor().timer(Duration::from_millis(1600)).await;
+                        let _ = this.update(cx, |this, cx| {
+                            if this.code_copie.as_deref() == Some(id.as_str()) {
+                                this.code_copie = None;
+                                cx.notify();
+                            }
+                        });
+                    })
+                    .detach();
+                }))
+                .into_any_element(),
+        )
+    }
+
     fn bulle_reactive(&self, m: &Msg, bulle: AnyElement, flou: bool, cx: &mut Context<Self>) -> AnyElement {
         let mut boite = div().relative().flex_none().max_w(px(540.)).child(bulle);
         if flou {
@@ -8019,12 +8119,19 @@ impl Jasette {
         }
         let id = m.id.clone();
         let (id_bas, id_haut, id_dehors, id_droit, id_clic) = (id.clone(), id.clone(), id.clone(), id.clone(), id.clone());
+        let id_glisse = id.clone();
         let mut boite = boite
             .id(SharedString::from(format!("bulle-{id}")))
             // Appui long (450 ms) : la barre des réactions.
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _, _, cx| {
+                cx.listener(move |this, e: &gpui::MouseDownEvent, _, cx| {
+                    // Un double ou triple clic sélectionne un mot, la bulle : pas d'appui long.
+                    if e.click_count > 1 {
+                        this.appui = None;
+                        return;
+                    }
+                    this.appui_depart = Some(e.position);
                     this.appui_seq += 1;
                     let seq = this.appui_seq;
                     this.appui = Some((id_bas.clone(), seq));
@@ -8042,6 +8149,18 @@ impl Jasette {
                     .detach();
                 }),
             )
+            // La souris glisse, bouton enfoncé : on sélectionne du texte, pas d'appui long.
+            .on_mouse_move(cx.listener(move |this, e: &gpui::MouseMoveEvent, _, _| {
+                if this.appui.as_ref().is_some_and(|(a, _)| *a == id_glisse)
+                    && e.pressed_button == Some(MouseButton::Left)
+                    && this.appui_depart.is_some_and(|d| {
+                        let (dx, dy) = (f32::from(e.position.x - d.x), f32::from(e.position.y - d.y));
+                        dx * dx + dy * dy > 25.
+                    })
+                {
+                    this.appui = None;
+                }
+            }))
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(move |this, _, _, _| {
@@ -8068,6 +8187,13 @@ impl Jasette {
             )
             // Un clic sur la bulle ne ferme pas sa propre barre (l'appui long finit par un clic).
             .on_click(cx.listener(move |this, _, _, cx| {
+                // Relâché avant l'appui long. (Le clic arrête la propagation : le
+                // `on_mouse_up` ci-dessus ne le voit pas toujours, quand une image
+                // s'est glissée entre l'appui et le relâchement, comme après le
+                // début d'une sélection de texte.)
+                if this.appui.as_ref().is_some_and(|(a, _)| *a == id_clic) {
+                    this.appui = None;
+                }
                 if this.barre_reactions.as_ref().is_some_and(|b| *b != id_clic) {
                     this.barre_reactions = None;
                     cx.notify();
@@ -8160,6 +8286,50 @@ impl Jasette {
                     }))
                     .child(icone("plus", 18., th().texte)),
             );
+            // Copier le texte de la bulle (le texte complet, adresse comprise).
+            if !m.text.is_empty() {
+                let texte = self.texte_original(m);
+                let id_c = id.clone();
+                let fait = self.texte_copie.as_deref() == Some(m.id.as_str());
+                barre = barre.child(div().w(px(1.)).h(px(22.)).mx(px(3.)).bg(th().trait_fin)).child(
+                    div()
+                        .id(SharedString::from(format!("copier-texte-{id}")))
+                        .h(px(34.))
+                        .px(px(10.))
+                        .rounded(rayon(999.))
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(6.))
+                        .cursor_pointer()
+                        .hover(|s| s.bg(th().survol))
+                        .text_size(px(13.))
+                        .text_color(if fait { th().succes } else { th().texte })
+                        .child(icone(if fait { "check" } else { "copy" }, 16., if fait { th().succes } else { th().texte }))
+                        .child(if fait { t("Copié") } else { t("Copier le texte") })
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            cx.write_to_clipboard(gpui::ClipboardItem::new_string(texte.clone()));
+                            this.texte_copie = Some(id_c.clone());
+                            cx.notify();
+                            // « Copié » un instant, puis la barre se ferme.
+                            let id_c = id_c.clone();
+                            cx.spawn(async move |this, cx| {
+                                cx.background_executor().timer(Duration::from_millis(700)).await;
+                                let _ = this.update(cx, |this, cx| {
+                                    if this.texte_copie.as_deref() == Some(id_c.as_str()) {
+                                        this.texte_copie = None;
+                                        if this.barre_reactions.as_deref() == Some(id_c.as_str()) {
+                                            this.barre_reactions = None;
+                                        }
+                                        cx.notify();
+                                    }
+                                });
+                            })
+                            .detach();
+                        })),
+                );
+            }
             boite = boite.child(gpui::deferred(
                 div()
                     .absolute()
@@ -13195,6 +13365,8 @@ fn t(fr: &'static str) -> &'static str {
         "Les services se connectent et se déconnectent sur le serveur." => "Services are connected and disconnected on the server.",
         "Copier" => "Copy",
         "Copié" => "Copied",
+        "Copier le texte" => "Copy text",
+        "Copier le code" => "Copy code",
         "Connexion MCP (Claude)" => "MCP connection (Claude)",
         "Branchez Claude (claude.ai ou Claude Code) sur les messageries de ce serveur : il pourra lister vos conversations, les lire et y chercher. Lire ne marque rien comme lu." => {
             "Connect Claude (claude.ai or Claude Code) to this server's messaging: it can list your conversations, read them and search them. Reading marks nothing as read."

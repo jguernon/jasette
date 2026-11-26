@@ -10,6 +10,8 @@ license = "AGPL-3.0-or-later"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 gpui = { package = "gpui-pre", version = "=0.3.14" }
 gpui-component = "0.11.0"
+# La sélection du texte des bulles (src/selection.rs) : déjà dans l'arbre par gpui-component.
+gpui-base = "0.11.0"
 gpui-kit-assets = "0.11.0"
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.14", features = ["wayland", "x11", "font-kit"] }
 qrcode = { version = "0.14", default-features = false }
