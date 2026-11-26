@@ -64,15 +64,22 @@ func (p *Pont) publierNoteWA(ctx context.Context, texte string, _ int, e *etatNo
 }
 
 func (p *Pont) effacerNoteWA(ctx context.Context, e *etatNote) error {
-	ancienne := ""
-	if e.Ancienne != nil {
-		ancienne = *e.Ancienne
+	cli := p.client()
+	if cli == nil {
+		return erreurNote("WhatsApp n'est pas connecté.")
 	}
-	if err := p.ecrireInfos(ctx, ancienne, 0); err != nil {
-		var en erreurNote
-		if errors.As(err, &en) {
-			return en
-		}
+	// Le statut de 24 h n'est pas le texte « Infos » classique (GetUserInfo) :
+	// on l'efface (texte nul) au lieu d'y réécrire l'ancien texte avec une
+	// durée de 0, que WhatsApp refuse (400). Le texte « Infos » classique
+	// n'a jamais été touché.
+	err := cli.SetStatusMessage(ctx, types.SetStatusInput{Text: nil})
+	if err != nil {
+		log.Warn().Err(err).Msg("note WhatsApp : effacement (texte nul) refusé, essai avec un texte vide")
+		vide := ""
+		err = cli.SetStatusMessage(ctx, types.SetStatusInput{Text: &vide, Duration: jsontime.S(dureeNoteWA)})
+	}
+	if err != nil {
+		log.Warn().Err(err).Msg("note WhatsApp : effacement refusé")
 		return erreurNote("Le statut WhatsApp n'a pas pu être effacé : " + err.Error())
 	}
 	return nil
