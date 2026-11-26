@@ -8,9 +8,10 @@ use super::*;
 impl Service {
     /// Les ponts qui savent créer un groupe (commande `create_group`, §5.6 bis
     /// du protocole), Discord compris. X (mautrix-twitter) et Bluesky ne le
-    /// savent pas, Reddit non plus (Jasette n'y crée pas de salon).
+    /// savent pas, Reddit et LinkedIn non plus (Jasette n'y crée pas de salon
+    /// ni de groupe).
     pub(super) fn cree_groupes(self) -> bool {
-        !matches!(self, Service::X | Service::Bluesky | Service::Reddit)
+        !matches!(self, Service::X | Service::Bluesky | Service::Reddit | Service::LinkedIn)
     }
 
     /// Le service prend-il un nom de groupe à la création ? Instagram, non.
@@ -553,6 +554,7 @@ impl Jasette {
                 Service::Bluesky => t("Nouvelle conversation Bluesky").to_string(),
                 Service::Discord => t("Nouvelle conversation Discord").to_string(),
                 Service::Reddit => t("Nouvelle conversation Reddit").to_string(),
+                Service::LinkedIn => t("Nouvelle conversation LinkedIn").to_string(),
                 Service::Messenger => t("Nouvelle conversation Messenger").to_string(),
             };
             let detail = if groupe { svc.court().to_string() } else { detail };
@@ -632,10 +634,10 @@ mod essais {
 
     #[test]
     fn puces_compactes() {
-        // Neuf services en icônes, « Tout » choisi : une seule ligne ; les dix
-        // (Reddit compris) passent à la ligne, sans défiler.
+        // Neuf services en icônes, « Tout » choisi : une seule ligne ; les onze
+        // (Reddit et LinkedIn compris) passent à la ligne, sans défiler.
         let tous: Vec<Service> = tous_services().collect();
-        assert_eq!(tous.len(), 10);
+        assert_eq!(tous.len(), 11);
         assert_eq!(lignes_puces(None, &tous[..9], LARGEUR_PUCES), 1);
         assert_eq!(lignes_puces(None, &tous, LARGEUR_PUCES), 2);
         // Un service choisi montre son nom : la rangée passe à la ligne, sans défiler.

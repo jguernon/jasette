@@ -78,7 +78,7 @@ impl Pont {
 
     /// Le pont d'un service autre que Google : « messenger » ou « instagram »
     /// (le pont Meta, une copie par service, chacune avec son dossier de
-    /// données), ou « whatsapp », « signal », « x », « telegram », « bluesky », « discord », « reddit » (un pont chacun, qui parle
+    /// données), ou « whatsapp », « signal », « x », « telegram », « bluesky », « discord », « reddit », « linkedin » (un pont chacun, qui parle
     /// le même protocole ; erreur si son binaire est absent).
     pub fn lancer_meta(service: &str) -> Result<Self, String> {
         match service {
@@ -89,6 +89,7 @@ impl Pont {
             "bluesky" => return Self::lancer_nomme("jasette-bluesky", "JASETTE_BLUESKY", None),
             "discord" => return Self::lancer_nomme("jasette-discord", "JASETTE_DISCORD", None),
             "reddit" => return Self::lancer_nomme("jasette-reddit", "JASETTE_REDDIT", None),
+            "linkedin" => return Self::lancer_nomme("jasette-linkedin", "JASETTE_LINKEDIN", None),
             _ => {}
         }
         // Instagram a changé de protocole : son propre pont (instameow), s'il est là.

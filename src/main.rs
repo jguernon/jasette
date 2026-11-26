@@ -956,6 +956,7 @@ enum Service {
     Bluesky,
     Discord,
     Reddit,
+    LinkedIn,
 }
 
 impl Service {
@@ -971,6 +972,7 @@ impl Service {
             Service::Bluesky => "Bluesky",
             Service::Discord => "Discord",
             Service::Reddit => "Reddit",
+            Service::LinkedIn => "LinkedIn",
         }
     }
 
@@ -987,6 +989,7 @@ impl Service {
             Service::Bluesky => "Bluesky",
             Service::Discord => "Discord",
             Service::Reddit => "Reddit",
+            Service::LinkedIn => "LinkedIn",
         }
     }
 
@@ -1003,6 +1006,7 @@ impl Service {
             Service::Bluesky => "b:",
             Service::Discord => "d:",
             Service::Reddit => "r:",
+            Service::LinkedIn => "l:",
         }
     }
 
@@ -1031,13 +1035,14 @@ impl Service {
             Service::Bluesky => "bluesky",
             Service::Discord => "discord",
             Service::Reddit => "reddit",
+            Service::LinkedIn => "linkedin",
         }
     }
 
     /// Un service facultatif : son pont n'existe que si son binaire est là
     /// (ou si le serveur Jasette l'offre) ; sinon il est absent de l'interface.
     fn facultatif(self) -> bool {
-        matches!(self, Service::WhatsApp | Service::Signal | Service::X | Service::Telegram | Service::Bluesky | Service::Discord | Service::Reddit)
+        matches!(self, Service::WhatsApp | Service::Signal | Service::X | Service::Telegram | Service::Bluesky | Service::Discord | Service::Reddit | Service::LinkedIn)
     }
 
     /// Les ids d'éléments propres à ce service (barre latérale, pastilles).
@@ -1053,6 +1058,7 @@ impl Service {
             Service::Bluesky => "r-bluesky",
             Service::Discord => "r-discord",
             Service::Reddit => "r-reddit",
+            Service::LinkedIn => "r-linkedin",
         }
     }
 
@@ -1068,6 +1074,7 @@ impl Service {
             Service::Bluesky => "chargement-bluesky",
             Service::Discord => "chargement-discord",
             Service::Reddit => "chargement-reddit",
+            Service::LinkedIn => "chargement-linkedin",
         }
     }
 }
@@ -1108,8 +1115,8 @@ fn lancer_pont(r: &Reglages, svc: Service) -> Result<Pont, String> {
 
 /// Les services autres que Google, tous gérés comme un compte Meta : le pont
 /// Meta (une copie par service) pour Messenger et Instagram, un pont chacun
-/// (même protocole) pour WhatsApp, Signal, X, Telegram, Bluesky, Discord et Reddit.
-const SERVICES_META: [Service; 9] = [
+/// (même protocole) pour WhatsApp, Signal, X, Telegram, Bluesky, Discord, Reddit et LinkedIn.
+const SERVICES_META: [Service; 10] = [
     Service::Messenger,
     Service::Instagram,
     Service::WhatsApp,
@@ -1119,6 +1126,7 @@ const SERVICES_META: [Service; 9] = [
     Service::Bluesky,
     Service::Discord,
     Service::Reddit,
+    Service::LinkedIn,
 ];
 
 /// Un compte Meta : son pont, son état, sa fenêtre de connexion.
@@ -1216,6 +1224,9 @@ fn image_service(s: Service, taille: f32) -> Arc<gpui::Image> {
         // EGA, Live et Sirène : Snoo en pixels, rouge clair EGA.
         Service::Reddit if th().ega || retro::retro() => (11u8, variantes!("reddit-ega")),
         Service::Reddit => (10u8, variantes!("reddit")),
+        // EGA, Live et Sirène : « in » en pixels, bleu clair EGA.
+        Service::LinkedIn if th().ega || retro::retro() => (13u8, variantes!("linkedin-ega")),
+        Service::LinkedIn => (12u8, variantes!("linkedin")),
         Service::X => return image_service_svg(s, taille),
     };
     let voulu = taille * 2.;
@@ -2224,6 +2235,7 @@ struct Jasette {
     bluesky: CompteMeta,
     discord: CompteMeta,
     reddit: CompteMeta,
+    linkedin: CompteMeta,
     /// L'écran d'association ouvert (WhatsApp, Signal ou X), dans Comptes.
     ajout_service: Option<Service>,
     /// WhatsApp : le numéro pour « Associer avec un numéro de téléphone ».
@@ -2845,7 +2857,7 @@ fn adresse_appel(conv: &Conv) -> Option<String> {
         Service::Instagram => Some(format!("https://www.instagram.com/direct/t/{id}/")),
         Service::Discord => Some(format!("https://discord.com/channels/@me/{id}")),
         // Pas d'appel par le web pour ceux-là : l'app du téléphone.
-        Service::WhatsApp | Service::Signal | Service::X | Service::Telegram | Service::Bluesky | Service::Reddit => None,
+        Service::WhatsApp | Service::Signal | Service::X | Service::Telegram | Service::Bluesky | Service::Reddit | Service::LinkedIn => None,
     }
 }
 
@@ -3282,6 +3294,7 @@ impl Jasette {
             bluesky: CompteMeta::lancer(Service::Bluesky, &reglages),
             discord: CompteMeta::lancer(Service::Discord, &reglages),
             reddit: CompteMeta::lancer(Service::Reddit, &reglages),
+            linkedin: CompteMeta::lancer(Service::LinkedIn, &reglages),
             ajout_service: None,
             telephone_wa,
             cookies_x: None,
@@ -3480,6 +3493,7 @@ impl Jasette {
             Service::Bluesky => &self.bluesky,
             Service::Discord => &self.discord,
             Service::Reddit => &self.reddit,
+            Service::LinkedIn => &self.linkedin,
             Service::Messenger | Service::GoogleMessages => &self.messenger,
         }
     }
@@ -3494,6 +3508,7 @@ impl Jasette {
             Service::Bluesky => &mut self.bluesky,
             Service::Discord => &mut self.discord,
             Service::Reddit => &mut self.reddit,
+            Service::LinkedIn => &mut self.linkedin,
             Service::Messenger | Service::GoogleMessages => &mut self.messenger,
         }
     }
@@ -3818,15 +3833,16 @@ impl Jasette {
         if self.meta(svc).connexion_ouverte {
             return;
         }
-        // Reddit : la fenêtre reddit.com ; ses cookies vont au pont par `login`.
-        if svc == Service::Reddit {
-            self.ajout_service = Some(Service::Reddit);
+        // Reddit et LinkedIn : la fenêtre du site ; ses cookies vont au pont par `login`.
+        if matches!(svc, Service::Reddit | Service::LinkedIn) {
+            self.ajout_service = Some(svc);
             self.section = Some(Section::Comptes);
         }
         let (nom, option) = match svc {
             Service::Instagram => ("jasette-connexion-meta.py", "--instagram"),
             Service::X => ("jasette-connexion-x.py", "--sans-code"),
             Service::Reddit => ("jasette-connexion-reddit.py", "--reddit"),
+            Service::LinkedIn => ("jasette-connexion-linkedin.py", "--linkedin"),
             _ => ("jasette-connexion-meta.py", "--messenger"),
         };
         let Some(script) = script_connexion_nomme(nom) else {
@@ -5762,7 +5778,7 @@ impl Jasette {
                 )
             })
             // WhatsApp, Signal et X : seulement s'ils ont donné une photo.
-            .children([Service::WhatsApp, Service::Signal, Service::X, Service::Telegram, Service::Bluesky, Service::Discord, Service::Reddit].into_iter().filter(|s| self.meta(*s).avatar.is_some()).map(|svc| {
+            .children([Service::WhatsApp, Service::Signal, Service::X, Service::Telegram, Service::Bluesky, Service::Discord, Service::Reddit, Service::LinkedIn].into_iter().filter(|s| self.meta(*s).avatar.is_some()).map(|svc| {
                 let (id, titre, initiale, couleur) = match svc {
                     Service::WhatsApp => ("av-wa", t("Avatar de WhatsApp"), "W", "#25d366"),
                     Service::Signal => ("av-signal", t("Avatar de Signal"), "S", "#3a76f0"),
@@ -5770,6 +5786,7 @@ impl Jasette {
                     Service::Bluesky => ("av-bluesky", t("Avatar de Bluesky"), "B", "#1185fe"),
                     Service::Discord => ("av-discord", t("Avatar de Discord"), "D", "#5865f2"),
                     Service::Reddit => ("av-reddit", t("Avatar de Reddit"), "R", "#ff4500"),
+                    Service::LinkedIn => ("av-linkedin", t("Avatar de LinkedIn"), "L", "#0a66c2"),
                     _ => ("av-x", t("Avatar de X"), "X", "#000000"),
                 };
                 let compte = self.meta(svc);
@@ -10433,6 +10450,7 @@ impl Jasette {
                                 Service::Bluesky => ("Bluesky", "XRPC (AT Protocol)"),
                                 Service::Discord => ("Discord", "mautrix-discord"),
                                 Service::Reddit => ("Reddit", "mautrix-go (Matrix)"),
+                                Service::LinkedIn => ("LinkedIn", "linkedingo (mautrix-linkedin)"),
                                 _ => ("X", "twittermeow (mautrix-twitter)"),
                             };
                             [ligne_info(nom, bibli.into()).into_any_element(), separateur().into_any_element()]
@@ -11390,6 +11408,7 @@ impl Jasette {
                 Service::Instagram => t("Connectez-vous dans la fenêtre Instagram…").to_string(),
                 Service::X => t("Connectez-vous dans la fenêtre x.com…").to_string(),
                 Service::Reddit => t("Connectez-vous dans la fenêtre reddit.com…").to_string(),
+                Service::LinkedIn => t("Connectez-vous dans la fenêtre linkedin.com…").to_string(),
                 _ => t("Connectez-vous dans la fenêtre Facebook…").to_string(),
             }
         } else if svc.facultatif() && compte.etat == Etat::Association {
@@ -11528,6 +11547,7 @@ impl Jasette {
                 Service::Bluesky => "choix-bluesky",
                 Service::Discord => "choix-discord",
                 Service::Reddit => "choix-reddit",
+                Service::LinkedIn => "choix-linkedin",
                 _ => "choix-x",
             };
             carte = carte.child(
@@ -11841,6 +11861,27 @@ impl Jasette {
                         .child(t("Reddit n'a pas d'API officielle pour le chat : utilisez Jasette à vos risques. Jasette n'agit que sur vos actions.")),
                 );
             }
+            Service::LinkedIn => {
+                if compte.connexion_ouverte {
+                    carte = carte.child(attente("Connectez-vous dans la fenêtre linkedin.com…"));
+                } else if matches!(compte.etat, Etat::Association | Etat::Connexion) {
+                    carte = carte.child(attente("Connexion à la messagerie LinkedIn…"));
+                } else {
+                    carte = carte
+                        .child(texte(t("Jasette lit et envoie vos messages LinkedIn (conversations, groupes, demandes de message). Connectez-vous à linkedin.com dans la fenêtre qui s'ouvre : captcha et vérifications s'y font comme d'habitude.").into()))
+                        .child(Self::bouton_principal("li-fenetre", t("Se connecter à linkedin.com")).mt(px(6.)).on_click(cx.listener(|this, _, _, cx| {
+                            this.connecter_meta(Service::LinkedIn);
+                            cx.notify();
+                        })));
+                }
+                carte = carte.child(
+                    div()
+                        .text_center()
+                        .text_size(px(12.))
+                        .text_color(th().texte_pale)
+                        .child(t("LinkedIn surveille l'automatisation : Jasette va lentement et n'agit que sur vos actions. À vos risques.")),
+                );
+            }
             _ => {
                 if compte.connexion_ouverte {
                     carte = carte.child(attente("Connectez-vous dans la fenêtre x.com…"));
@@ -11932,7 +11973,7 @@ impl Jasette {
                 div()
                     .text_center()
                     .text_color(th().texte)
-                    .child(t("Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram, Bluesky, Discord et Reddit au même endroit.")),
+                    .child(t("Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram, Bluesky, Discord, Reddit et LinkedIn au même endroit.")),
             );
 
         if let Some(emoji) = &self.emoji {
@@ -11982,6 +12023,7 @@ impl Jasette {
                 Service::Instagram => t("Connectez-vous dans la fenêtre Instagram…"),
                 Service::X => t("Connectez-vous dans la fenêtre x.com…"),
                 Service::Reddit => t("Connectez-vous dans la fenêtre reddit.com…"),
+                Service::LinkedIn => t("Connectez-vous dans la fenêtre linkedin.com…"),
                 _ => t("Connectez-vous dans la fenêtre Facebook…"),
             }));
         } else if self.serveur_occupe {
@@ -12089,6 +12131,7 @@ impl Jasette {
                         Service::Bluesky => "accueil-bluesky",
                         Service::Discord => "accueil-discord",
                         Service::Reddit => "accueil-reddit",
+                        Service::LinkedIn => "accueil-linkedin",
                         _ => "accueil-x",
                     };
                     service(id, svc).on_click(cx.listener(move |this, _, _, cx| {
@@ -13411,8 +13454,8 @@ fn t(fr: &'static str) -> &'static str {
         "Jasette s'ouvre toute seule à l'ouverture de session : les messages arrivent dès le départ." => "Jasette opens by itself when you log in, so messages arrive right away.",
         "Icône de l'app" => "App icon",
         "Blanche" => "White",
-        "Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram, Bluesky, Discord et Reddit au même endroit." => {
-            "Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram, Bluesky, Discord and Reddit in one place."
+        "Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram, Bluesky, Discord, Reddit et LinkedIn au même endroit." => {
+            "Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram, Bluesky, Discord, Reddit and LinkedIn in one place."
         }
         "Connectez un premier service :" => "Connect a first service:",
         "← Autres services" => "← Other services",
@@ -13657,6 +13700,17 @@ fn t(fr: &'static str) -> &'static str {
         "Se connecter à reddit.com" => "Sign in to reddit.com",
         "Avatar de Reddit" => "Reddit avatar",
         "Nouvelle conversation Reddit" => "New Reddit chat",
+        "Connectez-vous dans la fenêtre linkedin.com…" => "Sign in in the linkedin.com window…",
+        "Connexion à la messagerie LinkedIn…" => "Connecting to LinkedIn messaging…",
+        "Se connecter à linkedin.com" => "Sign in to linkedin.com",
+        "Avatar de LinkedIn" => "LinkedIn avatar",
+        "Nouvelle conversation LinkedIn" => "New LinkedIn conversation",
+        "Jasette lit et envoie vos messages LinkedIn (conversations, groupes, demandes de message). Connectez-vous à linkedin.com dans la fenêtre qui s'ouvre : captcha et vérifications s'y font comme d'habitude." => {
+            "Jasette reads and sends your LinkedIn messages (conversations, groups, message requests). Sign in to linkedin.com in the window that opens: captcha and verification work as usual."
+        }
+        "LinkedIn surveille l'automatisation : Jasette va lentement et n'agit que sur vos actions. À vos risques." => {
+            "LinkedIn watches for automation: Jasette goes slowly and only acts on your actions. At your own risk."
+        }
         "Jasette lit et envoie vos messages du chat de Reddit (conversations, groupes, chats de subreddit). Connectez-vous à reddit.com dans la fenêtre qui s'ouvre : captcha et double authentification s'y font comme d'habitude." => {
             "Jasette reads and sends your Reddit chat messages (chats, groups, subreddit chats). Sign in to reddit.com in the window that opens: captcha and two-factor authentication work as usual."
         }

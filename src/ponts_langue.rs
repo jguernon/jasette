@@ -95,6 +95,7 @@ pub const EXACTS: &[(&str, &str)] = &[
     ("Conversation Signal", "Signal conversation"),
     ("Conversation Telegram", "Telegram conversation"),
     ("Conversation X", "X conversation"),
+    ("Conversation LinkedIn", "LinkedIn conversation"),
 ];
 
 /// Le début d'une ligne (la suite est gardée, traduite si elle est connue).

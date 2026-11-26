@@ -16,7 +16,7 @@ fn tr(fr: &'static str, en: &'static str) -> &'static str {
 }
 
 /// L'ordre des sections : les services qui ont le plus de grands espaces d'abord.
-const ORDRE_GROUPES: [Service; 10] = [
+const ORDRE_GROUPES: [Service; 11] = [
     Service::Discord,
     Service::Reddit,
     Service::Telegram,
@@ -26,6 +26,7 @@ const ORDRE_GROUPES: [Service; 10] = [
     Service::Signal,
     Service::X,
     Service::Bluesky,
+    Service::LinkedIn,
     Service::GoogleMessages,
 ];
 
