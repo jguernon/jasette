@@ -7,10 +7,10 @@ import org.json.JSONObject
  * Les services. Les ids des services autres que Google portent un préfixe dans
  * l'interface, comme sur le bureau : « m: » pour Messenger, « i: » pour
  * Instagram, « w: » pour WhatsApp, « s: » pour Signal, « x: » pour X, « t: »
- * pour Telegram, « b: » pour Bluesky. Le
+ * pour Telegram, « b: » pour Bluesky, « d: » pour Discord. Le
  * préfixe dit aussi à quel pont envoyer une commande.
  *
- * WhatsApp, Signal, X, Telegram et Bluesky : leurs ponts tournent sur le serveur Jasette, ou
+ * WhatsApp, Signal, X, Telegram, Bluesky et Discord : leurs ponts tournent sur le serveur Jasette, ou
  * sur le téléphone (mode « Sur cet appareil ») quand l'APK les embarque
  * (voir [serveurSeulement] et Depot.services).
  */
@@ -22,7 +22,8 @@ enum class Service(val titre: String, val court: String, val prefixe: String, va
     SIGNAL("Signal", "Signal", "s:", "signal"),
     X("X", "X", "x:", "x"),
     TELEGRAM("Telegram", "Telegram", "t:", "telegram"),
-    BLUESKY("Bluesky", "Bluesky", "b:", "bluesky");
+    BLUESKY("Bluesky", "Bluesky", "b:", "bluesky"),
+    DISCORD("Discord", "Discord", "d:", "discord");
 
     /** Un service préfixé (tous sauf Google) : ses nouvelles passent par `nouvelleMeta`. */
     val meta get() = this != GOOGLE
@@ -36,22 +37,27 @@ enum class Service(val titre: String, val court: String, val prefixe: String, va
     val archiveNatif get() = (this == GOOGLE && !Depot.smsActif) || this == WHATSAPP || this == TELEGRAM
 
     /**
-     * WhatsApp, Signal, X, Telegram ou Bluesky : servi par le serveur Jasette, ou sur cet appareil
+     * WhatsApp, Signal, X, Telegram, Bluesky ou Discord : servi par le serveur Jasette, ou sur cet appareil
      * seulement si son pont a été compilé dans l'APK (sinon, service absent).
      */
-    val serveurSeulement get() = this == WHATSAPP || this == SIGNAL || this == X || this == TELEGRAM || this == BLUESKY
+    val serveurSeulement get() = this == WHATSAPP || this == SIGNAL || this == X || this == TELEGRAM || this == BLUESKY || this == DISCORD
 
     /** « Nouveau message » interroge-t-il ce pont (commande `search`) ? */
-    val cherchePersonnes get() = this == MESSENGER || this == INSTAGRAM || this == WHATSAPP || this == SIGNAL || this == TELEGRAM || this == BLUESKY
+    val cherchePersonnes get() = this == MESSENGER || this == INSTAGRAM || this == WHATSAPP || this == SIGNAL || this == TELEGRAM || this == BLUESKY || this == DISCORD
 
     /** Un numéro tapé se cherche-t-il aussi dans ce pont ? (pas chez Meta) */
     val chercheNumeros get() = this == GOOGLE || this == WHATSAPP || this == SIGNAL
 
     /**
      * La taille d'envoi maximale d'un fichier (octets) : environ 100 Mo pour
-     * Google Messages (RCS), WhatsApp, Signal et Telegram, 25 Mo pour les autres.
+     * Google Messages (RCS), WhatsApp, Signal et Telegram, 10 Mo pour Discord
+     * (compte sans Nitro), 25 Mo pour les autres.
      */
-    val limiteEnvoi: Long get() = if (this == GOOGLE || this == WHATSAPP || this == SIGNAL || this == TELEGRAM) 100L shl 20 else 25L shl 20
+    val limiteEnvoi: Long get() = when {
+        this == GOOGLE || this == WHATSAPP || this == SIGNAL || this == TELEGRAM -> 100L shl 20
+        this == DISCORD -> 10L shl 20
+        else -> 25L shl 20
+    }
 
     /**
      * Le service prend-il des fichiers ? Bluesky refuse les pièces jointes en

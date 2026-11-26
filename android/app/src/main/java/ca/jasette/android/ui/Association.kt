@@ -137,6 +137,8 @@ internal fun EtapeQr(service: Service) {
                 t("Scanne-le avec un autre téléphone qui a Signal (Paramètres → Appareils liés). Les anciens messages ne sont pas récupérés.")
             } else if (service == Service.TELEGRAM) {
                 t("Scanne-le avec un autre appareil qui a Telegram : Paramètres → Appareils → Connecter un appareil.")
+            } else if (service == Service.DISCORD) {
+                t("Scanne-le avec un autre appareil qui a Discord : Paramètres → Scanner le code QR.")
             } else {
                 t("Scanne-le avec le téléphone qui a WhatsApp : Appareils connectés → Connecter un appareil.")
             },

@@ -152,6 +152,9 @@ object Depot {
      * (`ev api` : api_id et api_hash de my.telegram.org).
      */
     var etapeTelegram by mutableStateOf<String?>(null)
+
+    /** Discord : le code QR a été lu (le nom du compte) ; reste à confirmer sur le téléphone. */
+    var qrLuDiscord by mutableStateOf<String?>(null)
     var indiceTelegram by mutableStateOf<String?>(null)
     var apiTelegram by mutableStateOf<Boolean?>(null)
     /** WhatsApp, « Associer avec un numéro de téléphone » : le code à taper (`ev pair_code`). */
@@ -424,6 +427,7 @@ object Depot {
         Service.X -> executable("libjasette-x.so")
         Service.TELEGRAM -> executable("libjasette-telegram.so")
         Service.BLUESKY -> executable("libjasette-bluesky.so")
+        Service.DISCORD -> executable("libjasette-discord.so")
         else -> null
     }
 
@@ -707,6 +711,23 @@ object Depot {
         commande(Service.BLUESKY, JSONObject().put("cmd", "login").put("number", identifiant).put("password", motDePasse))
     }
 
+    /** Discord : la connexion par code QR (`pair`, puis des `ev qr`). */
+    fun discordQr() {
+        erreur = null
+        qrLuDiscord = null
+        qr.remove(Service.DISCORD)
+        commande(Service.DISCORD, JSONObject().put("cmd", "pair"))
+    }
+
+    /** Discord : le jeton du compte, collé à la main (gardé par le pont seul, 0600). */
+    fun discordJeton(jeton: String) {
+        erreur = null
+        qrLuDiscord = null
+        qr.remove(Service.DISCORD)
+        etats[Service.DISCORD] = Etat.ASSOCIATION
+        commande(Service.DISCORD, JSONObject().put("cmd", "login").put("token", jeton))
+    }
+
     /** X : les cookies de x.com et le code X Chat, en un seul essai (X verrouille après quelques codes faux). */
     fun connecterX(cookies: Map<String, String>, pin: String) {
         erreur = null
@@ -743,6 +764,7 @@ object Depot {
                         etapeTelegram = null
                         indiceTelegram = null
                     }
+                    if (service == Service.DISCORD) qrLuDiscord = null
                 }
             }
             "paired" -> {
@@ -751,7 +773,12 @@ object Depot {
                 etats[service] = Etat.CONNEXION
             }
             // WhatsApp et Signal : un code QR (renouvelé) à scanner.
-            "qr" -> v.chaine("code").ifEmpty { v.chaine("data") }.let { if (it.isNotEmpty()) qr[service] = it }
+            "qr" -> v.chaine("code").ifEmpty { v.chaine("data") }.let {
+                if (it.isNotEmpty()) qr[service] = it
+                if (service == Service.DISCORD) qrLuDiscord = null
+            }
+            // Discord : le code QR a été lu ; le téléphone demande de confirmer.
+            "qr_scanned" -> if (service == Service.DISCORD) qrLuDiscord = v.chaine("name")
             // WhatsApp : le code à taper sur le téléphone ; les QR cessent.
             "pair_code" -> v.chaine("code").let {
                 if (it.isNotEmpty()) {

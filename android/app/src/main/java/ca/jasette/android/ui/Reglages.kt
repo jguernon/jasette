@@ -345,6 +345,8 @@ private fun SectionComptes(connecter: (Service, String) -> Unit) {
                         Service.TELEGRAM -> BoutonAccent(t("Se connecter")) { connecter(s, "") }
                         // Bluesky : identifiant et mot de passe d'app (Bluesky.kt).
                         Service.BLUESKY -> BoutonAccent(t("Se connecter")) { connecter(s, "") }
+                        // Discord : code QR ou jeton (Discord.kt).
+                        Service.DISCORD -> BoutonAccent(t("Connecter Discord")) { connecter(s, "") }
                     }
                 }
             }

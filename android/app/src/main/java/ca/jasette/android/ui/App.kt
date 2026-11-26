@@ -237,6 +237,9 @@ fun App(activite: Activity, prive: Boolean = false) {
                 } else if (ecran.service == Service.BLUESKY) {
                     // Bluesky : identifiant et mot de passe d'app (Bluesky.kt).
                     AssociationBluesky(fini = ::retour)
+                } else if (ecran.service == Service.DISCORD) {
+                    // Discord : code QR ou jeton (Discord.kt).
+                    AssociationDiscord(fini = ::retour)
                 } else if (ecran.service == Service.WHATSAPP || ecran.service == Service.SIGNAL) {
                     Association(ecran.service, ecran.plateforme, fini = ::retour)
                 } else {
@@ -597,6 +600,7 @@ private fun detailPersonne(s: Service, id: String): String = when (s) {
     Service.X -> t("Nouvelle conversation X")
     Service.TELEGRAM -> t("Nouvelle conversation Telegram")
     Service.BLUESKY -> t("Nouvelle conversation Bluesky")
+    Service.DISCORD -> t("Nouvelle conversation Discord")
 }
 
 /**

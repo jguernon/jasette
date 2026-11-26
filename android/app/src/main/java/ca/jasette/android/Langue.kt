@@ -302,6 +302,20 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Nouvelle conversation Signal" to "New Signal chat",
     "Nouvelle conversation Telegram" to "New Telegram chat",
     "Nouvelle conversation Bluesky" to "New Bluesky chat",
+    "Nouvelle conversation Discord" to "New Discord chat",
+    // Discord (Discord.kt).
+    "Connecter Discord" to "Connect Discord",
+    "Scanne-le avec un autre appareil qui a Discord : Paramètres → Scanner le code QR." to
+        "Scan it with another device that has Discord: Settings → Scan QR Code.",
+    "Jasette lit et envoie tes messages privés Discord (pas les salons des serveurs). Le plus simple : un code QR à scanner avec l'app Discord d'un autre appareil." to
+        "Jasette reads and sends your Discord direct messages (not server channels). The easiest way: a QR code to scan with the Discord app on another device.",
+    "Se connecter avec un code QR" to "Log in with a QR code",
+    "Ou colle le jeton de ton compte (Discord dans un navigateur d'ordinateur → outils de développement → Réseau → en-tête « Authorization »). Ne le donne à personne : il ouvre ton compte." to
+        "Or paste your account token (Discord in a desktop browser → developer tools → Network → “Authorization” header). Never share it: it opens your account.",
+    "Jeton Discord" to "Discord token",
+    "Code lu. Confirme la connexion sur l'autre appareil, dans Discord." to "Code scanned. Confirm the login on the other device, in Discord.",
+    "Discord n'autorise pas officiellement les clients tiers : utilise Jasette à tes risques. Jasette n'agit que sur tes actions." to
+        "Discord doesn't officially allow third-party clients: use Jasette at your own risk. Jasette only acts on your actions.",
     // Bluesky (Bluesky.kt).
     "Connecter Bluesky" to "Connect Bluesky",
     "Jasette lit et envoie tes messages privés Bluesky. Il lui faut un mot de passe d'app qui a accès aux messages : dans Bluesky, Réglages → Confidentialité et sécurité → Mots de passe d'app → Ajouter, en cochant « Autoriser l'accès à vos messages privés ». Ton vrai mot de passe n'est jamais demandé." to

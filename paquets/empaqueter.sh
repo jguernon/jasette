@@ -58,7 +58,7 @@ strip -o "$BIN/jasette" "$CIBLE/release/jasette"
 export GOMODCACHE="$C/gomod" GOCACHE="$C/gocache" GOPATH="$C/gopath"
 export GOTMPDIR="$C/gotmp" TMPDIR="$C/gotmp" GOFLAGS=-modcacherw GOTOOLCHAIN=local
 for paire in pont:jasette-pont pont-meta:jasette-meta pont-ig:jasette-ig pont-wa:jasette-wa \
-	pont-x:jasette-x pont-telegram:jasette-telegram pont-bluesky:jasette-bluesky serveur:jasette-serveur; do
+	pont-x:jasette-x pont-telegram:jasette-telegram pont-bluesky:jasette-bluesky pont-discord:jasette-discord serveur:jasette-serveur; do
 	dossier="${paire%%:*}"; nom="${paire##*:}"
 	echo "== $nom"
 	(cd "$dossier" && go build -trimpath -ldflags "-s -w" -o "$BIN/$nom" .)
@@ -76,7 +76,7 @@ ln -sf "$(g++ -print-file-name=libstdc++.a)" "$C/staticlibs/libstdc++.a"
 	CGO_LDFLAGS="'-L$C/staticlibs'" \
 	go build -trimpath -ldflags '-s -w -extldflags=-static-libgcc' -o "$BIN/jasette-signal" .)
 
-EXECUTABLES=(jasette jasette-serveur jasette-pont jasette-meta jasette-ig jasette-wa jasette-signal jasette-x jasette-telegram jasette-bluesky)
+EXECUTABLES=(jasette jasette-serveur jasette-pont jasette-meta jasette-ig jasette-wa jasette-signal jasette-x jasette-telegram jasette-bluesky jasette-discord)
 SCRIPTS=(jasette-connexion.py jasette-connexion-meta.py jasette-connexion-x.py)
 
 # La plus récente version de la glibc demandée par l'un des binaires.
@@ -151,7 +151,7 @@ Priority: optional
 Homepage: https://jonathanguernon.net/jasette/
 Description: toutes tes messageries dans une seule app
  Jasette rassemble Google Messages (SMS/RCS), Messenger, Instagram,
- WhatsApp, Signal, X, Telegram et Bluesky dans une seule fenêtre. Il fonctionne seul, comme
+ WhatsApp, Signal, X, Telegram, Bluesky et Discord dans une seule fenêtre. Il fonctionne seul, comme
  serveur toujours allumé (jasette-serveur, service systemd de
  l'utilisateur) ou comme client d'un serveur Jasette, par un lien TLS
  épinglé. Aucun service tiers : tout passe par tes appareils.
