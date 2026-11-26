@@ -37,8 +37,29 @@ const (
 	prechargePause   = 1500 * time.Millisecond
 	prechargeDelai   = 45 * time.Second // attente maximale d'une réponse
 	prechargeAttente = 3 * time.Second  // avant une passe : le pont s'installe
-	demandeDuree     = 90 * time.Second // une demande d'un client sans réponse est oubliée
-	cacheEcriture    = 5 * time.Second
+)
+
+// Discord interdit les « self-bots » : son pont précharge moins, et plus
+// lentement, comme quelqu'un qui ouvre quelques conversations à la main.
+var prechargeParService = map[string]struct {
+	nombre, compte, total int
+	pause                 time.Duration
+}{
+	"discord": {nombre: 8, compte: 30, total: 15, pause: 4 * time.Second},
+}
+
+// reglagesPrecharge : nombre de conversations récentes, messages par
+// conversation, total au plus (marquées comprises, 0 = sans limite) et pause.
+func reglagesPrecharge(svc string) (nombre, compte, total int, pause time.Duration) {
+	if r, ok := prechargeParService[svc]; ok {
+		return r.nombre, r.compte, r.total, r.pause
+	}
+	return prechargeNombre, prechargeCompte, 0, prechargePause
+}
+
+const (
+	demandeDuree  = 90 * time.Second // une demande d'un client sans réponse est oubliée
+	cacheEcriture = 5 * time.Second
 )
 
 // Un message gardé : la ligne du pont telle quelle, et de quoi la ranger.
@@ -490,7 +511,7 @@ type candidat struct {
 // prechargeNombre plus récentes de la boîte de réception, puis les marquées
 // (`marquees`, ids sans préfixe) présentes dans les listes. Seulement celles
 // dont la copie manque ou n'est plus à jour.
-func (c *Cache) candidats(marquees []string) []candidat {
+func (c *Cache) candidats(marquees []string, nombre, total int) []candidat {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	connues := map[string]int64{}
@@ -516,8 +537,8 @@ func (c *Cache) candidats(marquees []string) []candidat {
 		}
 	}
 	sort.SliceStable(boite, func(i, j int) bool { return boite[i].time > boite[j].time })
-	if len(boite) > prechargeNombre {
-		boite = boite[:prechargeNombre]
+	if len(boite) > nombre {
+		boite = boite[:nombre]
 	}
 	for _, id := range marquees {
 		if t, ok := connues[id]; ok {
@@ -534,6 +555,9 @@ func (c *Cache) candidats(marquees []string) []candidat {
 		if !c.aJourVerrouille(k.conv, k.time) {
 			r = append(r, k)
 		}
+	}
+	if total > 0 && len(r) > total {
+		r = r[:total]
 	}
 	return r
 }
@@ -616,7 +640,8 @@ func (p *Pont) passePrecharge() {
 	if !pret {
 		return
 	}
-	liste := p.cache.candidats(marquees)
+	nombre, compte, total, pause := reglagesPrecharge(p.svc)
+	liste := p.cache.candidats(marquees, nombre, total)
 	if len(liste) == 0 {
 		return
 	}
@@ -639,7 +664,7 @@ func (p *Pont) passePrecharge() {
 		}
 		p.precharge = k.conv
 		srv.mu.Unlock()
-		cmd, _ := json.Marshal(map[string]any{"cmd": "messages", "conv": k.conv, "count": prechargeCompte})
+		cmd, _ := json.Marshal(map[string]any{"cmd": "messages", "conv": k.conv, "count": compte})
 		if err := p.envoyer(cmd); err != nil {
 			srv.mu.Lock()
 			p.precharge = ""
@@ -657,7 +682,7 @@ func (p *Pont) passePrecharge() {
 			srv.mu.Unlock()
 			logf("[%s] préchargement : pas de réponse", p.svc)
 		}
-		time.Sleep(prechargePause)
+		time.Sleep(pause)
 	}
 	logf("[%s] préchargement fini (%d/%d)", p.svc, faits, len(liste))
 }

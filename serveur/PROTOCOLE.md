@@ -152,9 +152,9 @@ Réponses :
 
 `services` : ceux que ce serveur fait tourner (`--services`), dans l'ordre
 `google`, `messenger`, `instagram`, `whatsapp`, `signal`, `x`, `telegram`,
-`bluesky`. Les cinq derniers sont **facultatifs** : le serveur ne les lance que si leur
+`bluesky`, `discord`. Les six derniers sont **facultatifs** : le serveur ne les lance que si leur
 binaire est présent (`jasette-wa`, `jasette-signal`, `jasette-x`,
-`jasette-telegram`, `jasette-bluesky`, voir §5.4) ; sinon
+`jasette-telegram`, `jasette-bluesky`, `jasette-discord`, voir §5.4) ; sinon
 ils sont simplement absents de la liste. Le client n'affiche que les
 services de cette liste. Après `ok`, la connexion passe au régime du §5,
 sans limite de durée.
@@ -171,11 +171,11 @@ Révocation : `jasette-serveur --appareils` liste les appareils,
 {"svc":"google","cmd":{"cmd":"messages","conv":"123","count":30}}
 ```
 
-`svc` : `google`, `messenger`, `instagram`, `whatsapp`, `signal`, `x`, `telegram` ou `bluesky`.
+`svc` : `google`, `messenger`, `instagram`, `whatsapp`, `signal`, `x`, `telegram`, `bluesky` ou `discord`.
 `cmd` : exactement la commande qu'on écrirait sur l'entrée standard du pont
 (voir l'en-tête de `pont/main.go`, `pont-meta/main.go`, `pont-wa/main.go`,
-`pont-signal/main.go`, `pont-x/main.go`, `pont-telegram/main.go` et
-`pont-bluesky/main.go`). Particularités :
+`pont-signal/main.go`, `pont-x/main.go`, `pont-telegram/main.go`,
+`pont-bluesky/main.go` et `pont-discord/main.go`). Particularités :
 
 - `{"cmd":"quit"}` est **ignoré** : le pont appartient au serveur.
 - `{"cmd":"delete","conv":"<id>"}` : supprime la conversation (§5.6).
@@ -230,9 +230,9 @@ envoie ensuite `hello` puis son état. Le client ne voit jamais `pont_ferme`.
 - Un client trop lent (8192 événements en attente) est coupé ; il se
   reconnecte et reçoit le rejeu.
 
-### 5.4 Connexion des services WhatsApp, Signal, X, Telegram et Bluesky
+### 5.4 Connexion des services WhatsApp, Signal, X, Telegram, Bluesky et Discord
 
-Ces cinq ponts parlent le même protocole que les autres (mêmes commandes
+Ces six ponts parlent le même protocole que les autres (mêmes commandes
 `conversations`, `messages`, `send`, `send_media`, `react`, `read`,
 `download`, `new`, `search`, `search_messages`, `unpair`…, mêmes
 événements `hello`, `state`, `account`, `avatar`, `avatar_moi`,
@@ -247,6 +247,7 @@ l'association diffère. États : `connecting`, `pairing`, `ready`,
 | `x` | `jasette-x` (ou `JASETTE_X`) | `<données>/x/` | cookies de x.com + code X Chat |
 | `telegram` | `jasette-telegram` (ou `JASETTE_TELEGRAM`) | `<données>/telegram/` | numéro + code (+ mot de passe), ou QR |
 | `bluesky` | `jasette-bluesky` (ou `JASETTE_BLUESKY`) | `<données>/bluesky/` | identifiant + mot de passe d'app |
+| `discord` | `jasette-discord` (ou `JASETTE_DISCORD`) | `<données>/discord/` | QR (app Discord), ou jeton |
 
 Les binaires sont cherchés comme les autres : variable d'environnement,
 `--bin`, à côté de `jasette-serveur`, puis le `PATH`. Le serveur crée le
@@ -354,19 +355,53 @@ compte et le relais `did:web:api.bsky.chat`) :
   conversation Bluesky ; un message : `<conversation>/<id>`. Les résultats de
   `search` ont le DID de la personne pour id (à passer à `new`).
 
+**Discord** (messages privés et groupes privés seulement ; une session de
+plus du compte, qui se présente comme le client web, par la discordgo
+modifiée de mautrix-discord) :
+
+```json
+{"svc":"discord","cmd":{"cmd":"pair"}}
+{"svc":"discord","cmd":{"cmd":"login","token":"…"}}
+```
+
+- `pair` → `state: pairing`, puis `{"ev":"qr","code":"https://discordapp.com/ra/…","data":"…"}`,
+  à scanner dans l'app Discord du téléphone (Paramètres → Scanner le code
+  QR) ; renouvelé à l'expiration (trois codes au plus). Une fois lu :
+  `{"ev":"qr_scanned","name":"…"}` (à confirmer sur le téléphone ; pas
+  rejoué). Refusé sur le téléphone : `error` (`where` : `pair`) et
+  `state: unpaired`.
+- `login` : le jeton du compte, collé à la main (`token`, ou `password`).
+  Un jeton de robot (`Bot …`) est refusé.
+- Réussite : `paired`, `account`, `state: ready`. Échec : `error`
+  (`where` : `pair` ou `login`) et `state: unpaired`. Un jeton révoqué
+  plus tard (mot de passe changé, appareil déconnecté) : `error` puis
+  `state: unpaired`.
+- Le pont garde le jeton dans `<données>/discord/session.json` (0600) ;
+  le serveur ne l'écrit jamais dans ses journaux. `unpair` déconnecte
+  aussi la session chez Discord.
+- Les ids : celui du salon privé (snowflake) ; un message : son snowflake.
+  Les résultats de `search` (amis et gens des conversations connues, sans
+  requête) ont l'id Discord de la personne pour id (à passer à `new`).
+  `search_messages` ne cherche que dans les messages vus depuis le
+  lancement du pont. Les salons des serveurs Discord ne sont pas offerts.
+- Discord interdit les « self-bots » : le pont n'agit que sur commande,
+  espace ses requêtes (400 ms au moins) et le serveur en précharge moins
+  (§5.8). Pas d'archives chez Discord (celles de Jasette, §5.5) ; 10 Mo au
+  plus par fichier envoyé.
+
 ### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
 conversations, tels que l'interface les voit (« m: » pour Messenger,
 « i: » pour Instagram, « w: » pour WhatsApp, « s: » pour Signal, « x: »
-pour X, « t: » pour Telegram, « b: » pour Bluesky, sans préfixe pour Google) :
+pour X, « t: » pour Telegram, « b: » pour Bluesky, « d: » pour Discord, sans préfixe pour Google) :
 
 - `head` : la grille en tête de la boîte de réception ;
 - `favoris` : la vue de l'étoile (`etoiles` dans les réglages du bureau) ;
 - `epingles` : les conversations épinglées en haut de la liste ;
 - `archives` : l'**archivage propre à Jasette**, pour les services qui ne
-  savent pas archiver (Messenger, Instagram, Signal, X, Bluesky). Google, WhatsApp et
+  savent pas archiver (Messenger, Instagram, Signal, X, Bluesky, Discord). Google, WhatsApp et
   Telegram archivent pour de vrai (commande `archive` de leur pont) et n'y
   vont pas ;
 - `privees` : la **Liste privée** (voir « Règle des privées » plus bas).
@@ -680,7 +715,9 @@ conversations les plus récentes de la boîte de réception et pour celles du
 Head, des favoris et des épinglées (§5.5) qui sont dans ses listes. Une à la
 fois (il attend la réponse, 45 s au plus), avec 1,5 s de pause entre deux ;
 seulement celles dont la copie manque, date d'avant le lancement du pont, ou
-n'a pas le dernier message annoncé par la liste (`time`). Ces réponses (et
+n'a pas le dernier message annoncé par la liste (`time`). **Discord** :
+8 conversations récentes, 30 messages chacune, 15 conversations au plus
+(marquées comprises), 4 s de pause. Ces réponses (et
 leurs erreurs `where: "messages"`) ne vont **qu'au cache** : aucun client ne
 les reçoit. Aucun pont ne marque une conversation comme lue sur `messages`
 (seulement sur `read`, que le serveur n'envoie jamais de lui-même).
@@ -732,7 +769,7 @@ rejouées sont des `conversations` ordinaires.
 
 **Fournis par le service.** Un message peut porter un champ facultatif
 `link_preview`, que le pont remplit quand le service envoie l'aperçu avec le
-message (WhatsApp, Signal, Telegram, Messenger et Instagram ; Google Messages,
+message (WhatsApp, Signal, Telegram, Discord, Messenger et Instagram ; Google Messages,
 X et Bluesky n'en envoient pas) :
 
 ```json
@@ -951,7 +988,7 @@ Le serveur ne sert que des fichiers réguliers :
 `<données>` = `JASETTE_DATA`, sinon `$XDG_DATA_HOME/jasette`, sinon
 `~/.local/share/jasette` (le même dossier que les ponts).
 Chaque pont a son dossier, en 0700 : `<données>/whatsapp/`,
-`<données>/signal/`, `<données>/x/`, `<données>/telegram/`, `<données>/bluesky/` (bases SQLite et session : jamais
+`<données>/signal/`, `<données>/x/`, `<données>/telegram/`, `<données>/bluesky/`, `<données>/discord/` (bases SQLite et session : jamais
 servis par `get`, §6.1).
 `<données>/serveur/` (0700) contient `cert.pem`, `cle.pem`,
 `appareils.json` (noms, SHA-256 des jetons, dates), `jumelage.json` (code en

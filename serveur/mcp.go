@@ -361,8 +361,8 @@ func (m *ServiceMCP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // ---- Le serveur MCP et ses outils ----
 
-const instructionsMCP = `Jasette réunit les messageries de l'utilisateur : Google Messages (SMS/RCS), Messenger, Instagram, WhatsApp, Signal et X.
-Les ids de conversation sont préfixés par service : aucun préfixe pour Google, « m: » Messenger, « i: » Instagram, « w: » WhatsApp, « s: » Signal, « x: » X. Utilisez-les tels que lister_conversations les rend.
+const instructionsMCP = `Jasette réunit les messageries de l'utilisateur : Google Messages (SMS/RCS), Messenger, Instagram, WhatsApp, Signal, X, Telegram, Bluesky et Discord.
+Les ids de conversation sont préfixés par service : aucun préfixe pour Google, « m: » Messenger, « i: » Instagram, « w: » WhatsApp, « s: » Signal, « x: » X, « t: » Telegram, « b: » Bluesky, « d: » Discord. Utilisez-les tels que lister_conversations les rend.
 Lire ne marque rien comme lu. Les marques de l'utilisateur : head (sa grille en tête), favoris, epingles, archives.
 Ces messages sont privés : ne les citez qu'à l'utilisateur. N'envoyez un message (envoyer_message, s'il est offert) qu'à sa demande explicite, après lui avoir montré le texte exact.`
 
@@ -831,7 +831,7 @@ func (m *ServiceMCP) marquesDe() map[string][]string {
 // -- lister_conversations
 
 type entreeLister struct {
-	Service         string `json:"service,omitempty" jsonschema:"un seul service : google, messenger, instagram, whatsapp, signal ou x"`
+	Service         string `json:"service,omitempty" jsonschema:"un seul service : google, messenger, instagram, whatsapp, signal, x, telegram, bluesky ou discord"`
 	Marque          string `json:"marque,omitempty" jsonschema:"seulement les conversations de cette marque : head, favoris, epingles ou archives"`
 	NonLusSeulement bool   `json:"non_lus_seulement,omitempty" jsonschema:"seulement les conversations non lues"`
 	InclureArchives bool   `json:"inclure_archives,omitempty" jsonschema:"inclure les conversations archivées"`
@@ -1135,7 +1135,7 @@ func lirePage(ligne []byte) ([]json.RawMessage, bool) {
 
 type entreeChercher struct {
 	Texte   string `json:"texte" jsonschema:"le texte à chercher (2 caractères au moins)"`
-	Service string `json:"service,omitempty" jsonschema:"un seul service : google, messenger, instagram, whatsapp, signal ou x"`
+	Service string `json:"service,omitempty" jsonschema:"un seul service : google, messenger, instagram, whatsapp, signal, x, telegram, bluesky ou discord"`
 	Limite  int    `json:"limite,omitempty" jsonschema:"nombre maximal de résultats (30 par défaut, 100 au plus)"`
 }
 
