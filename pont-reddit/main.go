@@ -125,7 +125,7 @@ type Message struct {
 
 type Attachment struct {
 	MediaID string `json:"media_id"` // l'adresse mxc:// de l'image
-	Key     []byte `json:"key"`      // inutilisé (Reddit ne chiffre pas)
+	Key     []byte `json:"key,omitempty"` // inutilisé, jamais null (Reddit ne chiffre pas)
 	Mime    string `json:"mime"`
 	Name    string `json:"name"`
 	Size    int64  `json:"size"`
