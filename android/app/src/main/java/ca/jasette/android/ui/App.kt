@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -260,6 +261,27 @@ private fun Liste(
 ) {
     var reorganiser by remember { mutableStateOf(false) }
     var filtre by remember { mutableStateOf("") }
+    // La recherche, cachée au repos : on tire la liste vers le bas (depuis le haut) pour
+    // la faire glisser en place, ou on touche la loupe. Voir [tirerPourChercher].
+    var rechercheOuverte by remember { mutableStateOf(false) }
+    // Le champ prend le focus (clavier) seulement s'il est ouvert par la loupe.
+    var focaliser by remember { mutableStateOf(false) }
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+    fun fermerRecherche() {
+        if (rechercheOuverte) focus.clearFocus()
+        rechercheOuverte = false
+        focaliser = false
+        filtre = ""
+    }
+    // Retour à la boîte de réception (retour arrière) : la recherche se referme, vidée.
+    BackHandler(enabled = rechercheOuverte || filtre.isNotEmpty()) { fermerRecherche() }
+    // Deux volets : la conversation de droite refermée referme aussi la recherche. (Sur
+    // téléphone, la liste quitte l'écran pendant la conversation et revient refermée.)
+    val choisieAvant = remember { arrayOfNulls<String>(1) }
+    LaunchedEffect(choisie) {
+        if (choisie == null && choisieAvant[0] != null) fermerRecherche()
+        choisieAvant[0] = choisie
+    }
     var nouveau by remember { mutableStateOf(false) }
     // La barre du bas des glissements : « Conversation archivée · Annuler », etc.
     val barreMessages = remember { androidx.compose.material3.SnackbarHostState() }
@@ -276,6 +298,7 @@ private fun Liste(
     }
     LaunchedEffect(vue) {
         reorganiser = false
+        fermerRecherche()
         if (vue == Vue.Archives) Depot.chargerArchives()
     }
     val titre = when (vue) {
@@ -293,6 +316,17 @@ private fun Liste(
                     Text(titre, fontWeight = FontWeight.Bold, fontSize = 22.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
                 actions = {
+                    // La loupe : l'autre accès à la recherche (et pour la refermer).
+                    IconButton(onClick = {
+                        if (rechercheOuverte) {
+                            fermerRecherche()
+                        } else {
+                            focaliser = true
+                            rechercheOuverte = true
+                        }
+                    }) {
+                        Icon(Icons.Filled.Search, t("Rechercher"), tint = if (rechercheOuverte) P.accent else P.icone)
+                    }
                     if (vue == Vue.Favoris && Marques.favoris.size > 1) {
                         IconButton(onClick = { reorganiser = !reorganiser }) {
                             if (reorganiser) {
@@ -376,15 +410,34 @@ private fun Liste(
         // Le fondu du haut, seulement une fois la liste défilée (lu au dessin, sans recomposer).
         val etatListe = androidx.compose.foundation.lazy.rememberLazyListState()
         val defilee = rememberApparition { etatListe.firstVisibleItemIndex > 0 || etatListe.firstVisibleItemScrollOffset > 0 }
+        val tirage = tirerPourChercher(
+            ouverte = rechercheOuverte,
+            vide = filtre.isEmpty(),
+            ouvrir = { focaliser = false; rechercheOuverte = true },
+            fermer = ::fermerRecherche,
+        )
+        Column(Modifier.fillMaxSize().padding(margesHaut)) {
+        // Le champ glisse sous l'en-tête (180 ms) ; en EGA, il apparaît d'un coup comme le reste.
+        androidx.compose.animation.AnimatedVisibility(
+            rechercheOuverte,
+            enter = if (P.ega) androidx.compose.animation.EnterTransition.None else
+                androidx.compose.animation.expandVertically(androidx.compose.animation.core.tween(180)) +
+                    androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(180)),
+            exit = if (P.ega) androidx.compose.animation.ExitTransition.None else
+                androidx.compose.animation.shrinkVertically(androidx.compose.animation.core.tween(160)) +
+                    androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(160)),
+        ) {
+            ChampFiltre(filtre, focaliser) { filtre = it }
+        }
         LazyColumn(
-            Modifier.fillMaxSize().padding(margesHaut)
+            Modifier.weight(1f).fillMaxWidth()
+                .nestedScroll(tirage)
                 // Le masque d'abord, la source ensuite : le flou de la barre voit les rangées intactes.
                 .fonduBords(28.dp, hautVisible = defilee)
                 .sourceFlou(LocalFlou.current, FLOU_LISTE),
             state = etatListe,
             contentPadding = margesBas,
         ) {
-            item { ChampFiltre(filtre) { filtre = it } }
             item { Bannieres(reglages) }
             if (vue == Vue.Tout && accueilVisible()) item { Accueil(serveur, connecter) }
             val vide = when {
@@ -467,6 +520,7 @@ private fun Liste(
             // De la place pour le bouton flottant.
             item { Spacer(Modifier.size(80.dp)) }
         }
+        }
     }
     if (nouveau) NouveauMessage(fermer = { nouveau = false }, ouvrir = ouvrir)
 }
@@ -508,9 +562,97 @@ private fun personnesPonts(tel: List<ContactTrouve>): List<Pair<String, String>>
     }.take(8)
 }
 
-/** La barre de recherche en haut de la liste. */
+/**
+ * Tirer pour chercher (comme les messageries d'iOS) : la liste déjà tout en haut,
+ * tirée vers le bas au-delà de 56 dp, ouvre la recherche (petite vibration au seuil).
+ * Seul le sur-défilement compte : un geste qui a d'abord fait défiler la liste n'ouvre
+ * rien, et rien n'est consommé (le défilement, l'étirement du bord et les glissements
+ * horizontaux des rangées restent intacts). Défiler vers le bas (24 dp) avec le champ
+ * vide le referme ; avec du texte, il reste.
+ */
 @Composable
-private fun ChampFiltre(texte: String, changer: (String) -> Unit) {
+private fun tirerPourChercher(
+    ouverte: Boolean,
+    vide: Boolean,
+    ouvrir: () -> Unit,
+    fermer: () -> Unit,
+): androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+    val densite = androidx.compose.ui.platform.LocalDensity.current
+    val seuilOuvrir = with(densite) { 56.dp.toPx() }
+    val seuilFermer = with(densite) { 24.dp.toPx() }
+    val haptique = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val estOuverte by androidx.compose.runtime.rememberUpdatedState(ouverte)
+    val estVide by androidx.compose.runtime.rememberUpdatedState(vide)
+    val surOuvrir by androidx.compose.runtime.rememberUpdatedState(ouvrir)
+    val surFermer by androidx.compose.runtime.rememberUpdatedState(fermer)
+    return remember(seuilOuvrir, seuilFermer, haptique) {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            var tire = 0f
+            var descendu = 0f
+            // Le geste en cours a fait défiler la liste : pas d'ouverture avant le prochain.
+            var bloque = false
+
+            override fun onPreScroll(
+                available: androidx.compose.ui.geometry.Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
+            ): androidx.compose.ui.geometry.Offset {
+                if (source != androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput) {
+                    return androidx.compose.ui.geometry.Offset.Zero
+                }
+                if (available.y < 0f) {
+                    tire = 0f
+                    if (estOuverte && estVide) {
+                        descendu -= available.y
+                        if (descendu > seuilFermer) {
+                            descendu = 0f
+                            surFermer()
+                        }
+                    }
+                } else {
+                    descendu = 0f
+                }
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: androidx.compose.ui.geometry.Offset,
+                available: androidx.compose.ui.geometry.Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
+            ): androidx.compose.ui.geometry.Offset {
+                if (source != androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput) {
+                    return androidx.compose.ui.geometry.Offset.Zero
+                }
+                if (consumed.y != 0f) {
+                    bloque = true
+                    tire = 0f
+                } else if (available.y > 0f && !bloque && !estOuverte) {
+                    tire += available.y
+                    if (tire > seuilOuvrir) {
+                        tire = 0f
+                        bloque = true
+                        haptique.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.GestureThresholdActivate)
+                        surOuvrir()
+                    }
+                }
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+
+            // Le doigt levé (avec ou sans élan) : le prochain geste repart de zéro.
+            override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
+                tire = 0f
+                descendu = 0f
+                bloque = false
+                return androidx.compose.ui.unit.Velocity.Zero
+            }
+        }
+    }
+}
+
+/** La barre de recherche, sous l'en-tête quand elle est ouverte ; [focaliser] : le clavier tout de suite. */
+@Composable
+private fun ChampFiltre(texte: String, focaliser: Boolean, changer: (String) -> Unit) {
+    val demande = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { if (focaliser) runCatching { demande.requestFocus() } }
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).carte(20.dp)
             .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -524,7 +666,7 @@ private fun ChampFiltre(texte: String, changer: (String) -> Unit) {
                 texte, changer, singleLine = true,
                 textStyle = TextStyle(color = P.texteFort, fontSize = 15.sp, fontFamily = P.police),
                 cursorBrush = SolidColor(P.accent),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().focusRequester(demande),
             )
         }
         if (texte.isNotEmpty()) {
