@@ -454,7 +454,7 @@ private fun Liste(
             // archives, sauf dans sa propre vue et dans la recherche. Ses marques restent.
             val cache = f.isEmpty() && vue !is Vue.DuService && vue != Vue.Privees && ServicesCaches.cache(c.service)
             // Liste privée : nulle part ailleurs que dans sa vue.
-            !cache && dansVue && Marques.estPrivee(c.id) == (vue == Vue.Privees) && (f.isEmpty() || ca.jasette.android.plier(c.name).contains(f) ||
+            !cache && dansVue && Marques.estPrivee(c.id) == (vue == Vue.Privees) && (f.isEmpty() || ca.jasette.android.plier(c.name).contains(f) || ca.jasette.android.plier(ca.jasette.android.nomAffiche(c)).contains(f) ||
                 ca.jasette.android.plier(c.preview).contains(f) ||
                 c.members.any { ca.jasette.android.plier(it).contains(f) })
         }
@@ -880,10 +880,10 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
                 // ce sont des fils, pas des personnes).
                 val existantes = if (groupe) emptyList() else (Depot.convs + Depot.archives).filter { c ->
                     !c.group && choix.montre(c.service) && !Marques.estPrivee(c.id) &&
-                        (ca.jasette.android.plier(c.name).contains(q) || c.members.any { ca.jasette.android.plier(it).contains(q) })
+                        (ca.jasette.android.plier(c.name).contains(q) || ca.jasette.android.plier(ca.jasette.android.nomAffiche(c)).contains(q) || c.members.any { ca.jasette.android.plier(it).contains(q) })
                 }.distinctBy { it.id }.take(6)
                 items(existantes, key = { "c-" + it.id }) { c ->
-                    Suggestion(c.name.ifEmpty { t("Sans nom") }, c.service.titre, c.service, c) {
+                    Suggestion(ca.jasette.android.nomAffiche(c).ifEmpty { t("Sans nom") }, c.service.titre, c.service, c) {
                         finir()
                         ouvrir(c.id)
                     }

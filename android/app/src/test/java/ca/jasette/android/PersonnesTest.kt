@@ -99,4 +99,25 @@ class PersonnesTest {
         // Aller-retour JSON.
         assertEquals(u, Personnes.lire(Personnes.json(u)))
     }
+
+    @Test
+    fun principalAffiche() {
+        val w = "w:14185551234@s.whatsapp.net"
+        val g = listOf("105", w, "m:2005")
+        var p = listOf(Personne("p1", g))
+        // Sans principal : chacune garde son nom et sa photo.
+        assertEquals(null, principalDe(p, w))
+        p = listOf(Personne("p1", g, "105"))
+        assertEquals("105", principalDe(p, w))
+        assertEquals("105", principalDe(p, "m:2005"))
+        assertEquals(null, principalDe(p, "105"))
+        assertEquals(null, principalDe(p, "i:3005"))
+        // Délier rend à la conversation les siens.
+        p = delier(p, emptyList(), g, "m:2005").first
+        assertEquals(null, principalDe(p, "m:2005"))
+        assertEquals("105", principalDe(p, w))
+        // La principale déliée : plus de principal pour les autres.
+        p = delier(p, emptyList(), g, "105").first
+        assertEquals(null, principalDe(p, w))
+    }
 }

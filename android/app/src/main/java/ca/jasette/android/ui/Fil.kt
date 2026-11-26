@@ -1,5 +1,6 @@
 package ca.jasette.android.ui
 
+import ca.jasette.android.nomAffiche
 import ca.jasette.android.t
 import android.app.Activity
 import androidx.compose.ui.graphics.graphicsLayer
@@ -266,7 +267,7 @@ fun Fil(
                         // au titre l'interligne de titleLarge (28 sp), qui les poussait vers le haut.
                         Column(verticalArrangement = Arrangement.Center) {
                             Text(
-                                entete?.name ?: "", fontSize = 17.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold,
+                                entete?.let { nomAffiche(it) } ?: "", fontSize = 17.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis, style = androidx.compose.material3.LocalTextStyle.current.merge(TITRE_SERRE),
                             )
                             // « Actif il y a 12 min » d'abord (Presence.kt).
@@ -400,7 +401,7 @@ fun Fil(
                     val premier = avant == null || avant.fromMe != m.fromMe || avant.sender != m.sender
                     val dernier = apres == null || apres.fromMe != m.fromMe || apres.sender != m.sender
                     Message(
-                        m, groupe = conv?.group == true || conv?.large == true, nomConv = entete?.name ?: "", premier = premier, dernier = dernier,
+                        m, groupe = conv?.group == true || conv?.large == true, nomConv = entete?.let { nomAffiche(it) } ?: "", premier = premier, dernier = dernier,
                         surligne = if (recherche) q else "", courant = m.id == courant,
                         reagir = { coords -> reaction = m to coords },
                         pop = pops.debut(m),
@@ -1111,7 +1112,7 @@ private fun Saisie(conv: String, actif: Boolean) {
             // Comme au bureau : une pastille avec le logo du service et
             // « Message à <nom> sur <service> ».
             val service = ca.jasette.android.Service.de(conv)
-            val nomConv = Depot.conv(conv)?.name?.ifEmpty { null } ?: t("ce contact")
+            val nomConv = Depot.conv(conv)?.let { nomAffiche(it) }?.ifEmpty { null } ?: t("ce contact")
             // Hauteur minimale : exactement celle du + (et du bouton de droite), texte
             // centré ; sur plusieurs lignes, la pastille grandit comme avant.
             Row(

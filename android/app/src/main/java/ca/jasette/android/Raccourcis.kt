@@ -78,7 +78,7 @@ object Raccourcis {
 
     private fun fiche(c: Conv) = Fiche(
         id = c.id,
-        nom = c.name.ifEmpty { c.members.joinToString(", ") }.ifEmpty { c.service.court },
+        nom = nomAffiche(c).ifEmpty { c.members.joinToString(", ") }.ifEmpty { c.service.court },
         photo = Contacts.photoPour(c, grande = true) ?: Depot.avatarDe(c) ?: CacheMarques.avatar(c.id),
         couleur = c.color,
         groupe = c.group,

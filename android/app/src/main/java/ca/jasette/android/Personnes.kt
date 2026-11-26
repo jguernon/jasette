@@ -278,7 +278,28 @@ fun delier(personnes: List<Personne>, refus: List<Refus>, groupe: List<String>, 
 fun refuser(refus: List<Refus>, groupe: List<String>, x: String): List<Refus> =
     Personnes.nettoyerRefus(refus + groupe.filter { it != x }.map { Personnes.ranger(it, x) })
 
-/** « Utiliser ce nom » : [x] devient le nom principal de la personne (créée au besoin). */
+/**
+ * La conversation principale de la personne de [id], si un principal est choisi
+ * (et toujours lié) : son nom et sa photo valent alors pour toutes.
+ */
+fun principalDe(personnes: List<Personne>, id: String): String? {
+    val p = personnes.firstOrNull { id in it.convs } ?: return null
+    return p.principal.takeIf { it.isNotEmpty() && it != id && it in p.convs }
+}
+
+/** La conversation principale de la personne de [conv] (jamais pour un groupe). */
+fun principaleDe(conv: Conv): Conv? {
+    if (conv.group || conv.large) return null
+    return principalDe(Marques.personnes, conv.id)?.let { Depot.conv(it) }?.takeIf { !it.group }
+}
+
+/**
+ * Le nom montré partout pour [conv] : celui de la principale de sa personne,
+ * sinon le sien (vide s'il n'en a pas). La recherche trouve aussi le nom d'origine.
+ */
+fun nomAffiche(conv: Conv): String = principaleDe(conv)?.name?.trim()?.takeIf { it.isNotEmpty() } ?: conv.name
+
+/** « Utiliser ce nom et cette photo » : [x] devient le nom principal de la personne (créée au besoin). */
 fun choisirPrincipal(personnes: List<Personne>, groupe: List<String>, x: String, idNeuf: String): List<Personne> {
     val ancre = groupe.firstOrNull() ?: return personnes
     val p = personnes.toMutableList()

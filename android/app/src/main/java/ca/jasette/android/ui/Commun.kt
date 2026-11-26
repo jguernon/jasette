@@ -85,9 +85,11 @@ private fun initiales(nom: String): String? {
  * [grise] : la conversation n'est pas chargée (service absent) ; le logo du service reste en couleur.
  */
 @Composable
-fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false, presence: Boolean = false, fondPoint: Color = P.fond) {
-    val photo = ca.jasette.android.Contacts.photoPour(conv, grande = taille >= 48.dp) ?: Depot.avatarDe(conv)
-        ?: ca.jasette.android.CacheMarques.avatar(conv.id)
+fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false, presence: Boolean = false, fondPoint: Color = P.fond, propre: Boolean = false) {
+    // La photo de la principale de sa personne (fiche), sinon la sienne ; [propre] : la sienne seulement.
+    fun photoDe(c: Conv) = ca.jasette.android.Contacts.photoPour(c, grande = taille >= 48.dp) ?: Depot.avatarDe(c)
+        ?: ca.jasette.android.CacheMarques.avatar(c.id)
+    val photo = (if (propre) null else ca.jasette.android.principaleDe(conv))?.let { photoDe(it) } ?: photoDe(conv)
     Box(Modifier.size(taille)) {
         // Rond, carré (EGA), cadre vert brillant (Live) ou carré en creux (Sirène).
         val rond = Modifier.cadreAvatar(taille)
@@ -100,7 +102,7 @@ fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false
         } else {
             val base = if (grise) GRIS_ABSENT else couleurHex(conv.color) ?: P.avatarDefaut
             Box(rond.background(fondAvatar(base)), contentAlignment = Alignment.Center) {
-                val i = if (conv.group) null else initiales(conv.name)
+                val i = if (conv.group) null else initiales(if (propre) conv.name else ca.jasette.android.nomAffiche(conv))
                 if (i != null) {
                     Text(i, color = Color.White, fontSize = (taille.value * 0.38f).sp, fontWeight = FontWeight.SemiBold)
                 } else {

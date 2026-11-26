@@ -94,7 +94,7 @@ class PontService : ServiceAndroid() {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
-        val titre = conv?.name?.ifEmpty { null } ?: m.sender.ifEmpty { Service.de(m.conv).court }
+        val titre = conv?.let { nomAffiche(it) }?.ifEmpty { null } ?: m.sender.ifEmpty { Service.de(m.conv).court }
         val texte = if (conv?.group == true && m.sender.isNotEmpty()) "${m.sender}${t(" : ")}${m.apercu()}" else m.apercu()
         // L'avatar de la personne : photo du contact si on l'utilise, sinon celle du service.
         val photo = conv?.let { Contacts.photoPour(it, grande = true) ?: Depot.avatarDe(it) } ?: Depot.avatars[m.conv]

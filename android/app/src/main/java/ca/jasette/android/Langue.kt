@@ -59,7 +59,7 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Est-ce la même personne ?" to "Is this the same person?",
     "Pas la même personne" to "Not the same person",
     "Oui" to "Yes",
-    "Utiliser ce nom" to "Use this name",
+    "Utiliser ce nom et cette photo" to "Use this name & picture",
     "Lié à la main" to "Linked by hand",
     "Même numéro" to "Same number",
     "Nom très proche" to "Very similar name",

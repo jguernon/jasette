@@ -191,7 +191,7 @@ fun FichePersonne(ancre: String, fermer: () -> Unit) {
                             if (id != ancre) Depot.aOuvrir = id
                         }) {
                             if (!seule && c.name.isNotEmpty() && mots(c.name) != nomMots) {
-                                PetitBouton(t("Utiliser ce nom"), false) {
+                                PetitBouton(t("Utiliser ce nom et cette photo"), false) {
                                     Marques.changerPersonnes(choisirPrincipal(Marques.personnes, groupeIds(), id, Personnes.nouvelId()), Marques.personnesRefus)
                                 }
                             }
@@ -289,7 +289,7 @@ private fun LigneConv(c: Conv, active: Boolean, detail: String?, toucher: (() ->
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Avatar(c, 44.dp, presence = true, fondPoint = if (active) P.choisi else P.menu)
+        Avatar(c, 44.dp, presence = true, fondPoint = if (active) P.choisi else P.menu, propre = true)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

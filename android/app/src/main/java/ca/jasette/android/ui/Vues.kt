@@ -1,5 +1,6 @@
 package ca.jasette.android.ui
 
+import ca.jasette.android.nomAffiche
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -376,7 +377,7 @@ private fun CaseHead(
     val absente = absence(c.id)
     val note = ca.jasette.android.Notes.deContact(c.id)
     // Jamais vue (ni chargée, ni en cache) : pas de nom, seulement l'avatar générique et le logo.
-    val nom = if (c.name.isEmpty() && absente != null) "" else c.name.ifEmpty { t("Sans nom") }
+    val nom = if (c.name.isEmpty() && absente != null) "" else nomAffiche(c).ifEmpty { t("Sans nom") }
     val prenom = if (c.group) nom else nom.split(Regex("\\s+")).firstOrNull() ?: nom
     // Le point des non-lus suit la taille de l'avatar (13 dp pour 54 dp).
     val point = (avatar * (13f / 54f)).coerceAtLeast(9.dp)
@@ -455,7 +456,7 @@ fun Rangee(
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        c.name.ifEmpty { c.members.joinToString(", ") },
+                        nomAffiche(c).ifEmpty { c.members.joinToString(", ") },
                         color = if (choisie) P.surSelection else if (absente.grise()) P.texte else P.texteFort,
                         fontWeight = if (c.unread) FontWeight.Bold else FontWeight.SemiBold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), fontSize = Taille.liste(16f),
@@ -587,7 +588,7 @@ fun MenuConversation(
         Item(t("Rechercher"), Icons.Filled.Search, action = rechercher)
     }
 
-    if (feuilleMood) FeuilleMood(c.id, c.name) { feuilleMood = false }
+    if (feuilleMood) FeuilleMood(c.id, nomAffiche(c)) { feuilleMood = false }
 
     if (confirmer) {
         AlertDialog(

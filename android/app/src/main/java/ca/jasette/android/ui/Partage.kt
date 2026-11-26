@@ -118,7 +118,7 @@ private fun reessayable(c: Cible): Boolean =
         Depot.peutReessayer(tmp) && Depot.messages[c.conv].orEmpty().any { it.tmpId == tmp && it.status == "ÉCHEC" }
     }
 
-private fun nomDe(c: Conv) = c.name.ifEmpty { c.members.joinToString(", ") }.ifEmpty { c.service.court }
+private fun nomDe(c: Conv) = ca.jasette.android.nomAffiche(c).ifEmpty { c.members.joinToString(", ") }.ifEmpty { c.service.court }
 
 /**
  * L'écran de partage, monté par-dessus l'app d'origine : l'aperçu de ce qui est
@@ -269,7 +269,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.Choix(
         (dabord + Depot.boite.filter { !it.readOnly && !Marques.estPrivee(it.id) }).distinctBy { it.id }
     } else {
         toutes.filter { c ->
-            plier(c.name).contains(q) || c.members.any { plier(it).contains(q) } || plier(c.service.court).contains(q)
+            plier(c.name).contains(q) || plier(nomDe(c)).contains(q) || c.members.any { plier(it).contains(q) } || plier(c.service.court).contains(q)
         }
     }
     Text(
