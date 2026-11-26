@@ -23,6 +23,11 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import ca.jasette.android.Notes
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -93,7 +98,12 @@ fun BoutonAvatarMoi(taille: Dp) {
     if (menu) MenuAvatar { menu = false }
 }
 
-/** Le menu de l'avatar : Google, Facebook, Instagram, une image du téléphone, ou l'initiale. */
+/**
+ * L'écran « Moi » (le menu de l'avatar) : en premier plan, la bulle « Quoi de
+ * neuf ? » (QuoiDeNeuf.kt) ; dessous, « Publier sur : Tout ▸ » et « Changer
+ * d'avatar ▸ », repliés : Google, Facebook, Instagram, une image du
+ * téléphone, ou l'initiale.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MenuAvatar(fermer: () -> Unit) {
@@ -112,12 +122,22 @@ fun MenuAvatar(fermer: () -> Unit) {
             }
         }
     }
-    ModalBottomSheet(onDismissRequest = fermer, containerColor = P.menu) {
-        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
-            Text(
-                t("Votre avatar"), color = P.texteFort, fontWeight = FontWeight.Bold, fontSize = 18.sp,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-            )
+    var avatarOuvert by remember { mutableStateOf(false) }
+    val etatFeuille = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = {
+            Notes.oublierResultats()
+            fermer()
+        },
+        containerColor = P.menu, sheetState = etatFeuille,
+    ) {
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).imePadding()
+                .navigationBarsPadding().padding(bottom = 12.dp),
+        ) {
+            BulleQuoiDeNeuf()
+            SelecteurServicesNotes(marge = 20.dp)
+            LigneRepliable(t("Changer d'avatar"), avatarOuvert, 20.dp) { avatarOuvert = !avatarOuvert }
             @Composable
             fun Ligne(cle: String, titre: String, detail: String, dispo: Boolean, image: @Composable () -> Unit, action: () -> Unit) {
                 Row(
@@ -138,6 +158,7 @@ fun MenuAvatar(fermer: () -> Unit) {
                 Marques.choisirAvatar(cle)
                 fermer()
             }
+            if (!avatarOuvert) return@Column
             val google = Depot.avatarsMoi[Service.GOOGLE] != null
             Ligne("google", t("Avatar de Google Messages"),
                 if (google) t("Votre fiche sur le téléphone") else t("Aucune photo trouvée"), google,

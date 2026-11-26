@@ -360,6 +360,15 @@ fun BarreBas(vue: Vue, choisir: (Vue) -> Unit) {
 @Composable
 fun Head(favoris: List<Conv>, choisie: String?, ouvrir: (String) -> Unit, retiree: (String) -> Unit) {
     val colonnes = ca.jasette.android.Marques.colonnes(ca.jasette.android.Marques.headGrille)
+    // Les notes Instagram des contacts (§5.12) : relues au plus toutes les 15 minutes (Notes.demanderListe).
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        while (true) {
+            ca.jasette.android.Notes.demanderListe()
+            kotlinx.coroutines.delay(60_000L)
+        }
+    }
+    // Une note dans le Head : toutes les cases gardent la place de sa bulle (rangées alignées).
+    val espaceNote = favoris.any { ca.jasette.android.Notes.deContact(it.id) != null }
     Column {
         androidx.compose.foundation.layout.BoxWithConstraints(
             Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
@@ -373,7 +382,7 @@ fun Head(favoris: List<Conv>, choisie: String?, ouvrir: (String) -> Unit, retire
             Column {
                 for (rangee in favoris.chunked(colonnes)) {
                     Row {
-                        for (c in rangee) key(c.id) { CaseHead(c, choisie, case, avatar, police, ouvrir, retiree) }
+                        for (c in rangee) key(c.id) { CaseHead(c, choisie, case, avatar, police, ouvrir, retiree, espaceNote) }
                     }
                 }
             }
@@ -396,9 +405,11 @@ private fun CaseHead(
     police: androidx.compose.ui.unit.TextUnit,
     ouvrir: (String) -> Unit,
     retiree: (String) -> Unit,
+    espaceNote: Boolean = false,
 ) {
     var menu by remember { mutableStateOf(false) }
     val absente = absence(c.id)
+    val note = ca.jasette.android.Notes.deContact(c.id)
     // Jamais vue (ni chargée, ni en cache) : pas de nom, seulement l'avatar générique et le logo.
     val nom = if (c.name.isEmpty() && absente != null) "" else c.name.ifEmpty { t("Sans nom") }
     val prenom = if (c.group) nom else nom.split(Regex("\\s+")).firstOrNull() ?: nom
@@ -409,7 +420,7 @@ private fun CaseHead(
             Modifier.width(largeur).clip(forme(14.dp))
                 .background(if (c.id == choisie) P.selection else androidx.compose.ui.graphics.Color.Transparent)
                 .combinedClickable(onClick = { ouvrir(c.id) }, onLongClick = { menu = true })
-                .padding(vertical = 8.dp),
+                .padding(top = if (espaceNote) 8.dp + police.value.dp * 1.6f else 8.dp, bottom = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box {
@@ -435,6 +446,13 @@ private fun CaseHead(
                     modifier = Modifier.padding(horizontal = 4.dp),
                 )
             }
+        }
+        // La note Instagram du contact, en petite bulle au-dessus de l'avatar, comme dans Instagram.
+        if (note != null) {
+            BulleNoteHead(
+                note.text, largeur - 6.dp, police * 0.85f,
+                Modifier.align(Alignment.TopCenter).padding(top = 2.dp),
+            )
         }
         MenuDeListe(c, menu, fermer = { menu = false }, retiree = retiree, ouvrir = { ouvrir(c.id) })
     }

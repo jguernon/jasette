@@ -161,6 +161,60 @@ object Marques {
         changement()
     }
 
+    /**
+     * « Afficher les notes de mes contacts » (bulles du Head, PROTOCOLE.md §5.12).
+     * Vrai par défaut. Une marque (`notes_contacts`) ; [surNotesContacts]
+     * prévient le pont Instagram local.
+     */
+    var notesContacts by mutableStateOf(true)
+        private set
+
+    /** Appelée à chaque changement de [notesContacts] (ici ou par le serveur). Posée par [Depot]. */
+    var surNotesContacts: ((Boolean) -> Unit)? = null
+
+    fun choisirNotesContacts(oui: Boolean) {
+        if (oui == notesContacts) return
+        notesContacts = oui
+        changement()
+        surNotesContacts?.invoke(oui)
+    }
+
+    /**
+     * « Partager ce que j'écoute sur Spotify » : le nom de l'appareil qui publie
+     * la musique (`notes_musique`, §5.5), "" = désactivé. Un seul appareil à la fois.
+     */
+    var notesMusique by mutableStateOf("")
+        private set
+
+    fun choisirNotesMusique(appareil: String) {
+        val a = bornerOctets(appareil, 128)
+        if (a == notesMusique) return
+        notesMusique = a
+        changement()
+    }
+
+    /** Ce que dit la note musicale (`notes_musique_format`) : "artiste" (défaut), "genre" ou "titre". */
+    var notesMusiqueFormat by mutableStateOf("artiste")
+        private set
+
+    fun choisirNotesMusiqueFormat(f: String) {
+        val n = formatMusique(f)
+        if (n == notesMusiqueFormat) return
+        notesMusiqueFormat = n
+        changement()
+    }
+
+    /** Les services où « Quoi de neuf ? » publie (`notes_services`) : ["tout"] ou une liste précise. */
+    var notesServices by mutableStateOf(listOf("tout"))
+        private set
+
+    fun choisirNotesServices(l: List<String>) {
+        val n = servicesNotes(l)
+        if (n == notesServices) return
+        notesServices = n
+        changement()
+    }
+
     /** Chaque bulle montre son heure (et sa date si ce n'est pas aujourd'hui), comme `details_heures`. */
     var heureChaqueMessage by mutableStateOf(true)
         private set
@@ -259,6 +313,12 @@ object Marques {
         cacherApresJours = bornerJours(p.getInt("cacher_apres_jours", 0))
         presenceEnLigne = p.getBoolean("presence_en_ligne", true)
         sonsConversation = jeuSons(p.getString("sons_conversation", "bulle"))
+        notesContacts = p.getBoolean("notes_contacts", true)
+        notesMusique = p.getString("notes_musique", "") ?: ""
+        notesMusiqueFormat = formatMusique(p.getString("notes_musique_format", "artiste"))
+        notesServices = try {
+            servicesNotes(JSONArray(p.getString("notes_services", "[\"tout\"]") ?: "[]").chaines())
+        } catch (_: Exception) { listOf("tout") }
         archivesDepuis.clear()
         try {
             val o = JSONObject(p.getString("archives_depuis", "{}") ?: "{}")
@@ -325,6 +385,10 @@ object Marques {
             ?.putInt("cacher_apres_jours", cacherApresJours)
             ?.putBoolean("presence_en_ligne", presenceEnLigne)
             ?.putString("sons_conversation", sonsConversation)
+            ?.putBoolean("notes_contacts", notesContacts)
+            ?.putString("notes_musique", notesMusique)
+            ?.putString("notes_musique_format", notesMusiqueFormat)
+            ?.putString("notes_services", JSONArray(notesServices).toString())
             ?.putString("archives_depuis", JSONObject(archivesDepuis.toMap()).toString())
             ?.putLong("version", version)
             ?.putBoolean("a_envoyer", aEnvoyer)
@@ -457,10 +521,14 @@ object Marques {
         val cacherApresJours: Int,
         val presenceEnLigne: Boolean,
         val sons: String,
+        val notesContacts: Boolean = true,
+        val notesMusique: String = "",
+        val notesMusiqueFormat: String = "artiste",
+        val notesServices: List<String> = listOf("tout"),
     ) {
         fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty() && privees.isEmpty() &&
             moods.isEmpty() && emojis.isEmpty() && !garderArchives && cacherApresJours == 0 && presenceEnLigne &&
-            sons == "bulle"
+            sons == "bulle" && notesContacts && notesMusique.isEmpty() && notesMusiqueFormat == "artiste" && notesServices == listOf("tout")
 
         /** Chaque liste de this, dans son ordre, puis les ids de [b] qui n'y sont pas. */
         fun union(b: Listes) = Listes(
@@ -479,6 +547,10 @@ object Marques {
             cacherApresJours,
             presenceEnLigne,
             sons,
+            notesContacts,
+            notesMusique,
+            notesMusiqueFormat,
+            notesServices,
         )
 
         /** Les ids de this absents de [b], liste par liste. */
@@ -491,6 +563,10 @@ object Marques {
             cacherApresJours,
             presenceEnLigne,
             sons,
+            notesContacts,
+            notesMusique,
+            notesMusiqueFormat,
+            notesServices,
         )
     }
 
@@ -498,6 +574,7 @@ object Marques {
         Listes(
             head.toList(), favoris.toList(), epingles.toList(), archives.toList(), privees.toList(), moods.toMap(), emojis.toMap(),
             garderArchives, cacherApresJours, presenceEnLigne, sonsConversation,
+            notesContacts, notesMusique, notesMusiqueFormat, notesServices,
         )
 
     private fun poser(l: Listes) {
@@ -519,6 +596,13 @@ object Marques {
             surPresence?.invoke(l.presenceEnLigne)
         }
         sonsConversation = l.sons
+        if (notesContacts != l.notesContacts) {
+            notesContacts = l.notesContacts
+            surNotesContacts?.invoke(l.notesContacts)
+        }
+        notesMusique = l.notesMusique
+        notesMusiqueFormat = l.notesMusiqueFormat
+        notesServices = l.notesServices
     }
 
     /** Envoie une trame au serveur ; faux si la connexion est coupée. Posé par [Depot] en mode client. */
@@ -561,6 +645,10 @@ object Marques {
             .put("cacher_apres_jours", l.cacherApresJours)
             .put("presence_en_ligne", l.presenceEnLigne)
             .put("sons_conversation", l.sons)
+            .put("notes_contacts", l.notesContacts)
+            .put("notes_musique", l.notesMusique)
+            .put("notes_musique_format", l.notesMusiqueFormat)
+            .put("notes_services", JSONArray(l.notesServices))
             .put("version", version).put("id", prochain)
         if (!envoi(JSONObject().put("marques", corps))) {
             // La connexion tombe : le rejeu suivant tranchera.
@@ -601,6 +689,11 @@ object Marques {
                 is String -> jeuSons(j)
                 else -> sonsConversation
             },
+            // Les réglages de « Quoi de neuf ? » (absents : les nôtres restent).
+            if (m.opt("notes_contacts") is Boolean) m.optBoolean("notes_contacts") else notesContacts,
+            (m.opt("notes_musique") as? String)?.let { bornerOctets(it, 128) } ?: notesMusique,
+            (m.opt("notes_musique_format") as? String)?.let { formatMusique(it) } ?: notesMusiqueFormat,
+            m.optJSONArray("notes_services")?.let { servicesNotes(it.chaines()) } ?: notesServices,
         )
         val v = m.optLong("version", -1)
         if (v < 0) return
@@ -662,4 +755,34 @@ object Marques {
 fun jeuSons(j: String?): String = when (j) {
     "bulle", "bois", "verre", "aucun" -> j
     else -> "bulle"
+}
+
+/**
+ * `notes_services` normalisé (PROTOCOLE.md §5.5) : sans doublon ni nom vide,
+ * 32 noms de 32 octets au plus ; vide ou contenant "tout" : ["tout"].
+ */
+fun servicesNotes(l: List<String>): List<String> {
+    val n = l.filter { it.isNotEmpty() && it.toByteArray().size <= 32 }.distinct().take(32)
+    return if (n.isEmpty() || "tout" in n) listOf("tout") else n
+}
+
+/** [s] coupé à [max] octets UTF-8, sans couper un caractère. */
+fun bornerOctets(s: String, max: Int): String {
+    if (s.toByteArray().size <= max) return s
+    var i = 0
+    var octets = 0
+    while (i < s.length) {
+        val cp = s.codePointAt(i)
+        val n = String(Character.toChars(cp)).toByteArray().size
+        if (octets + n > max) break
+        octets += n
+        i += Character.charCount(cp)
+    }
+    return s.substring(0, i)
+}
+
+/** Un format de note musicale connu, sinon "artiste" (le défaut). */
+fun formatMusique(f: String?): String = when (f) {
+    "artiste", "genre", "titre" -> f
+    else -> "artiste"
 }

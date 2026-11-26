@@ -193,6 +193,7 @@ object Depot {
         appli = ctx.applicationContext
         enMarche = true
         Marques.surPresence = { oui -> principal.post { presenceReglee(oui) } }
+        Marques.surNotesContacts = { oui -> principal.post { notesContactsReglees(oui) } }
         Sons.init(ctx)
         generation++
         val cfg = ConfigServeur.lire(appli)
@@ -369,6 +370,7 @@ object Depot {
         codeAssociation.clear()
         presences.clear()
         ecrits.clear()
+        Notes.vider()
         emoji = null
         besoinNip = false
         erreurNip = null
@@ -389,7 +391,20 @@ object Depot {
             "SSL_CERT_DIR" to "/system/etc/security/cacerts",
             // « Afficher qui est en ligne » (PROTOCOLE.md §5.10) ; ensuite, la commande `presence`.
             "JASETTE_PRESENCE" to if (Marques.presenceEnLigne) "1" else "0",
+            // « Afficher les notes de mes contacts » (§5.12) ; ensuite, la commande `notes_contacts`.
+            "JASETTE_NOTES" to if (Marques.notesContacts) "1" else "0",
         )
+    }
+
+    /**
+     * Le réglage « Afficher les notes de mes contacts » vient de changer : le
+     * pont Instagram local reçoit `notes_contacts` (en mode client, le
+     * serveur prévient le sien) ; désactivé, les notes sont oubliées.
+     */
+    private fun notesContactsReglees(oui: Boolean) {
+        Notes.contactsRegles(oui)
+        if (connexion != null) return
+        (ponts[Service.INSTAGRAM] as? PontLocal)?.envoyer(JSONObject().put("cmd", "notes_contacts").put("on", oui))
     }
 
     /** Les services dont le pont suit la présence. */
@@ -753,7 +768,11 @@ object Depot {
                     pretPourArchives(service)
                     filsAuPret(service)
                 }
-                if (apres == Etat.NON_ASSOCIE) oublier(service)
+                if (apres == Etat.NON_ASSOCIE) {
+                    oublier(service)
+                    Notes.oublier(service)
+                }
+                if (apres == Etat.PRET && avant != Etat.PRET && service == Service.INSTAGRAM) Notes.demanderListe(force = true)
                 // Le pont n'écoute plus : sa présence ne vaut plus rien.
                 if (apres != Etat.PRET) presences.keys.filter { Service.de(it) == service }.forEach { presences.remove(it) }
                 // Hors association, le QR et le code n'ont plus de sens.
@@ -811,6 +830,8 @@ object Depot {
             }
             "search" -> recevoirRecherche(v, service)
             "presence" -> recevoirPresence(v)
+            // « Quoi de neuf ? » (§5.12) : ma note, le résultat d'une publication, les notes des contacts.
+            "note_moi", "note_result", "notes" -> Notes.recevoir(v, service)
             "hello", "e2ee" -> {}
             "error" -> {
                 val texte = v.chaine("text")

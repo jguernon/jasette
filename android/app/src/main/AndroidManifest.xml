@@ -32,6 +32,19 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Jasette">
 
+        <!-- « Partager ce que j'écoute sur Spotify » (Musique.kt) : un écouteur de
+             notifications, seule façon de lire la session multimédia de Spotify
+             (titre, artiste). Aucune notification n'y est lue. L'utilisateur
+             l'active lui-même dans Android (Réglages > Quoi de neuf). -->
+        <service
+            android:name=".EcouteMusique"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

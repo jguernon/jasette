@@ -52,6 +52,47 @@ object Langue {
 fun t(fr: String): String = if (!Langue.anglais) fr else ANGLAIS[fr] ?: fr
 
 private val ANGLAIS: Map<String, String> = mapOf(
+    // « Quoi de neuf ? » (QuoiDeNeuf.kt, Notes.kt, Musique.kt).
+    "Quoi de neuf ?" to "What's up?",
+    "Quoi de neuf" to "What's up",
+    "🎵 La musique remplace ta note pendant que tu écoutes" to "🎵 Music replaces your note while you listen",
+    "Aucune note pour l'instant." to "No note yet.",
+    "Partage une pensée…" to "Share a thought…",
+    "Aucun service compatible connecté." to "No compatible service connected.",
+    "caractères restants" to "characters left",
+    "Publier" to "Post",
+    "publication…" to "posting…",
+    "La publication a échoué." to "Posting failed.",
+    "Tout" to "All",
+    "Publier sur :" to "Post to:",
+    "Tous les services compatibles connectés, et ceux à venir" to "All compatible connected services, and future ones",
+    "Aucun service compatible connecté (Instagram, Messenger, WhatsApp, Telegram, Bluesky…)." to
+        "No compatible service connected (Instagram, Messenger, WhatsApp, Telegram, Bluesky…).",
+    "Note, 60 caractères, 24 h" to "Note, 60 characters, 24 h",
+    "Remplace « Infos » pendant 24 h" to "Replaces “About” for 24 h",
+    "Remplace la bio, 70 caractères" to "Replaces your bio, 70 characters",
+    "Remplace la description du profil" to "Replaces your profile description",
+    "Statut personnalisé" to "Custom status",
+    "Audience Instagram" to "Instagram audience",
+    "Abonnés mutuels" to "Mutual followers",
+    "Amis proches" to "Close friends",
+    "Changer d'avatar" to "Change avatar",
+    "Afficher les notes de mes contacts" to "Show my contacts' notes",
+    "Les notes Instagram, en petite bulle au-dessus des avatars du Head." to "Instagram notes, in a small bubble above the avatars of the Head.",
+    "Partager ce que j'écoute sur Spotify" to "Share what I'm listening to on Spotify",
+    "Activé sur" to "On for",
+    "L'activer ici le reprend." to "Turning it on here takes it over.",
+    "Ta note devient ce que tu écoutes, au plus une fois par 15 minutes. Un seul appareil publie." to
+        "Your note becomes what you're listening to, at most once every 15 minutes. Only one device posts.",
+    "Pour savoir ce que joue Spotify, Android demande l'accès aux notifications pour Jasette. Jasette n'y lit aucune notification : seulement le titre et l'artiste de Spotify, sur ce téléphone." to
+        "To know what Spotify is playing, Android asks for notification access for Jasette. Jasette reads no notifications: only Spotify's title and artist, on this phone.",
+    "Autoriser l'accès" to "Allow access",
+    "Artiste ou émission" to "Artist or show",
+    "Genre" to "Genre",
+    "Titre de la chanson" to "Song title",
+    "« 🎵 Écoute Daft Punk »" to "“🎵 Listening to Daft Punk”",
+    "Le genre est trouvé sur MusicBrainz à partir du nom de l'artiste." to "The genre is looked up on MusicBrainz from the artist's name.",
+    "« 🎵 Titre — Artiste »" to "“🎵 Title — Artist”",
     // Réglages → Serveur Jasette → Connexion MCP (Claude).
     "Connexion MCP (Claude)" to "MCP connection (Claude)",
     "Branchez Claude (claude.ai ou Claude Code) sur les messageries de ce serveur : il pourra lister vos conversations, les lire et y chercher. Lire ne marque rien comme lu." to

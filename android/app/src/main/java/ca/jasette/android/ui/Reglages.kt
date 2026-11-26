@@ -73,6 +73,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.runtime.key
 
 /**
@@ -84,6 +85,7 @@ enum class SectionReglages(val nom: String, val couleur: Long, val couleurEga: L
     COMPTES("Comptes", 0x8b5cf6, 0xaa00aa),
     NOTIFICATIONS("Notifications", 0x16a34a, 0x00aa00),
     SONS("Sons", 0xf59e0b, 0xaa5500),
+    QUOI_DE_NEUF("Quoi de neuf", 0x06b6d4, 0x00aaaa),
     APPARENCE("Apparence", 0xec4899, 0xaa00aa),
     CONVERSATIONS("Conversations", 0x14b8a6, 0x00aaaa),
     SERVEUR("Serveur Jasette", 0x8b5cf6, 0xaa00aa),
@@ -96,6 +98,7 @@ private fun iconeSection(s: SectionReglages): androidx.compose.ui.graphics.vecto
     SectionReglages.COMPTES -> Icones.arobase
     SectionReglages.NOTIFICATIONS -> Icons.Filled.Notifications
     SectionReglages.SONS -> Icones.volume
+    SectionReglages.QUOI_DE_NEUF -> Icons.Filled.Edit
     SectionReglages.APPARENCE -> Icones.palette
     SectionReglages.CONVERSATIONS -> Icones.forum
     SectionReglages.SERVEUR -> Icones.serveur
@@ -111,6 +114,7 @@ private fun resumeSection(s: SectionReglages): String? = when (s) {
     }
     SectionReglages.SONS -> ca.jasette.android.Sons.JEUX.firstOrNull { it.first == ca.jasette.android.Marques.sonsConversation }
         ?.let { t(it.second) }
+    SectionReglages.QUOI_DE_NEUF -> if (ca.jasette.android.Musique.actifIci()) t("Spotify") else null
     SectionReglages.CONVERSATIONS -> ca.jasette.android.Marques.cacherApresJours.takeIf { it > 0 }?.let { nomCacherApres(it) }
     SectionReglages.SERVEUR -> Depot.serveur?.adresse ?: t("Sur cet appareil")
     SectionReglages.LANGUE -> when (Langue.choix) {
@@ -247,6 +251,7 @@ private fun PageSection(
             SectionReglages.COMPTES -> SectionComptes(connecter)
             SectionReglages.NOTIFICATIONS -> SectionNotifications()
             SectionReglages.SONS -> ChoixSons()
+            SectionReglages.QUOI_DE_NEUF -> SectionQuoiDeNeuf()
             SectionReglages.APPARENCE -> {
                 ChoixTheme()
                 ChoixTeinte()
