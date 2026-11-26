@@ -597,7 +597,7 @@ linkedingo, la bibliothèque de mautrix-linkedin ; pur Go, sans CGO) :
   `send_media`, `react` et `read` ne partent pas (`error` / ignoré). Pas
   de Sales Navigator, pas d'InMail envoyé, pas de pages d'entreprise.
 
-### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, personnes, contacts perso, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*)
+### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, personnes, contacts perso, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*, ordre_services)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
@@ -681,6 +681,15 @@ Et des réglages (facultatifs) :
   compris ceux qu'on branchera plus tard ; sinon une liste précise de noms
   de services (`instagram`, `messenger`, `whatsapp`, `telegram`, `bluesky`,
   `discord`…).
+- `ordre_services` (liste de chaînes, **`[]`** par défaut) : l'**ordre des
+  services** choisi avec les flèches ↑↓ de Réglages → Comptes → « Dans la
+  boîte de réception », partagé entre les appareils comme l'ordre des
+  favoris. Ce sont les clés des services (`google`, `messenger`,
+  `instagram`, `whatsapp`, `signal`, `x`, `telegram`, `bluesky`, `discord`,
+  `reddit`, `linkedin`). Le client range ses services ainsi partout où ils
+  sont en liste (rail, filtres, Nouveau, réglages…) : ceux de la liste
+  d'abord, puis ceux qui n'y sont pas (un service ajouté plus tard) dans son
+  ordre par défaut ; une clé inconnue est ignorée. `[]` : l'ordre par défaut.
 
 C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 
@@ -688,7 +697,7 @@ C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 changement, à **tous** les clients) :
 
 ```json
-{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"personnes":[{"id":"p1764160000000a3f","convs":["123","m:99"],"principal":"123"}],"personnes_refus":[["i:42","m:99"]],"contacts_perso":{"123":{"nom":"Maman","photo":"/srv/jasette/media/contacts/9f3c0a.jpg"}},"version":7}}
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"ordre_services":["google","signal","messenger"],"personnes":[{"id":"p1764160000000a3f","convs":["123","m:99"],"principal":"123"}],"personnes_refus":[["i:42","m:99"]],"contacts_perso":{"123":{"nom":"Maman","photo":"/srv/jasette/media/contacts/9f3c0a.jpg"}},"version":7}}
 ```
 
 `version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
@@ -697,7 +706,7 @@ encore rien reçu (listes vides).
 **Client → serveur** :
 
 ```json
-{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"personnes":[…],"personnes_refus":[…],"contacts_perso":{…},"version":7,"id":12}}
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"ordre_services":[…],"personnes":[…],"personnes_refus":[…],"contacts_perso":{…},"version":7,"id":12}}
 ```
 
 - `version` : la dernière version reçue du serveur (0 si aucune).
@@ -737,6 +746,15 @@ encore rien reçu (listes vides).
   telle quelle (sans doublon ni nom vide, 32 noms de 32 octets au plus) ;
   vide, ou contenant `"tout"` : `["tout"]`. Pas d'union : c'est un réglage.
   Toujours envoyé ; absent de `marques.json` : `["tout"]`.
+- `ordre_services` : absent, `null` ou autre chose qu'une liste de chaînes,
+  rien ne change (un client d'avant ce réglage ne l'efface pas ; le reste de
+  la trame compte) ; une liste est prise telle quelle, sans union (c'est un
+  réglage), même d'un client en retard (sans doublon ni nom vide, 32 noms de
+  32 octets au plus ; le serveur ne vérifie pas les noms). Exception : une
+  liste **vide** d'un client en retard est ignorée (il n'a sans doute jamais
+  reçu l'ordre du serveur) ; d'un client à jour, elle remet l'ordre par
+  défaut. Toujours envoyé (liste, jamais `null`) ; absent de `marques.json` :
+  `[]`.
 - `personnes` : absent ou `null`, rien ne change (un client d'avant la fiche
   de la personne ne les efface pas) ; présent, c'est la liste complète. Un
   élément mal formé est sauté (pas toute la trame). Nettoyage : id de
@@ -796,6 +814,14 @@ réponse. À la réception :
   diffère ;
 - changé ici et version inchangée : la copie locale est renvoyée ;
 - sinon : les marques du serveur remplacent la copie locale.
+
+`ordre_services` vide sur le serveur alors que le client en a un (l'ordre
+d'avant le partage, gardé sur l'appareil : `ordre_services` de
+reglages.json au bureau, préférences « affichage » sur Android) : le client
+garde le sien et l'envoie (une seule fois : ensuite la marque fait foi, et
+les autres appareils prennent celle du serveur). Un serveur d'avant cette
+marque ne l'envoie pas : le client garde alors son ordre pour lui seul ; de
+même, sans serveur (mode autonome), l'ordre reste sur l'appareil.
 
 Rien n'est mis en file pendant une coupure : à la reconnexion, le rejeu
 donne l'état du serveur et la règle ci-dessus s'applique. Un serveur d'avant

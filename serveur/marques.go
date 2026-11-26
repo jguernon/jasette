@@ -1,6 +1,6 @@
 // Les marques : le Head, les favoris, les épinglées, les archives, les
 // privées, les moods, les emojis rapides, les personnes et les contacts perso (fiche de la
-// personne, personnes.go) et les réglages garder_archives et
+// personne, personnes.go), l'ordre des services et les réglages garder_archives et
 // cacher_apres_jours de Jasette, partagés entre tous les appareils de l'utilisateur (voir
 // PROTOCOLE.md, §5.5).
 //
@@ -81,6 +81,12 @@ type Marques struct {
 	NotesMusiqueFormat string `json:"notes_musique_format"`
 	// NotesServices : où « Quoi de neuf ? » publie, ["tout"] ou une liste.
 	NotesServices []string `json:"notes_services"`
+	// OrdreServices : l'ordre des services choisi dans « Dans la boîte de
+	// réception » (leurs clés : "google", "messenger"…), partagé comme
+	// l'ordre des favoris. Vide : l'ordre par défaut de chaque client. Le
+	// serveur ne connaît pas les noms : un client ignore une clé inconnue et
+	// met à la fin un service absent. Absent (ancien fichier) : vide.
+	OrdreServices []string `json:"ordre_services"`
 	// Personnes : les conversations reliées à la main (fiche de la personne,
 	// personnes.go). PersonnesRefus : les paires « Pas la même personne ».
 	// Absents (ancien fichier) : vides.
@@ -118,6 +124,7 @@ func (m *Marques) normaliser() {
 	m.NotesMusique = bornerAppareil(m.NotesMusique)
 	m.NotesMusiqueFormat = formatMusique(m.NotesMusiqueFormat)
 	m.NotesServices = nettoyerServicesNotes(m.NotesServices)
+	m.OrdreServices = nettoyerOrdreServices(m.OrdreServices)
 	m.Personnes = nettoyerPersonnes(m.Personnes)
 	m.PersonnesRefus = nettoyerRefus(m.PersonnesRefus)
 	m.ContactsPerso = nettoyerContactsPerso(m.ContactsPerso)
@@ -144,6 +151,7 @@ func (m *Marques) memesListes(n *Marques) bool {
 		m.CacherApresJours == n.CacherApresJours && m.PresenceEnLigne == n.PresenceEnLigne &&
 		m.SonsConversation == n.SonsConversation && m.NotesContacts == n.NotesContacts &&
 		m.NotesMusique == n.NotesMusique && m.NotesMusiqueFormat == n.NotesMusiqueFormat && egales(m.NotesServices, n.NotesServices) &&
+		egales(m.OrdreServices, n.OrdreServices) &&
 		egalesPersonnes(m.Personnes, n.Personnes) && egalesRefus(m.PersonnesRefus, n.PersonnesRefus) &&
 		egalesContactsPerso(m.ContactsPerso, n.ContactsPerso)
 }
@@ -364,7 +372,7 @@ func trameMarques(m Marques, id json.RawMessage, refus string) []byte {
 		"cacher_apres_jours": m.CacherApresJours, "presence_en_ligne": m.PresenceEnLigne,
 		"sons_conversation": jeuSons(m.SonsConversation), "notes_contacts": m.NotesContacts,
 		"notes_musique": m.NotesMusique, "notes_musique_format": formatMusique(m.NotesMusiqueFormat), "notes_services": nettoyerServicesNotes(m.NotesServices),
-		"personnes": nettoyerPersonnes(m.Personnes), "personnes_refus": nettoyerRefus(m.PersonnesRefus),
+		"ordre_services": nettoyerOrdreServices(m.OrdreServices), "personnes": nettoyerPersonnes(m.Personnes), "personnes_refus": nettoyerRefus(m.PersonnesRefus),
 		"contacts_perso": nettoyerContactsPerso(m.ContactsPerso), "version": m.Version,
 	}
 	if len(id) > 0 {
@@ -404,6 +412,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		NotesM   *string            `json:"notes_musique"`
 		NotesF   *string            `json:"notes_musique_format"`
 		NotesS   *[]string          `json:"notes_services"`
+		Ordre    json.RawMessage    `json:"ordre_services"`
 		Pers     json.RawMessage    `json:"personnes"`
 		PersR    json.RawMessage    `json:"personnes_refus"`
 		Perso    json.RawMessage    `json:"contacts_perso"`
@@ -470,6 +479,13 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	}
 	if d.NotesS != nil {
 		nouv.NotesServices = *d.NotesS
+	}
+	// L'ordre des services : absent, null ou mal formé, rien ne change (un
+	// client d'avant ce réglage ne l'efface pas) ; présent, c'est l'ordre
+	// complet, sans union (un réglage). Vide d'un client en retard : ignoré
+	// (il n'a sans doute jamais reçu celui du serveur).
+	if l, ok := lireOrdreServices(d.Ordre); ok && (len(l) > 0 || d.Version == cur.Version) {
+		nouv.OrdreServices = l
 	}
 	// Les personnes et leurs refus : absents (ou null), rien ne change (un
 	// client d'avant la fiche de la personne ne les efface pas) ; présents,
@@ -546,8 +562,8 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		return
 	}
 	s.marques = nouv
-	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s, notes_contacts %v, notes_services %v, personnes %d, refus %d, contacts perso %d",
-		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation, nouv.NotesContacts, nouv.NotesServices, len(nouv.Personnes), len(nouv.PersonnesRefus), len(nouv.ContactsPerso))
+	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s, notes_contacts %v, notes_services %v, ordre_services %v, personnes %d, refus %d, contacts perso %d",
+		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation, nouv.NotesContacts, nouv.NotesServices, nouv.OrdreServices, len(nouv.Personnes), len(nouv.PersonnesRefus), len(nouv.ContactsPerso))
 	if nouv.PresenceEnLigne != cur.PresenceEnLigne {
 		s.presenceChangee(nouv.PresenceEnLigne)
 	}
@@ -707,4 +723,36 @@ func formatMusique(f string) string {
 		return f
 	}
 	return "artiste"
+}
+
+// nettoyerOrdreServices : l'ordre des services, sans doublon ni nom vide,
+// invalide ou démesuré (32 noms de 32 octets au plus) ; jamais nul.
+func nettoyerOrdreServices(l []string) []string {
+	r := make([]string, 0, len(l))
+	vus := map[string]bool{}
+	for _, svc := range l {
+		if svc == "" || len(svc) > tailleServiceMax || !utf8.ValidString(svc) || vus[svc] {
+			continue
+		}
+		vus[svc] = true
+		r = append(r, svc)
+		if len(r) >= servicesNotesMax {
+			break
+		}
+	}
+	return r
+}
+
+// lireOrdreServices : la valeur de `ordre_services` d'une trame, nettoyée.
+// Faux si elle est absente, nulle ou n'est pas une liste de chaînes (rien ne
+// change, le reste de la trame compte).
+func lireOrdreServices(brute json.RawMessage) ([]string, bool) {
+	if len(brute) == 0 || string(brute) == "null" {
+		return nil, false
+	}
+	var l []string
+	if json.Unmarshal(brute, &l) != nil {
+		return nil, false
+	}
+	return nettoyerOrdreServices(l), true
 }
