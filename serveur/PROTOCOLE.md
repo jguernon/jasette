@@ -353,7 +353,7 @@ compte et le relais `did:web:api.bsky.chat`) :
   conversation Bluesky ; un message : `<conversation>/<id>`. Les résultats de
   `search` ont le DID de la personne pour id (à passer à `new`).
 
-### 5.5 Marques (Head, favoris, épinglées, archives, privées)
+### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
@@ -370,13 +370,18 @@ pour X, « t: » pour Telegram, « b: » pour Bluesky, sans préfixe pour Google
   vont pas ;
 - `privees` : la **Liste privée** (voir « Règle des privées » plus bas).
 
+S'y ajoute un objet (facultatif) :
+
+- `moods` : le **Mood** de chaque conversation, `{id: nom}` (voir « Règle
+  des moods » plus bas).
+
 C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 
 **Serveur → client** (rejeu, juste après `{"auth":"ok"}`, puis à chaque
 changement, à **tous** les clients) :
 
 ```json
-{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"version":7}}
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"version":7}}
 ```
 
 `version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
@@ -385,7 +390,7 @@ encore rien reçu (listes vides).
 **Client → serveur** :
 
 ```json
-{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"version":7,"id":12}}
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"version":7,"id":12}}
 ```
 
 - `version` : la dernière version reçue du serveur (0 si aucune).
@@ -394,7 +399,10 @@ encore rien reçu (listes vides).
 - Une liste absente ne change pas. Ids vides ou en double retirés ; au plus
   5000 ids par liste, 512 octets par id. Un client d'avant `archives` ou
   `privees` (qui n'envoie pas ce champ) ne les vide donc jamais : le serveur
-  les garde.
+  les garde. De même pour `moods` : absent, rien ne change ; présent, c'est
+  l'objet complet (une clé absente = plus de mood pour cette conversation).
+  Entrées à id ou nom vide retirées ; au plus 5000 entrées, 512 octets par
+  id, 64 par nom. Le serveur envoie toujours `moods` (objet, jamais `null`).
 
 Règles du serveur :
 
@@ -405,7 +413,9 @@ Règles du serveur :
      ne l'est pas, la trame est **refusée** ; le client reçoit les marques
      du serveur, avec `"refus":"<texte>"` (et son `id`) ;
    - sinon, union : les listes du client dans leur ordre, puis les ids du
-     serveur qu'elles n'ont pas.
+     serveur qu'elles n'ont pas. Pour `moods` (même garde-fou s'il est vide
+     alors que celui du serveur ne l'est pas) : les entrées du client, puis
+     celles du serveur pour les ids que le client n'a pas.
 3. Si rien ne change, seul l'expéditeur reçoit l'état courant (avec son
    `id`). Sinon le serveur écrit `marques.json`, passe à `version+1` et
    diffuse les nouvelles marques à tous (l'expéditeur les reçoit avec son `id`).
@@ -428,6 +438,25 @@ Rien n'est mis en file pendant une coupure : à la reconnexion, le rejeu
 donne l'état du serveur et la règle ci-dessus s'applique. Un serveur d'avant
 `archives` (ou `privees`) n'envoie pas ce champ : le client garde alors ses
 archives (ou ses privées) pour lui seul, sans les vider.
+
+**Règle des moods.**
+
+- Un mood colore une conversation : mes bulles (couleur ou dégradé), une
+  teinte légère des bulles reçues et le fond du fil (dégradé à taches floues,
+  en variante sombre ou claire selon le thème). Les noms connus : `rose_bebe`,
+  `amour`, `bleu_bebe`, `vert_pomme`, `lavande`, `peche`, `menthe`, `soleil`,
+  `ocean`, `aurore`, `nuit`, `coucher`. Le serveur ne les vérifie pas ; un
+  client ignore un nom qu'il ne connaît pas (couleurs par défaut).
+- « Par défaut » retire l'entrée. Le thème EGA n'a pas de mood : il ignore
+  ceux qui sont posés, sans les effacer.
+- Chaque appareil garde aussi ses moods pour lui (bureau : `moods` de
+  `reglages.json` ; Android : préférences privées de l'app) : sans serveur,
+  ils restent locaux. Union de deux copies : celle qui passe d'abord gagne
+  pour chaque id, l'autre ajoute les ids qui manquent.
+- Compatibilité : un client d'avant `moods` ne l'envoie pas (le serveur
+  garde les moods) ; un serveur d'avant `moods` ne l'envoie pas (le client
+  garde les siens pour lui, sans les vider). Une conversation privée garde
+  son mood.
 
 **Règle des archives.**
 

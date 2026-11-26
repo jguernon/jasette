@@ -11,7 +11,7 @@
 //! on réécrit les chemins avant de passer l'événement à l'interface. Pour
 //! `send_media`, le fichier local est d'abord téléversé sur le serveur.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fs;
 use std::io::{self, Read, Write};
@@ -1072,6 +1072,8 @@ pub struct Marques {
     /// La Liste privée : cachées partout sauf dans la vue Privées. Le code
     /// qui ouvre cette vue n'est jamais synchronisé.
     pub privees: Vec<String>,
+    /// Le Mood de chaque conversation (id → nom), PROTOCOLE.md §5.5.
+    pub moods: BTreeMap<String, String>,
 }
 
 impl Marques {
@@ -1081,6 +1083,7 @@ impl Marques {
             && self.epingles.is_empty()
             && self.archives.is_empty()
             && self.privees.is_empty()
+            && self.moods.is_empty()
     }
 
     /// Chaque liste de `dabord`, dans son ordre, puis les ids de `ensuite` qui n'y sont pas.
@@ -1100,6 +1103,8 @@ impl Marques {
             epingles: unir(&dabord.epingles, &ensuite.epingles),
             archives: unir(&dabord.archives, &ensuite.archives),
             privees: unir(&dabord.privees, &ensuite.privees),
+            // Les moods de `dabord` gagnent, `ensuite` ajoute les ids qui manquent.
+            moods: ensuite.moods.iter().chain(dabord.moods.iter()).map(|(k, v)| (k.clone(), v.clone())).collect(),
         }
     }
 
@@ -1112,6 +1117,7 @@ impl Marques {
             epingles: garder(&self.epingles, &autre.epingles),
             archives: garder(&self.archives, &autre.archives),
             privees: garder(&self.privees, &autre.privees),
+            moods: self.moods.iter().filter(|(k, v)| autre.moods.get(*k) != Some(*v)).map(|(k, v)| (k.clone(), v.clone())).collect(),
         }
     }
 }
@@ -1123,6 +1129,7 @@ pub enum NouvelleMarques {
     /// `avec_archives` : faux pour un serveur d'avant `archives` (champ absent) ;
     /// le client garde alors ses archives pour lui seul.
     /// `avec_privees` : de même pour un serveur d'avant `privees`.
+    /// `avec_moods` : de même pour un serveur d'avant `moods`.
     Recues {
         marques: Marques,
         version: u64,
@@ -1130,6 +1137,7 @@ pub enum NouvelleMarques {
         refus: Option<String>,
         avec_archives: bool,
         avec_privees: bool,
+        avec_moods: bool,
     },
     /// La connexion est tombée : rien n'est plus en vol.
     Coupure,
@@ -1151,12 +1159,21 @@ impl NouvelleMarques {
                 epingles: liste("epingles")?,
                 archives: liste("archives")?,
                 privees: liste("privees")?,
+                moods: match v.get("moods") {
+                    Some(Value::Object(o)) => o
+                        .iter()
+                        .filter_map(|(k, n)| Some((k.clone(), n.as_str()?.to_string())))
+                        .filter(|(k, n)| !k.is_empty() && !n.is_empty())
+                        .collect(),
+                    _ => BTreeMap::new(),
+                },
             },
             version: v.get("version")?.as_u64()?,
             id: v.get("id").and_then(Value::as_u64),
             refus: v.get("refus").and_then(Value::as_str).map(str::to_string),
             avec_archives: v.get("archives").is_some_and(Value::is_array),
             avec_privees: v.get("privees").is_some_and(Value::is_array),
+            avec_moods: v.get("moods").is_some_and(Value::is_object),
         })
     }
 }
@@ -1214,6 +1231,7 @@ impl SuiviMarques {
             "epingles": c.listes.epingles,
             "archives": c.listes.archives,
             "privees": c.listes.privees,
+            "moods": c.listes.moods,
             "version": c.version,
             "id": id,
         }}))
@@ -1227,7 +1245,7 @@ impl SuiviMarques {
                 self.reinitialiser();
                 return None;
             }
-            NouvelleMarques::Recues { marques, version, id, refus, avec_archives, avec_privees } => {
+            NouvelleMarques::Recues { marques, version, id, refus, avec_archives, avec_privees, avec_moods } => {
                 // Un serveur d'avant `archives` : nos archives restent les nôtres, jamais vidées.
                 let mut marques = marques;
                 if !avec_archives {
@@ -1236,6 +1254,10 @@ impl SuiviMarques {
                 // De même pour les privées (serveur d'avant `privees`).
                 if !avec_privees {
                     marques.privees = c.listes.privees.clone();
+                }
+                // Et pour les moods (serveur d'avant `moods`).
+                if !avec_moods {
+                    marques.moods = c.listes.moods.clone();
                 }
                 (marques, version, id, refus)
             }
@@ -1481,7 +1503,7 @@ mod essais {
     }
 
     fn recues(marques: Marques, version: u64, id: Option<u64>) -> NouvelleMarques {
-        NouvelleMarques::Recues { marques, version, id, refus: None, avec_archives: true, avec_privees: true }
+        NouvelleMarques::Recues { marques, version, id, refus: None, avec_archives: true, avec_privees: true, avec_moods: true }
     }
 
     fn id_de(t: &Value) -> u64 {
@@ -1589,6 +1611,37 @@ mod essais {
     }
 
     #[test]
+    fn marques_moods() {
+        // Les moods vont et viennent ; un objet, jamais null.
+        let n = NouvelleMarques::lire(&json!({"head": [], "favoris": [], "epingles": [], "archives": [], "privees": [],
+            "moods": {"m:1": "amour", "x:2": ""}, "version": 3}));
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques::default();
+        s.recu(n.unwrap(), &mut c);
+        assert_eq!(c.listes.moods.len(), 1);
+        c.listes.moods.insert("s:1".into(), "ocean".into());
+        c.listes.moods.remove("m:1");
+        let t = s.changement(&mut c).expect("envoi");
+        assert_eq!(t["marques"]["moods"], json!({"s:1": "ocean"}));
+        // Un serveur d'avant `moods` : les nôtres restent.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 4, ..Default::default() };
+        c.listes.moods.insert("s:1".into(), "menthe".into());
+        let vieux = NouvelleMarques::lire(&json!({"head": [], "favoris": ["b"], "epingles": [], "archives": [], "privees": [], "version": 4})).unwrap();
+        assert!(s.recu(vieux, &mut c).is_none());
+        assert_eq!(c.listes.moods.get("s:1").map(String::as_str), Some("menthe"));
+        // Union : le premier gagne pour un même id.
+        let mut a = Marques::default();
+        a.moods.insert("k".into(), "amour".into());
+        let mut b = Marques::default();
+        b.moods.insert("k".into(), "soleil".into());
+        b.moods.insert("j".into(), "nuit".into());
+        let u = Marques::union(&a, &b);
+        assert_eq!(u.moods.get("k").map(String::as_str), Some("amour"));
+        assert_eq!(u.moods.len(), 2);
+    }
+
+    #[test]
     fn marques_hors_ligne() {
         // Changé pendant une coupure, personne d'autre : la copie locale part telle quelle.
         let mut s = SuiviMarques::default();
@@ -1612,6 +1665,7 @@ mod essais {
             refus: Some("non".into()),
             avec_archives: true,
             avec_privees: true,
+            avec_moods: true,
         };
         let t = s.recu(r, &mut c).expect("renvoi");
         assert_eq!(t["marques"]["favoris"], json!(["z", "a", "y", "x"]));

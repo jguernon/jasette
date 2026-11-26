@@ -531,6 +531,7 @@ fun MenuConversation(
     rechercher: () -> Unit,
 ) {
     var confirmer by remember { mutableStateOf(false) }
+    var feuilleMood by remember { mutableStateOf(false) }
     // Une conversation absente (affichée depuis le cache des marques) : seules ses
     // marques se changent ; archiver ou supprimer attend que son service la charge.
     val chargee = Depot.conv(c.id) != null
@@ -570,6 +571,8 @@ fun MenuConversation(
             }
         }
         Item(t("Médias"), Icones.images, action = medias)
+        // Le Mood (couleurs des bulles et fond du fil) : pas en EGA.
+        if (!P.ega) Item(t("Mood"), Icones.palette) { feuilleMood = true }
         Item(
             if (archivee) t("Désarchiver") else t("Archiver"),
             if (archivee) Icones.desarchiver else Icones.archive,
@@ -589,6 +592,8 @@ fun MenuConversation(
         HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = P.traitFin)
         Item(t("Rechercher"), Icons.Filled.Search, action = rechercher)
     }
+
+    if (feuilleMood && !P.ega) FeuilleMood(c.id, c.name) { feuilleMood = false }
 
     if (confirmer) {
         AlertDialog(

@@ -16,6 +16,7 @@ mod apercu;
 mod cache;
 mod pont;
 mod prive;
+mod mood;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -1358,6 +1359,10 @@ struct Reglages {
     /// `privees`, partagée par le serveur). Le code est dans prive.json.
     #[serde(default)]
     privees: Vec<String>,
+    /// Le Mood de chaque conversation (id → nom dans `mood::MOODS`) : gardé
+    /// ici, et partagé par le serveur Jasette s'il y en a un (marque `moods`).
+    #[serde(default)]
+    moods: std::collections::BTreeMap<String, String>,
     /// La grille du Head : son nombre de colonnes, de 3 à 6 (« 5 ») ; vide = 4.
     /// Une ancienne valeur « colonnes x rangées » (« 8x3 ») donne ses colonnes,
     /// ramenées entre 3 et 6. Propre à cet appareil.
@@ -1485,6 +1490,7 @@ impl Default for Reglages {
             archives: Vec::new(),
             archives_depuis: HashMap::new(),
             privees: Vec::new(),
+            moods: Default::default(),
             head_grille: String::new(),
             marques_cache: HashMap::new(),
             heures_messages: false,
@@ -1593,6 +1599,7 @@ impl Reglages {
                     epingles: self.epingles.clone(),
                     archives: self.archives.clone(),
                     privees: self.privees.clone(),
+                    moods: self.moods.clone(),
                 },
                 version: self.marques_version,
                 a_envoyer: self.marques_a_envoyer,
@@ -1607,6 +1614,7 @@ impl Reglages {
         self.epingles = b.copie.listes.epingles;
         self.archives = b.copie.listes.archives;
         self.privees = b.copie.listes.privees;
+        self.moods = b.copie.listes.moods;
         self.marques_version = b.copie.version;
         self.marques_a_envoyer = b.copie.a_envoyer;
         self.marques_serveur = b.serveur;
@@ -1892,6 +1900,8 @@ struct Jasette {
     menu_avatar: bool,
     /// Le menu « … » de la conversation ouverte, et la confirmation de suppression.
     menu_conv: bool,
+    /// La feuille « Mood » ouverte : la conversation et le mood essayé (None : par défaut).
+    mood_feuille: Option<(String, Option<&'static str>)>,
     /// Le menu du clic droit sur l'icône d'un service, dans le rail.
     menu_rail: Option<Service>,
     /// La vue Favoris en mode « réorganiser » (flèches sur chaque rangée).
@@ -2770,6 +2780,7 @@ impl Jasette {
             emojis_ouverts: false,
             menu_avatar: false,
             menu_conv: false,
+            mood_feuille: None,
             menu_rail: None,
             reorganiser: false,
             confirmer_suppression: false,
@@ -3542,7 +3553,8 @@ impl Jasette {
         r.epingles.retain(|x| x != id);
         r.archives.retain(|x| x != id);
         r.privees.retain(|x| x != id);
-        if r.head.len() + r.etoiles.len() + r.epingles.len() + r.archives.len() + r.privees.len() != avant {
+        let mood = r.moods.remove(id).is_some();
+        if mood || r.head.len() + r.etoiles.len() + r.epingles.len() + r.archives.len() + r.privees.len() != avant {
             self.marques_changees();
         }
     }
@@ -6242,6 +6254,10 @@ impl Jasette {
             }]
         };
         let groupe = self.conv(&id).is_some_and(|c| c.group);
+        // Le mood de la conversation : mes bulles, les reçues (aucun en EGA).
+        let mood = self.mood_fil();
+        let tache_moi = mood.map(|m| m.tache_envoyee()).unwrap_or_else(tache_envoyee);
+        let fond_recu = mood.map(|m| m.recue()).unwrap_or(th().surface);
         // Le fil passe sous l'en-tête et la barre d'envoi : la marge leur laisse la place.
         let mut col = div()
             .flex()
@@ -6345,8 +6361,18 @@ impl Jasette {
                         .child(m.sender.clone()),
                 );
             }
-            for p in &m.attachments {
-                ligne = ligne.child(if flou { self.piece_floue(p) } else { self.piece(m, p, cx) });
+            // Sans texte, la dernière pièce porte le bouton 🙂 et la pastille des
+            // réactions (à côté de la photo, pas sous elle).
+            let reactions_sur_piece = !flou && m.text.is_empty();
+            for (k, p) in m.attachments.iter().enumerate() {
+                ligne = ligne.child(if flou {
+                    self.piece_floue(p)
+                } else if reactions_sur_piece && k + 1 == m.attachments.len() {
+                    let piece = self.piece(m, p, cx);
+                    self.bulle_reactive(m, piece, flou, cx)
+                } else {
+                    self.piece(m, p, cx)
+                });
             }
             if m.attachments.is_empty() && !m.media.is_empty() {
                 ligne = ligne.child(
@@ -6400,7 +6426,7 @@ impl Jasette {
                 } else if echec {
                     th().danger
                 } else if m.from_me {
-                    th().heure_envoyee
+                    mood.map(|m| m.heure_envoyee()).unwrap_or(th().heure_envoyee)
                 } else {
                     th().heure_recue
                 };
@@ -6417,10 +6443,14 @@ impl Jasette {
                     })
                     .flatten();
                 let bulle = match (flou, m.from_me) {
-                    (true, true) => bulle.border_color(invisible).shadow(tache(tache_envoyee(), 24.)),
-                    (true, false) => bulle.border_color(invisible).shadow(tache(ton(blanc(0.9), th().surface), 24.)),
-                    (false, true) => bulle.border_color(invisible).bg(degrade_accent()).text_color(blanc(1.)).shadow(ombre_flottante()),
-                    (false, false) => bulle.bg(th().surface).border_color(th().surface_bord).text_color(th().texte_fort),
+                    (true, true) => bulle.border_color(invisible).shadow(tache(tache_moi, 24.)),
+                    (true, false) => bulle.border_color(invisible).shadow(tache(if mood.is_some() { fond_recu } else { ton(blanc(0.9), th().surface) }, 24.)),
+                    (false, true) => bulle
+                        .border_color(invisible)
+                        .bg(mood.map(|m| m.envoye()).unwrap_or_else(degrade_accent))
+                        .text_color(mood.map(|m| m.texte_envoye()).unwrap_or(blanc(1.)))
+                        .shadow(ombre_flottante()),
+                    (false, false) => bulle.bg(fond_recu).border_color(th().surface_bord).text_color(th().texte_fort),
                 }
                 // Trouvé par la recherche : un liseré ; le courant : plus épais, avec un halo.
                 .when(trouve && !est_courant, |d| d.border_color(alpha(couleur_trouve(), 0.8)))
@@ -6466,8 +6496,12 @@ impl Jasette {
                 // Il ne restait que l'adresse : la carte seule, avec les réactions.
                 ligne = ligne.child(self.bulle_reactive(orig, carte, flou, cx));
             } else if !flou && (!m.reactions.is_empty() || self.barre_reactions.as_deref() == Some(m.id.as_str())) {
-                // Un message sans texte (photo, vocal) : la pastille sous la pièce.
+                // Un message sans texte ni pièce (vocal, fichier) : la pastille sous lui.
+                if !m.attachments.is_empty() {
+                    // Déjà portées par la dernière pièce, plus haut.
+                } else {
                 ligne = ligne.child(self.bulle_reactive(m, div().h(px(2.)).w(px(60.)).into_any_element(), flou, cx));
+                }
             }
             if self.details_heures || (!heure_dedans && (dernier || echec)) {
                 let mut pied =
@@ -6569,7 +6603,8 @@ impl Jasette {
     /// Le texte d'une bulle : emojis, passage trouvé surligné, et liens
     /// soulignés qu'un clic ouvre dans le navigateur.
     fn texte_bulle(&self, m: &Msg, plage: Option<(Range<usize>, Hsla)>) -> AnyElement {
-        let couleur = if m.from_me { blanc(1.) } else { th().texte_fort };
+        let texte_moi = self.mood_fil().map(|m| m.texte_envoye()).unwrap_or(blanc(1.));
+        let couleur = if m.from_me { texte_moi } else { th().texte_fort };
         let liens = if m.text.contains("://") || m.text.to_ascii_lowercase().contains("www.") {
             apercu::liens(&m.text)
         } else {
@@ -6580,7 +6615,7 @@ impl Jasette {
         }
         // Sur ma bulle (accent), le blanc souligné ; sur la reçue, l'accent lisible du thème.
         let couleur_lien = if m.from_me {
-            blanc(1.)
+            texte_moi
         } else if th().ega {
             c(EGA_CYAN_VIF)
         } else {
@@ -6979,6 +7014,9 @@ impl Jasette {
             // jouées en blanc, les autres en cyan vif (sur le bleu) ou en gris.
             let pale = if m.from_me { c(EGA_CYAN_VIF) } else { c(EGA_GRIS) };
             (c(EGA_BLANC), pale, gpui::Background::from(c(EGA_GRIS_CLAIR)), c(EGA_NOIR))
+        } else if m.from_me && let Some(mo) = self.mood_fil() {
+            let t = mo.texte_envoye();
+            (t, alpha(t, 0.45), gpui::Background::from(alpha(t, 0.95)), if t.l > 0.5 { alpha(mo.tache_envoyee(), 1.) } else { blanc(1.) })
         } else if m.from_me {
             (blanc(1.), blanc(0.45), gpui::Background::from(blanc(0.95)), th().accent)
         } else if th().sombre {
@@ -7005,8 +7043,10 @@ impl Jasette {
             .pr(px(14.))
             .py(px(6.))
             .rounded(rayon(999.))
-            .when(m.from_me, |d| d.bg(degrade_accent()).shadow(ombre_flottante()))
-            .when(!m.from_me, |d| d.bg(th().surface).border_1().border_color(th().surface_bord))
+            .when(m.from_me, |d| d.bg(self.mood_fil().map(|m| m.envoye()).unwrap_or_else(degrade_accent)).shadow(ombre_flottante()))
+            .when(!m.from_me, |d| {
+                d.bg(self.mood_fil().map(|m| m.recue()).unwrap_or(th().surface)).border_1().border_color(th().surface_bord)
+            })
             .child(
                 div()
                     .id(SharedString::from(format!("vb-{}-{}", m.id, p.media_id)))
@@ -7424,7 +7464,12 @@ impl Jasette {
         // L'en-tête flotte sur le fil : un voile dégradé fait disparaître les messages qui passent dessous.
         // En retrait d'un pixel et arrondi comme le panneau : GPUI ne découpe pas
         // les enfants selon les coins arrondis, le voile garderait des coins carrés.
-        let givre = |a: f32| alpha(th().givre_fil, a);
+        // Avec un mood, le givre prend la couleur du haut de son fond (et celle
+        // du bas sous la barre d'envoi).
+        let mood = self.mood_fil();
+        let givre_haut = mood.map(|m| m.haut()).unwrap_or(th().givre_fil);
+        let givre_bas = mood.map(|m| m.bas()).unwrap_or(th().givre_fil);
+        let givre = |a: f32| alpha(givre_haut, a);
         let r = (th().rayon_fil - 1.).max(0.);
         let haut_voile = HAUT_ENTETE + 26.;
         // Le verre dépoli, en trois couches sous la rangée de l'en-tête :
@@ -7561,8 +7606,8 @@ impl Jasette {
             .when(!ega, |d| {
                 d.pt(px(26.)).bg(linear_gradient(
                     0.,
-                    linear_color_stop(alpha(th().givre_fil, mesure(0.9, 1.)), 0.35),
-                    linear_color_stop(alpha(th().givre_fil, 0.), 1.),
+                    linear_color_stop(alpha(givre_bas, mesure(0.9, 1.)), 0.35),
+                    linear_color_stop(alpha(givre_bas, 0.), 1.),
                 ))
             })
             .when(ega, |d| d.pt(px(14.)).bg(th().givre_fil).border_t_1().border_color(th().trait_fin))
@@ -7576,7 +7621,13 @@ impl Jasette {
             // En sombre, le fil est un panneau noir posé avec une petite marge.
             .when(th().marge_fil > 0., |d| d.h_auto().m(px(th().marge_fil)))
             .overflow_hidden()
-
+            // Le fond du mood : son dégradé, et ses taches floues tenues hors
+            // des coins arrondis (sous l'en-tête et la barre d'envoi, opaques).
+            .when_some(mood, |d, m| {
+                d.bg(m.fond()).child(
+                    div().absolute().top(px(th().rayon_fil)).bottom(px(th().rayon_fil)).left_0().right_0().child(m.taches(460.)),
+                )
+            })
             // Le fil ne dessine pas sur les coins arrondis du panneau : il commence
             // et finit sous les voiles de l'en-tête et de la barre d'envoi.
             .child(div().absolute().top(px(MARGE_FIL)).left_0().right_0().bottom(px(MARGE_FIL)).child(fil))
@@ -7787,6 +7838,7 @@ impl Jasette {
                 })),
             )
             .children(self.item_menu_prive(&id, cx))
+            .children(self.item_menu_mood(&id, cx))
             .child(item("menu-rechercher", "search", t("Rechercher").into(), th().texte_fort, true).on_click(cx.listener(
                 |this, _, window, cx| {
                     this.ouvrir_recherche_fil(window, cx);
@@ -10296,7 +10348,10 @@ impl Jasette {
                         cx.notify();
                     }
                 } else if k.key == "escape" {
-                    if this.barre_reactions.is_some() || this.reaction_cible.is_some() {
+                    if this.mood_feuille.take().is_some() {
+                        cx.stop_propagation();
+                        cx.notify();
+                    } else if this.barre_reactions.is_some() || this.reaction_cible.is_some() {
                         this.barre_reactions = None;
                         if this.reaction_cible.take().is_some() {
                             this.emojis_ouverts = false;
@@ -10385,6 +10440,8 @@ impl Jasette {
                 .child(self.rail(cx))
                 .child(centre),
         )
+        // La feuille « Mood » de la conversation ouverte.
+        .children(self.feuille_mood(cx))
         .when_some(self.apercu.clone(), |d, chemin| {
             d.child(
                 div()

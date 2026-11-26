@@ -79,11 +79,13 @@ val LocalFlou = staticCompositionLocalOf<HazeState?> { null }
 const val FLOU_FOND = "fond"
 const val FLOU_LISTE = "liste"
 const val FLOU_FIL = "fil"
+/** Le fond du Mood d'une conversation (Mood.kt), sous ses messages. */
+const val FLOU_MOOD = "mood"
 
 /** Ce que voient les effets de la liste : le fond et les rangées (gardés comme objets : comparés par identité). */
 val SELECTION_LISTE: HazeSourceSelection = HazeSourceSelection.Behind.where { it.key == FLOU_FOND || it.key == FLOU_LISTE }
 /** Ce que voient les effets du fil : le fond et les messages. */
-val SELECTION_FIL: HazeSourceSelection = HazeSourceSelection.Behind.where { it.key == FLOU_FOND || it.key == FLOU_FIL }
+val SELECTION_FIL: HazeSourceSelection = HazeSourceSelection.Behind.where { it.key == FLOU_FOND || it.key == FLOU_MOOD || it.key == FLOU_FIL }
 
 /** Une source du flou (fond, liste ou fil) ; sans état fourni, rien. */
 fun Modifier.sourceFlou(etat: HazeState?, cle: String, z: Float = 1f): Modifier =
@@ -113,10 +115,20 @@ private val STYLE_BARRE = HazeBlurStyle {
  * sources de [selection] derrière elle. En EGA ou sans état : [opaque] (l'aplat du thème).
  */
 @Composable
-fun Modifier.barreFloutee(selection: HazeSourceSelection, opaque: Color): Modifier {
+fun Modifier.barreFloutee(selection: HazeSourceSelection, opaque: Color, voile: Color? = null): Modifier {
     val etat = LocalFlou.current
-    if (P.ega || etat == null) return if (opaque.alpha > 0f) background(opaque) else this
-    return hazeBlur(HazeInput.Sources(etat, selection), STYLE_BARRE)
+    if (P.ega || etat == null) return if (voile != null) background(voile.copy(alpha = 0.94f)) else if (opaque.alpha > 0f) background(opaque) else this
+    if (voile == null) return hazeBlur(HazeInput.Sources(etat, selection), STYLE_BARRE)
+    // Le voile d'un Mood : la couleur du haut de son fond, pour que l'en-tête s'y fonde.
+    val style = remember(voile) {
+        HazeBlurStyle {
+            blurRadius(24.dp)
+            noiseFactor(0.05f)
+            colorEffects(listOf(HazeColorEffect.tint(voile.copy(alpha = if (P.clair) 0.5f else 0.6f))))
+            fallbackColorEffect(HazeColorEffect.tint(voile.copy(alpha = 0.94f)))
+        }
+    }
+    return hazeBlur(HazeInput.Sources(etat, selection), style)
 }
 
 /**

@@ -67,6 +67,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -228,12 +229,20 @@ fun Fil(
         etaitPret = pret
     }
 
+    // Le Mood de la conversation (Mood.kt) : son fond sous tout le fil, source du flou
+    // de l'en-tête ; ses couleurs de bulles par LocalMood. Jamais en EGA.
+    val mood = moodDeConv(id)
+    val flou = LocalFlou.current
+    Box(Modifier.fillMaxSize()) {
+    if (mood != null) Box(Modifier.matchParentSize().fondMood(mood, P.clair).sourceFlou(flou, FLOU_MOOD, z = 0.5f))
+    CompositionLocalProvider(LocalMood provides mood) {
     Scaffold(
         // En deux volets, le fond du volet est déjà posé (pas de double voile au verre).
-        containerColor = if (volet) Color.Transparent else P.fil,
+        // Avec un Mood, son fond est dessiné dessous.
+        containerColor = if (volet || mood != null) Color.Transparent else P.fil,
         // L'en-tête flotte par-dessus les messages, avec le flou de ce qui passe derrière
         // (opaque en EGA) ; les messages défilent dessous (contentPadding du haut).
-        topBar = { Column(Modifier.barreFloutee(SELECTION_FIL, opaque = P.barre)) {
+        topBar = { Column(Modifier.barreFloutee(SELECTION_FIL, opaque = P.barre, voile = mood?.haut(P.clair))) {
             TopAppBar(
                 navigationIcon = {
                     if (!volet) IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Filled.ArrowBack, t("Retour")) }
@@ -302,7 +311,8 @@ fun Fil(
                 if (P.ega) Modifier.background(P.fil)
                 else Modifier.background(
                     androidx.compose.ui.graphics.Brush.verticalGradient(
-                        0f to Color.Transparent, 0.5f to P.fil.copy(alpha = 0.85f), 1f to P.fil,
+                        0f to Color.Transparent, 0.5f to (mood?.bas(P.clair) ?: P.fil).copy(alpha = 0.85f),
+                        1f to (mood?.bas(P.clair) ?: P.fil),
                     ),
                 ),
             ) {
@@ -434,6 +444,8 @@ fun Fil(
         }
         }
         }
+    }
+    }
     }
     grilleMsg?.let { m ->
         GrilleEmojis(fermer = { grilleMsg = null }) { e ->
@@ -574,9 +586,18 @@ private fun Message(
                         formeBulle(rayon, rayon, rayon, if (dernier) 4.dp else rayon)
                     }
                     // Envoyée : le dégradé d'accent (bleu EGA) ; reçue : la surface et son liseré.
+                    // Avec un Mood : ses couleurs à lui.
+                    val mood = LocalMood.current
                     Column(
                         Modifier.widthIn(max = 300.dp).clip(forme)
-                            .let { if (m.fromMe) it.background(P.degrade) else it.background(P.surface) }
+                            .let {
+                                when {
+                                    mood != null && m.fromMe -> it.background(mood.envoye)
+                                    mood != null -> it.background(mood.recue(P.clair))
+                                    m.fromMe -> it.background(P.degrade)
+                                    else -> it.background(P.surface)
+                                }
+                            }
                             .let {
                                 when {
                                     courant -> it.border(2.dp, P.trouve, forme)
@@ -589,8 +610,13 @@ private fun Message(
                     ) {
                         val contexte = LocalContext.current
                         Text(
-                            avecLiens(surligner(texteSansLien, surligne, courant), m.fromMe) { ouvrirLien(contexte, it) },
-                            color = if (m.fromMe) P.surAccent else P.texteFort,
+                            avecLiens(surligner(texteSansLien, surligne, courant), m.fromMe, mood?.texteEnvoye) { ouvrirLien(contexte, it) },
+                            color = when {
+                                mood != null && m.fromMe -> mood.texteEnvoye
+                                mood != null -> mood.texteRecu(P.clair)
+                                m.fromMe -> P.surAccent
+                                else -> P.texteFort
+                            },
                             fontSize = (15f * ca.jasette.android.Marques.tailleMessages).sp,
                             lineHeight = (20f * ca.jasette.android.Marques.tailleMessages).sp,
                         )
@@ -1039,10 +1065,11 @@ private fun surligner(texte: String, q: String, courant: Boolean): AnnotatedStri
 }
 
 /** Les adresses du texte, soulignées et cliquables (le surlignage de la recherche reste). */
-private fun avecLiens(texte: AnnotatedString, surAccent: Boolean, ouvrir: (String) -> Unit): AnnotatedString {
+private fun avecLiens(texte: AnnotatedString, surAccent: Boolean, surMood: Color? = null, ouvrir: (String) -> Unit): AnnotatedString {
     val liens = ca.jasette.android.Liens.trouver(texte.text)
     if (liens.isEmpty()) return texte
     val couleur = when {
+        surAccent && surMood != null -> surMood
         surAccent -> P.surAccent
         P.ega -> couleur(EGA_CYAN_VIF)
         P.clair -> P.accent

@@ -1,5 +1,5 @@
-// Les marques : le Head, les favoris, les épinglées et les archives de
-// Jasette, partagés entre tous les appareils de l'utilisateur (voir
+// Les marques : le Head, les favoris, les épinglées, les archives, les
+// privées et les moods de Jasette, partagés entre tous les appareils de l'utilisateur (voir
 // PROTOCOLE.md, §5.5).
 //
 // Le serveur en garde la copie de référence dans <données>/serveur/marques.json
@@ -21,6 +21,7 @@ import (
 const (
 	marquesParListe = 5000 // ids au plus par liste
 	tailleIdMax     = 512  // octets au plus par id
+	tailleMoodMax   = 64   // octets au plus par nom de mood
 )
 
 // Marques : cinq listes ordonnées d'ids de conversations (préfixés « m: »
@@ -40,7 +41,11 @@ type Marques struct {
 	// cachées partout ailleurs que dans la vue Privées des clients, et
 	// exclues du MCP. Le code qui ouvre cette vue reste sur chaque appareil.
 	Privees []string `json:"privees"`
-	Version int64    `json:"version"`
+	// Moods : le « Mood » choisi pour une conversation (couleurs des bulles et
+	// fond du fil), {id: nom}. Le serveur ne connaît pas les noms : il les
+	// garde tels quels ; un client ignore un nom qu'il ne connaît pas.
+	Moods   map[string]string `json:"moods"`
+	Version int64             `json:"version"`
 	// Propre au serveur, jamais envoyé aux clients : depuis quand (ms, horloge
 	// du serveur) chaque id est dans Archives. Seul un message reçu après
 	// cette heure ramène la conversation dans l'Inbox (une réaction ou une
@@ -62,6 +67,7 @@ func (m *Marques) normaliser() {
 	for _, l := range m.listes() {
 		*l = nettoyerIds(*l)
 	}
+	m.Moods = nettoyerMoods(m.Moods)
 	depuis := make(map[string]int64, len(m.Archives))
 	maintenant := time.Now().UnixMilli()
 	for _, id := range m.Archives {
@@ -81,7 +87,48 @@ func (m *Marques) memesListes(n *Marques) bool {
 			return false
 		}
 	}
+	return egalesMoods(m.Moods, n.Moods)
+}
+
+// nettoyerMoods : jamais nul, sans id ni nom vide ou démesuré, borné.
+func nettoyerMoods(m map[string]string) map[string]string {
+	r := make(map[string]string, len(m))
+	for id, nom := range m {
+		if id == "" || len(id) > tailleIdMax || !utf8.ValidString(id) ||
+			nom == "" || len(nom) > tailleMoodMax || !utf8.ValidString(nom) {
+			continue
+		}
+		if len(r) >= marquesParListe {
+			break
+		}
+		r[id] = nom
+	}
+	return r
+}
+
+func egalesMoods(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for id, nom := range a {
+		if v, ok := b[id]; !ok || v != nom {
+			return false
+		}
+	}
 	return true
+}
+
+// unirMoods : les moods de `dabord`, puis ceux de `ensuite` pour les ids
+// qu'il n'a pas.
+func unirMoods(dabord, ensuite map[string]string) map[string]string {
+	r := make(map[string]string, len(dabord)+len(ensuite))
+	for id, nom := range ensuite {
+		r[id] = nom
+	}
+	for id, nom := range dabord {
+		r[id] = nom
+	}
+	return nettoyerMoods(r)
 }
 
 // nettoyerIds : sans doublon, sans id vide ni démesuré, borné.
@@ -222,7 +269,7 @@ func ecrireAtomique(chemin string, data []byte) error {
 func trameMarques(m Marques, id json.RawMessage, refus string) []byte {
 	corps := map[string]any{
 		"head": m.Head, "favoris": m.Favoris, "epingles": m.Epingles, "archives": m.Archives,
-		"privees": m.Privees, "version": m.Version,
+		"privees": m.Privees, "moods": m.Moods, "version": m.Version,
 	}
 	if len(id) > 0 {
 		corps["id"] = id
@@ -246,13 +293,14 @@ func trameMarques(m Marques, id json.RawMessage, refus string) []byte {
 // Un changement accepté est gardé, puis diffusé à tous avec version+1.
 func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	var d struct {
-		Head     *[]string       `json:"head"`
-		Favoris  *[]string       `json:"favoris"`
-		Epingles *[]string       `json:"epingles"`
-		Archives *[]string       `json:"archives"`
-		Privees  *[]string       `json:"privees"`
-		Version  int64           `json:"version"`
-		ID       json.RawMessage `json:"id"`
+		Head     *[]string          `json:"head"`
+		Favoris  *[]string          `json:"favoris"`
+		Epingles *[]string          `json:"epingles"`
+		Archives *[]string          `json:"archives"`
+		Privees  *[]string          `json:"privees"`
+		Moods    *map[string]string `json:"moods"`
+		Version  int64              `json:"version"`
+		ID       json.RawMessage    `json:"id"`
 	}
 	if json.Unmarshal(brute, &d) != nil {
 		return
@@ -265,7 +313,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	cur := s.marques
 	nouv := Marques{
 		Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Archives: cur.Archives,
-		Privees: cur.Privees, ArchivesDepuis: cur.ArchivesDepuis,
+		Privees: cur.Privees, Moods: cur.Moods, ArchivesDepuis: cur.ArchivesDepuis,
 	}
 	// Une liste absente de la trame ne change pas (un ancien client, qui ne
 	// connaît pas `archives` ou `privees`, ne les vide donc jamais).
@@ -273,6 +321,10 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		if l != nil {
 			*nouv.listes()[i] = nettoyerIds(*l)
 		}
+	}
+	// De même pour `moods` (un client d'avant les moods ne les efface pas).
+	if d.Moods != nil {
+		nouv.Moods = nettoyerMoods(*d.Moods)
 	}
 	repondre := func(m Marques, refus string) {
 		select {
@@ -288,9 +340,15 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 				return
 			}
 		}
+		if len(nouv.Moods) == 0 && len(cur.Moods) > 0 {
+			logf("marques de %q refusées : moods vides, version %d < %d", c.nom, d.Version, cur.Version)
+			repondre(cur, "version périmée : les moods du serveur seraient vidés")
+			return
+		}
 		for i, l := range nouv.listes() {
 			*l = unir(*l, *cur.listes()[i])
 		}
+		nouv.Moods = unirMoods(nouv.Moods, cur.Moods)
 	}
 	nouv.normaliser()
 	if nouv.memesListes(&cur) {
@@ -305,8 +363,8 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		return
 	}
 	s.marques = nouv
-	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d",
-		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees))
+	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d",
+		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods))
 	tous := trameMarques(nouv, nil, "")
 	for autre := range s.clients {
 		if autre == c {
@@ -356,7 +414,7 @@ func (s *Serveur) desarchiverSiRecu(svc string, ligne []byte) {
 		return
 	}
 	cur := s.marques
-	nouv := Marques{Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Privees: cur.Privees, ArchivesDepuis: cur.ArchivesDepuis}
+	nouv := Marques{Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Privees: cur.Privees, Moods: cur.Moods, ArchivesDepuis: cur.ArchivesDepuis}
 	for _, a := range cur.Archives {
 		if a != id {
 			nouv.Archives = append(nouv.Archives, a)

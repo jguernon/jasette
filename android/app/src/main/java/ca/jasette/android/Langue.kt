@@ -476,4 +476,11 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Connexion à %s…" to "Connecting to %s…",
     "%s n'est pas connecté pour l'instant." to "%s isn't connected right now.",
     "Tu peux fermer : l'envoi continue en arrière-plan." to "You can close this: sending continues in the background.",
+    // Le Mood d'une conversation (ui/Mood.kt) ; les noms des moods sont dans MOODS.
+    "Mood" to "Mood",
+    "Appliquer" to "Apply",
+    "Par défaut" to "Default",
+    "Tu viens au chalet vendredi ?" to "Coming to the cabin on Friday?",
+    "Oui ! J'apporte les guimauves 🔥" to "Yes! I'll bring the marshmallows 🔥",
+    "Parfait, on t'attend !" to "Perfect, see you there!",
 )

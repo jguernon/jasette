@@ -5,9 +5,11 @@ import android.content.SharedPreferences
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -52,6 +54,13 @@ object Marques {
      * autres listes (`privees`) ; le code, lui, reste sur l'appareil.
      */
     val privees: SnapshotStateList<String> = mutableStateListOf()
+    /**
+     * Le « Mood » de chaque conversation (id préfixé → id du mood, voir
+     * [ca.jasette.android.ui.MOODS]) : couleurs des bulles et fond du fil.
+     * Gardé ici d'abord ; partagé par le serveur Jasette s'il y en a un
+     * (champ `moods` des marques, §5.5). Ignoré en EGA.
+     */
+    val moods: SnapshotStateMap<String, String> = mutableStateMapOf()
     /**
      * Depuis quand (ms, horloge du téléphone) chaque id est dans [archives], ici :
      * seul un message reçu après cette heure la désarchive (pas une réaction
@@ -149,6 +158,8 @@ object Marques {
         archives.addAll(lire(p, "archives"))
         privees.clear()
         privees.addAll(lire(p, "privees"))
+        moods.clear()
+        moods.putAll(lireMoods(p.getString("moods", "{}") ?: "{}"))
         archivesDepuis.clear()
         try {
             val o = JSONObject(p.getString("archives_depuis", "{}") ?: "{}")
@@ -162,6 +173,25 @@ object Marques {
         val maintenant = System.currentTimeMillis()
         archivesDepuis.keys.retainAll(archives.toSet())
         for (id in archives) if ((archivesDepuis[id] ?: 0L) <= 0L) archivesDepuis[id] = maintenant
+    }
+
+    /** Un objet {id: mood} ; les valeurs vides ou non textuelles sont ignorées. */
+    private fun lireMoods(brut: String): Map<String, String> = try {
+        objetMoods(JSONObject(brut))
+    } catch (_: Exception) {
+        Log.w("jasette", "marques « moods » illisibles : mises de côté")
+        prefs?.edit()?.putString("moods_illisible", brut)?.commit()
+        emptyMap()
+    }
+
+    private fun objetMoods(o: JSONObject?): Map<String, String> {
+        val r = LinkedHashMap<String, String>()
+        if (o == null) return r
+        for (k in o.keys()) {
+            val v = o.opt(k) as? String ?: continue
+            if (k.isNotEmpty() && v.isNotEmpty()) r[k] = v
+        }
+        return r
     }
 
     private fun lire(p: SharedPreferences, cle: String): List<String> {
@@ -187,6 +217,7 @@ object Marques {
             ?.putString("head", JSONArray(head.toList()).toString())
             ?.putString("archives", JSONArray(archives.toList()).toString())
             ?.putString("privees", JSONArray(privees.toList()).toString())
+            ?.putString("moods", JSONObject(moods.toMap()).toString())
             ?.putString("archives_depuis", JSONObject(archivesDepuis.toMap()).toString())
             ?.putLong("version", version)
             ?.putBoolean("a_envoyer", aEnvoyer)
@@ -199,6 +230,16 @@ object Marques {
     fun estDansHead(id: String) = id in head
     fun estArchivee(id: String) = id in archives
     fun estPrivee(id: String) = id in privees
+
+    /** Le mood choisi pour [id] (id du mood), ou null : « Par défaut ». */
+    fun mood(id: String): String? = moods[id]
+
+    /** Choisit le mood de [id] ; null ou vide le retire (« Par défaut »). */
+    fun choisirMood(id: String, mood: String?) {
+        if ((moods[id] ?: "") == (mood ?: "")) return
+        if (mood.isNullOrEmpty()) moods.remove(id) else moods[id] = mood
+        changement()
+    }
 
     /** Rend privée (à la fin de la liste) ou ne l'est plus ; rien si c'est déjà fait. */
     fun rendrePrivee(id: String, oui: Boolean) {
@@ -274,8 +315,9 @@ object Marques {
         val c = head.remove(id)
         val d = archives.remove(id)
         val e = privees.remove(id)
+        val f = moods.remove(id) != null
         if (d) majDepuis()
-        if (a || b || c || d || e) changement()
+        if (a || b || c || d || e || f) changement()
     }
 
     // ---- La synchronisation avec le serveur Jasette (§5.5) ----
@@ -287,8 +329,10 @@ object Marques {
         val epingles: List<String>,
         val archives: List<String>,
         val privees: List<String>,
+        val moods: Map<String, String>,
     ) {
-        fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty() && privees.isEmpty()
+        fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty() && privees.isEmpty() &&
+            moods.isEmpty()
 
         /** Chaque liste de this, dans son ordre, puis les ids de [b] qui n'y sont pas. */
         fun union(b: Listes) = Listes(
@@ -297,16 +341,20 @@ object Marques {
             (epingles + b.epingles).filter { it.isNotEmpty() }.distinct(),
             (archives + b.archives).filter { it.isNotEmpty() }.distinct(),
             (privees + b.privees).filter { it.isNotEmpty() }.distinct(),
+            // Les moods : ceux de this gagnent, puis les conversations que seul [b] a.
+            b.moods + moods,
         )
 
         /** Les ids de this absents de [b], liste par liste. */
         fun moins(b: Listes) = Listes(
             head - b.head.toSet(), favoris - b.favoris.toSet(), epingles - b.epingles.toSet(),
             archives - b.archives.toSet(), privees - b.privees.toSet(),
+            moods.filter { (k, v) -> b.moods[k] != v },
         )
     }
 
-    private fun listes() = Listes(head.toList(), favoris.toList(), epingles.toList(), archives.toList(), privees.toList())
+    private fun listes() =
+        Listes(head.toList(), favoris.toList(), epingles.toList(), archives.toList(), privees.toList(), moods.toMap())
 
     private fun poser(l: Listes) {
         if (head.toList() != l.head) { head.clear(); head.addAll(l.head) }
@@ -318,6 +366,7 @@ object Marques {
             privees.addAll(l.privees)
             Raccourcis.privees()
         }
+        if (moods.toMap() != l.moods) { moods.clear(); moods.putAll(l.moods) }
     }
 
     /** Envoie une trame au serveur ; faux si la connexion est coupée. Posé par [Depot] en mode client. */
@@ -354,6 +403,7 @@ object Marques {
         val corps = JSONObject().put("head", JSONArray(l.head)).put("favoris", JSONArray(l.favoris))
             .put("epingles", JSONArray(l.epingles)).put("archives", JSONArray(l.archives))
             .put("privees", JSONArray(l.privees))
+            .put("moods", JSONObject(l.moods))
             .put("version", version).put("id", prochain)
         if (!envoi(JSONObject().put("marques", corps))) {
             // La connexion tombe : le rejeu suivant tranchera.
@@ -378,6 +428,8 @@ object Marques {
             if (m.has("archives")) m.optJSONArray("archives").chaines().distinct() else archives.toList(),
             // De même pour les privées (serveur d'avant `privees`).
             if (m.has("privees")) m.optJSONArray("privees").chaines().distinct() else privees.toList(),
+            // Et pour les moods (serveur d'avant `moods`) : les nôtres restent, jamais vidés.
+            if (m.optJSONObject("moods") != null) objetMoods(m.optJSONObject("moods")) else moods.toMap(),
         )
         val v = m.optLong("version", -1)
         if (v < 0) return
