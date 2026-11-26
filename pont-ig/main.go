@@ -67,6 +67,9 @@ type Message struct {
 	Media  string `json:"media,omitempty"`
 	FromMe bool   `json:"from_me"`
 	Sender string `json:"sender"`
+	// L'id de l'auteur (groupes, sans préfixe) : sa photo arrive par
+	// « sender_avatar » (auteurs.go). Pas dans le cache (msgRow.SenderID).
+	Auteur string `json:"sender_id,omitempty"`
 	Time   int64  `json:"time"` // millisecondes
 	Status string `json:"status"`
 	Kind   string `json:"kind"` // "instagram" ou "admin"

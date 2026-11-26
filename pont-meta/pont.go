@@ -55,6 +55,9 @@ type Pont struct {
 	openThread map[int64]int64 // fil ouvert (ancien) -> fil chiffré qui l'a remplacé
 	recus      compteurFils    // lignes de fils reçues depuis le lancement (diagnostic, fils.go)
 
+	auteurs     map[int64]bool // photos d'auteurs déjà demandées (auteurs.go)
+	fileAuteurs chan int64
+
 	tableMu  sync.Mutex
 	waiters  map[string][]chan struct{} // fil -> qui attend des messages
 	pending  map[string]string          // otid -> tmp_id de l'interface
@@ -109,11 +112,14 @@ func newPont(ctx context.Context) *Pont {
 		fetching:     map[string]bool{},
 		listCount:    50,
 		e2eeReady:    exsync.NewEvent(),
+		auteurs:      map[int64]bool{},
+		fileAuteurs:  make(chan int64, 256),
 	}
 	mediadl.SetHTTP(exhttp.SensibleClientSettings)
 	p.notes = nouvellesNotesFB(p)
 	p.flux = p.newFluxPresence()
 	go p.listLoop()
+	go p.boucleAuteurs()
 	return p
 }
 
@@ -908,6 +914,7 @@ func (p *Pont) msgOut(r *msgRow) Message {
 			m.Sender = n
 		}
 	}
+	p.noteAuteur(r, &m)
 	for i := range m.Reactions {
 		if n := p.contactName(m.Reactions[i].Actor); n != "" {
 			m.Reactions[i].Sender = n

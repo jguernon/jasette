@@ -1325,6 +1325,11 @@ comme toute clé `path`, §6) :
   redonnée sans réseau avec chaque page d'historique. L'avatar propre au
   serveur (`member.avatar`) d'abord, sinon celui du compte ; sans avatar,
   rien : les clients mettent l'initiale.
+  Les ponts Messenger et Instagram font de même dans les groupes (chiffrés
+  ou non) : `sender_id` est le FBID de l'auteur, `service` vaut
+  `messenger` ou `instagram` ; une fois par personne et par session, au
+  plus 20 téléchargements par minute, photos prises dans le cache des fils
+  à deux.
 - `{"ev":"avatars_groupe","conv":…,"members":[{"name":…,"color":…,"path":…},…]}` :
   pour un **groupe sans image propre**, les photos de ses premiers membres
   (2 à 4). Le bureau en compose une mosaïque ; Android prend la première

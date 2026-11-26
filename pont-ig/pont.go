@@ -52,6 +52,9 @@ type Pont struct {
 	loaded   map[string]int64  // fil -> plus vieux message montré à l'interface
 	fetching map[string]bool
 
+	auteurs     map[int64]bool // photos d'auteurs déjà demandées (auteurs.go)
+	fileAuteurs chan int64
+
 	listDirty     bool
 	listCount     int
 	archiveWanted bool
@@ -79,23 +82,26 @@ type Pont struct {
 
 func newPont(ctx context.Context) *Pont {
 	p := &Pont{
-		ctx:        ctx,
-		convs:      map[string]*convState{},
-		contacts:   map[int64]*contact{},
-		byIGID:     map[string]string{},
-		byThreadID: map[string]string{},
-		byUserIGID: map[string]int64{},
-		presenceOn: presenceEnv(),
-		presence:   map[string]presenceState{},
-		notesOn:    notesEnv(),
-		notesNow:   make(chan struct{}, 1),
-		pending:    map[string]string{},
-		loaded:     map[string]int64{},
-		fetching:   map[string]bool{},
-		listCount:  50,
+		ctx:         ctx,
+		convs:       map[string]*convState{},
+		contacts:    map[int64]*contact{},
+		byIGID:      map[string]string{},
+		byThreadID:  map[string]string{},
+		byUserIGID:  map[string]int64{},
+		presenceOn:  presenceEnv(),
+		presence:    map[string]presenceState{},
+		notesOn:     notesEnv(),
+		notesNow:    make(chan struct{}, 1),
+		pending:     map[string]string{},
+		loaded:      map[string]int64{},
+		fetching:    map[string]bool{},
+		listCount:   50,
+		auteurs:     map[int64]bool{},
+		fileAuteurs: make(chan int64, 256),
 	}
 	mediadl.SetHTTP(exhttp.SensibleClientSettings)
 	go p.listLoop()
+	go p.boucleAuteurs()
 	p.flux = p.newFluxPresence()
 	p.notes = nouvellesNotes(opsNote{
 		nom: "Instagram", limite: 60, parHeure: 6, duree: 24 * time.Hour,
@@ -999,6 +1005,7 @@ func (p *Pont) msgOut(r *msgRow) Message {
 			m.Sender = n
 		}
 	}
+	p.noteAuteur(r, &m)
 	m.Reactions = slices.Clone(m.Reactions)
 	for i := range m.Reactions {
 		if n := p.contactName(m.Reactions[i].Actor); n != "" {
