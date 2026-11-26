@@ -209,17 +209,18 @@ private fun ListeSections(choisie: SectionReglages?, chevrons: Boolean, ouvrir: 
                     Icon(iconeSection(s), null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(19.dp))
                 }
                 Spacer(Modifier.width(14.dp))
+                // Le titre garde toujours une seule ligne ; le résumé prend la
+                // place qui reste et se coupe (…) au besoin.
                 Text(
                     t(s.nom), color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
+                    maxLines = 1, softWrap = false,
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    resumeSection(s) ?: "", color = P.textePale, fontSize = 13.sp, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.End,
                     modifier = Modifier.weight(1f),
                 )
-                resumeSection(s)?.let {
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        it, color = P.textePale, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 150.dp),
-                    )
-                }
                 if (chevrons || s == SectionReglages.SERVEUR) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = P.textePale)
                 }
