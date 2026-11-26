@@ -54,6 +54,28 @@ const (
 	apercuUA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 
+// Facebook et Instagram refusent leurs pages (HTTP 400, page de connexion) à
+// un navigateur non connecté, mais donnent leurs balises OpenGraph au robot
+// d'aperçus de Facebook : on se présente comme lui pour leurs pages seulement.
+const apercuUARobotFB = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"
+
+func domaineMeta(hote string) bool {
+	h := strings.ToLower(strings.TrimSuffix(hote, "."))
+	for _, d := range []string{"facebook.com", "fb.com", "fb.watch", "instagram.com"} {
+		if h == d || strings.HasSuffix(h, "."+d) {
+			return true
+		}
+	}
+	return false
+}
+
+func uaPour(hote string) string {
+	if domaineMeta(hote) {
+		return apercuUARobotFB
+	}
+	return apercuUA
+}
+
 // Apercu : ce qu'on montre sous le message. Image : chemin d'un fichier du
 // dossier des médias (servi par `get`, §6.1), vide s'il n'y en a pas.
 type Apercu struct {
@@ -259,7 +281,7 @@ func requeteApercu(ctx context.Context, u string, accepte string) (*http.Respons
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", apercuUA)
+	req.Header.Set("User-Agent", uaPour(req.URL.Hostname()))
 	req.Header.Set("Accept", accepte)
 	req.Header.Set("Accept-Language", "fr-CA,fr;q=0.9,en;q=0.8")
 	return clientApercus.Do(req)

@@ -559,7 +559,14 @@ private fun Message(
                     }
                 }
                 if (m.attachments.isEmpty() && m.media.isNotEmpty()) PieceAutre(m.media)
-                if (m.text.isNotEmpty()) {
+                // Une carte avec titre et image dit déjà où mène le lien : l'adresse
+                // sort du texte (et la bulle disparaît s'il ne restait qu'elle).
+                val apercuLien = ca.jasette.android.Apercus.de(m)
+                val texteSansLien = apercuLien
+                    ?.takeIf { (a, img) -> a.title.isNotEmpty() && img != null && java.io.File(img).isFile }
+                    ?.let { (a, _) -> ca.jasette.android.Liens.sansLien(m.text, a.url) }
+                    ?: m.text
+                if (texteSansLien.isNotEmpty()) {
                     val rayon = 18.dp
                     val forme = if (m.fromMe) {
                         formeBulle(rayon, rayon, if (dernier) 4.dp else rayon, rayon)
@@ -582,13 +589,13 @@ private fun Message(
                     ) {
                         val contexte = LocalContext.current
                         Text(
-                            avecLiens(surligner(m.text, surligne, courant), m.fromMe) { ouvrirLien(contexte, it) },
+                            avecLiens(surligner(texteSansLien, surligne, courant), m.fromMe) { ouvrirLien(contexte, it) },
                             color = if (m.fromMe) P.surAccent else P.texteFort,
                             fontSize = (15f * ca.jasette.android.Marques.tailleMessages).sp,
                             lineHeight = (20f * ca.jasette.android.Marques.tailleMessages).sp,
                         )
                     }
-                    ca.jasette.android.Apercus.de(m)?.let { (a, image) -> CarteApercu(a, image, appuiLong) }
+                    apercuLien?.let { (a, image) -> CarteApercu(a, image, appuiLong) }
                 }
             }
             if (aReactions) {
@@ -1073,7 +1080,13 @@ private fun CarteApercu(a: ca.jasette.android.LienApercu, image: String?, appuiL
             .combinedClickable(onClick = { ouvrirLien(contexte, a.url) }, onLongClick = appuiLong),
     ) {
         if (image != null && java.io.File(image).isFile) {
-            ImageFichier(image, Modifier.fillMaxWidth().aspectRatio(16f / 9f), cote = 720)
+            // Coupée aux coins du haut de la carte (sinon l'image déborde des coins arrondis).
+            ImageFichier(
+                image,
+                Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                    .clip(formeBulle(16.dp, 16.dp, 0.dp, 0.dp)),
+                cote = 720,
+            )
         }
         Column(Modifier.padding(horizontal = 12.dp, vertical = 9.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             if (a.title.isNotEmpty()) {

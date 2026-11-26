@@ -6365,6 +6365,12 @@ impl Jasette {
                         .child(m.media.clone()),
                 );
             }
+            // Le message d'origine (la carte de l'aperçu cherche son lien dans
+            // le texte complet) ; `m` : le texte montré, sans l'adresse si la
+            // carte a titre et image.
+            let orig = m;
+            let sans_lien = if flou { None } else { self.texte_sans_lien(m).map(|text| Msg { text, ..m.clone() }) };
+            let m = sans_lien.as_ref().unwrap_or(m);
             let echec = statut(&m.status) == "Échec";
             // Mes messages : les coches, dans la bulle (en bas à droite).
             let coches = if m.from_me && !flou { coche(&m.status) } else { None };
@@ -6453,9 +6459,12 @@ impl Jasette {
                 });
                 ligne = ligne.child(self.bulle_reactive(m, bulle.into_any_element(), flou, cx));
                 // L'aperçu du lien, sous la bulle, dès qu'il est là.
-                if !flou && let Some(carte) = self.carte_apercu(m) {
+                if !flou && let Some(carte) = self.carte_apercu(orig) {
                     ligne = ligne.child(carte);
                 }
+            } else if !flou && !orig.text.is_empty() && let Some(carte) = self.carte_apercu(orig) {
+                // Il ne restait que l'adresse : la carte seule, avec les réactions.
+                ligne = ligne.child(self.bulle_reactive(orig, carte, flou, cx));
             } else if !flou && (!m.reactions.is_empty() || self.barre_reactions.as_deref() == Some(m.id.as_str())) {
                 // Un message sans texte (photo, vocal) : la pastille sous la pièce.
                 ligne = ligne.child(self.bulle_reactive(m, div().h(px(2.)).w(px(60.)).into_any_element(), flou, cx));
@@ -6637,8 +6646,9 @@ impl Jasette {
     /// sinon celle que Jasette a faite (si le réglage le permet). Image en
     /// haut (environ 16:9), titre en gras, description, domaine ; un clic
     /// ouvre le lien.
-    fn carte_apercu(&self, m: &Msg) -> Option<AnyElement> {
-        let (a, image) = if let Some(lp) = &m.link_preview {
+    /// L'aperçu du lien d'un message (du service, sinon cherché) et son image.
+    fn apercu_de(&self, m: &Msg) -> Option<(apercu::Apercu, Option<PathBuf>)> {
+        Some(if let Some(lp) = &m.link_preview {
             let image = if !lp.image.is_empty() {
                 Some(PathBuf::from(&lp.image))
             } else if let Some(mid) = lp.image_media.as_ref().and_then(|v| v.get("media_id")).and_then(Value::as_str) {
@@ -6656,7 +6666,31 @@ impl Jasette {
             let a = self.apercus.get(&apercu::premier_lien(&m.text)?)?.clone()?;
             let image = (!a.image.is_empty()).then(|| PathBuf::from(&a.image));
             (a, image)
-        };
+        })
+    }
+
+    /// Le texte à montrer dans la bulle : sans l'adresse quand la carte a déjà
+    /// un titre et une image (elle dit où mène le lien). None : le texte tel quel.
+    fn texte_sans_lien(&self, m: &Msg) -> Option<String> {
+        let (a, image) = self.apercu_de(m)?;
+        if a.title.is_empty() || !image.is_some_and(|p| p.is_file()) {
+            return None;
+        }
+        let liens = apercu::liens(&m.text);
+        let net = |u: &str| u.trim_end_matches('/').to_string();
+        let (plage, _) = liens.iter().find(|(_, u)| net(u) == net(&a.url)).or_else(|| liens.first())?;
+        let avant = m.text[..plage.start].trim_end();
+        let apres = m.text[plage.end..].trim_start();
+        // La ponctuation qui suivait l'adresse seule (« Lis ça : https://… . »)
+        // ne veut plus rien dire ; un « : » qui l'annonçait non plus.
+        let ponct = |s: &str| s.chars().all(|c| ".,;:!?…".contains(c));
+        let apres = if ponct(apres) { "" } else { apres };
+        let avant = if apres.is_empty() { avant.trim_end_matches([':', ' ']) } else { avant };
+        Some(format!("{avant} {apres}").trim().to_string())
+    }
+
+    fn carte_apercu(&self, m: &Msg) -> Option<AnyElement> {
+        let (a, image) = self.apercu_de(m)?;
         if a.title.is_empty() && a.description.is_empty() {
             return None;
         }
@@ -6690,7 +6724,10 @@ impl Jasette {
                     .flex_none()
                     .overflow_hidden()
                     .when(ega, |d| d.border_b_1().border_color(bord))
-                    .child(img(image).size_full().object_fit(ObjectFit::Cover)),
+                    .when(!ega, |d| d.rounded_t(rayon(15.)))
+                    // GPUI ne coupe pas une image aux coins de son parent : on
+                    // arrondit l'image elle-même, comme la carte.
+                    .child(img(image).size_full().object_fit(ObjectFit::Cover).when(!ega, |d| d.rounded_t(rayon(15.)))),
             );
         }
         let mut texte = div().flex().flex_col().gap(px(3.)).px(px(12.)).py(px(9.));

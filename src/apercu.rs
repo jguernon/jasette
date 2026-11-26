@@ -22,6 +22,20 @@ const LARGEUR: u32 = 640;
 const DUREE_OK: i64 = 7 * 24 * 3600 * 1000;
 const DUREE_ECHEC: i64 = 6 * 3600 * 1000;
 const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+/// Facebook et Instagram refusent leurs pages à un navigateur non connecté,
+/// mais donnent leurs balises au robot d'aperçus de Facebook : pour leurs
+/// pages seulement, on se présente comme lui.
+const UA_ROBOT_FB: &str = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)";
+
+fn ua_pour(url: &str) -> &'static str {
+    let apres = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    let hote = apres.split(['/', '?', '#']).next().unwrap_or("");
+    let hote = hote.rsplit('@').next().unwrap_or(hote).split(':').next().unwrap_or("").to_ascii_lowercase();
+    let meta = ["facebook.com", "fb.com", "fb.watch", "instagram.com"]
+        .iter()
+        .any(|d| hote == *d || hote.ends_with(&format!(".{d}")));
+    if meta { UA_ROBOT_FB } else { UA }
+}
 
 /// L'aperçu d'un lien, tel que le pont l'envoie (`link_preview`) ou tel
 /// qu'on l'a fait. `image` : un fichier local ; `image_url` : une image à
@@ -293,6 +307,7 @@ fn lire_page(url: &str, dossier: &Path, k: &str) -> Option<Apercu> {
     }
     let rep = agent()
         .get(url)
+        .set("User-Agent", ua_pour(url))
         .set("Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5")
         .set("Accept-Language", "fr-CA,fr;q=0.9,en;q=0.8")
         .call()

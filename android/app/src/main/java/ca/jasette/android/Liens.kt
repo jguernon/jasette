@@ -72,6 +72,19 @@ object Liens {
     private const val HTML_MAX = 2 shl 20
     private const val IMAGE_MAX = 8 shl 20
     private const val LARGEUR = 640
+    /**
+     * Facebook et Instagram refusent leurs pages à un navigateur non connecté,
+     * mais donnent leurs balises au robot d'aperçus de Facebook : pour leurs
+     * pages seulement, on se présente comme lui.
+     */
+    private const val UA_ROBOT_FB = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"
+
+    private fun uaPour(hote: String): String {
+        val h = hote.lowercase().trimEnd('.')
+        val meta = listOf("facebook.com", "fb.com", "fb.watch", "instagram.com").any { h == it || h.endsWith(".$it") }
+        return if (meta) UA_ROBOT_FB else UA
+    }
+
     private const val UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
 
     private fun horsLien(c: Char): Boolean =
@@ -83,6 +96,23 @@ object Liens {
      * Les adresses du texte (http(s) et www.) : leur plage et l'adresse à ouvrir
      * (`www.…` devient `https://www.…`), sans la ponctuation finale.
      */
+    /**
+     * [texte] sans le lien qui mène à [url] (sinon sans le premier lien), et
+     * sans les espaces laissés autour.
+     */
+    fun sansLien(texte: String, url: String): String {
+        val liens = trouver(texte)
+        val (plage, _) = liens.firstOrNull { it.second == url || it.second.trimEnd('/') == url.trimEnd('/') }
+            ?: liens.firstOrNull() ?: return texte
+        // La ponctuation qui suivait l'adresse seule (« Lis ça : https://… . »)
+        // ne veut plus rien dire ; un « : » qui l'annonçait non plus.
+        var avant = texte.substring(0, plage.first).trimEnd()
+        var apres = texte.substring(plage.last + 1).trimStart()
+        if (apres.all { it in ".,;:!?…" }) apres = ""
+        if (apres.isEmpty()) avant = avant.trimEnd(':', ' ')
+        return "$avant $apres".trim()
+    }
+
     fun trouver(texte: String): List<Pair<IntRange, String>> {
         val r = ArrayList<Pair<IntRange, String>>()
         val bas = texte.lowercase(java.util.Locale.ROOT)
@@ -185,7 +215,7 @@ object Liens {
                 instanceFollowRedirects = false
                 connectTimeout = DELAI_MS
                 readTimeout = DELAI_MS
-                setRequestProperty("User-Agent", UA)
+                setRequestProperty("User-Agent", uaPour(u.host ?: ""))
                 setRequestProperty("Accept", accepte)
                 setRequestProperty("Accept-Language", "fr-CA,fr;q=0.9,en;q=0.8")
             }
