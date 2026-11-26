@@ -7,13 +7,17 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -138,13 +142,46 @@ fun Modifier.barreFloutee(selection: HazeSourceSelection, opaque: Color, voile: 
  * ne doit être lue qu'au dessin.
  */
 @Composable
-fun rememberApparition(condition: () -> Boolean): State<Float> {
+fun rememberApparition(dureeMs: Int = 180, condition: () -> Boolean): State<Float> {
     val actuelle by rememberUpdatedState(condition)
     val a = remember { Animatable(if (condition()) 1f else 0f) }
     LaunchedEffect(Unit) {
-        snapshotFlow { actuelle() }.collectLatest { a.animateTo(if (it) 1f else 0f, if (P.sec) snap() else tween(180)) }
+        snapshotFlow { actuelle() }.collectLatest { a.animateTo(if (it) 1f else 0f, if (P.sec) snap() else tween(dureeMs)) }
     }
     return a.asState()
+}
+
+// ---- L'ombre sous la barre du haut des écrans qui défilent ----
+//
+// Une seule règle pour tous les écrans (boîte de réception, Favoris, Archives, vues
+// par service, Réglages, Nouveau message, formulaires de connexion) : l'ombre (le
+// fondu du haut de [fonduBords]) n'apparaît qu'une fois la liste défilée, et
+// disparaît dès qu'on revient tout en haut, à 0 px, en 150 ms. À poser avant le
+// défilement (`verticalScroll`) ou sur la LazyColumn : elle suit la fenêtre visible.
+// En EGA et Sirène, comme tous les fondus : rien (coupure nette).
+
+private const val DUREE_OMBRE_HAUT = 150
+private val HAUTEUR_OMBRE_HAUT = 28.dp
+
+/** L'ombre du haut d'une LazyColumn : seulement hors du haut (premier élément, 0 px). */
+@Composable
+fun Modifier.ombreHaut(etat: LazyListState): Modifier {
+    val visible = rememberApparition(DUREE_OMBRE_HAUT) {
+        !(etat.firstVisibleItemIndex == 0 && etat.firstVisibleItemScrollOffset == 0)
+    }
+    return fonduBords(HAUTEUR_OMBRE_HAUT, hautVisible = visible)
+}
+
+/** `verticalScroll` avec l'ombre du haut : le défilement vertical des écrans à barre du haut. */
+@Composable
+fun Modifier.defilementAvecOmbre(etat: ScrollState = rememberScrollState()): Modifier =
+    ombreHaut(etat).verticalScroll(etat)
+
+/** L'ombre du haut d'une colonne `verticalScroll(etat)` : seulement hors du haut (0 px). */
+@Composable
+fun Modifier.ombreHaut(etat: ScrollState): Modifier {
+    val visible = rememberApparition(DUREE_OMBRE_HAUT) { etat.value != 0 }
+    return fonduBords(HAUTEUR_OMBRE_HAUT, hautVisible = visible)
 }
 
 /**

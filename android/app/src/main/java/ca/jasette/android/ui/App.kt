@@ -458,11 +458,9 @@ private fun Liste(
         // contentPadding, le dernier élément reste accessible. Les marges sont lues à la mesure.
         val margesHaut = remember(marges) { MargesPartielles(marges, haut = true, bas = false) }
         val margesBas = remember(marges) { MargesPartielles(marges, haut = false, bas = true, cotes = false) }
-        // Le fondu du haut, seulement une fois la liste défilée (lu au dessin, sans recomposer).
         // Gardée hors de l'écran (une par vue) : au retour d'une conversation, la
         // liste reprend où on était au lieu de remonter en haut.
         val etatListe = remember(vue) { PositionsListes.de(vue) }
-        val defilee = rememberApparition { etatListe.firstVisibleItemIndex > 0 || etatListe.firstVisibleItemScrollOffset > 0 }
         val tirage = tirerPourChercher(
             ouverte = rechercheOuverte,
             vide = filtre.isEmpty(),
@@ -485,14 +483,19 @@ private fun Liste(
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth()
                 .nestedScroll(tirage)
-                // Le masque d'abord, la source ensuite : le flou de la barre voit les rangées intactes.
-                .fonduBords(28.dp, hautVisible = defilee)
+                // L'ombre du haut, seulement une fois la liste défilée (Flou.kt). Le masque
+                // d'abord, la source ensuite : le flou de la barre voit les rangées intactes.
+                .ombreHaut(etatListe)
                 .sourceFlou(LocalFlou.current, FLOU_LISTE),
             state = etatListe,
             contentPadding = margesBas,
         ) {
             // Les bannières (NIP Messenger, aucun service sur le serveur) mènent à Comptes.
-            item { Bannieres { reglages(SectionReglages.COMPTES) } }
+            // Seulement s'il y en a : un premier élément de 0 px est sauté par la
+            // LazyColumn (firstVisibleItemIndex = 1 tout en haut), et l'ombre du haut
+            // restait affichée. Favoris y échappait : sa liste, plus courte que l'écran,
+            // est recalée sur l'élément 0.
+            if (bannieresVisibles()) item(key = "bannieres") { Bannieres { reglages(SectionReglages.COMPTES) } }
             if (vue == Vue.Tout && accueilVisible()) item { Accueil(serveur, connecter) }
             val vide = when {
                 visibles.isNotEmpty() || cachees > 0 -> null
@@ -775,7 +778,8 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
                 )
             },
         ) { marges ->
-            LazyColumn(Modifier.fillMaxSize().padding(marges).imePadding()) {
+            val etatContacts = androidx.compose.foundation.lazy.rememberLazyListState()
+            LazyColumn(Modifier.fillMaxSize().padding(marges).imePadding().ombreHaut(etatContacts), state = etatContacts) {
                 item {
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).carte(14.dp)
@@ -885,6 +889,15 @@ fun barreCouleurs(fond: androidx.compose.ui.graphics.Color = P.barre) = TopAppBa
     containerColor = fond, scrolledContainerColor = fond,
     titleContentColor = P.texteBarre, navigationIconContentColor = P.iconeBarre, actionIconContentColor = P.iconeBarre,
 )
+
+/**
+ * Y a-t-il au moins un bandeau à montrer ? Les mêmes conditions que [Bannieres]
+ * (un bandeau ajouté là doit l'être ici aussi).
+ */
+private fun bannieresVisibles(): Boolean =
+    Depot.erreur != null || Depot.emoji != null || Depot.besoinNip ||
+        (ca.jasette.android.MiseAJour.carteVisible && ca.jasette.android.MiseAJour.disponible != null) ||
+        (Depot.serveur != null && aucunCompte())
 
 /** Les bandeaux en haut de la liste : erreurs, association Google, NIP Messenger, aucun compte. */
 @Composable

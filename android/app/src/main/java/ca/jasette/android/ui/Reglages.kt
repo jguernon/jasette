@@ -18,11 +18,9 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -166,7 +164,7 @@ fun Reglages(
             val montree = section ?: SectionReglages.COMPTES
             Row(Modifier.fillMaxSize().padding(marges)) {
                 Column(
-                    Modifier.width(320.dp).fillMaxHeight().verticalScroll(rememberScrollState()).navigationBarsPadding()
+                    Modifier.width(320.dp).fillMaxHeight().defilementAvecOmbre().navigationBarsPadding()
                         .padding(16.dp),
                 ) {
                     ListeSections(choisie = montree, chevrons = false, ouvrir = ::ouvrir)
@@ -180,7 +178,7 @@ fun Reglages(
             key(section) { PageSection(section, Modifier.fillMaxSize().padding(marges), connecter, serveur) }
         } else {
             Column(
-                Modifier.fillMaxSize().padding(marges).verticalScroll(rememberScrollState()).navigationBarsPadding()
+                Modifier.fillMaxSize().padding(marges).defilementAvecOmbre().navigationBarsPadding()
                     .padding(16.dp),
             ) {
                 ListeSections(choisie = null, chevrons = true, ouvrir = ::ouvrir)
@@ -238,7 +236,7 @@ private fun PageSection(
     serveur: () -> Unit,
 ) {
     Column(
-        modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(16.dp),
+        modifier.defilementAvecOmbre().navigationBarsPadding().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         when (s) {
@@ -629,7 +627,7 @@ fun ServeurJasette(retour: () -> Unit) {
     ) { marges ->
         var confirmerQuitter by remember { mutableStateOf(false) }
         Column(
-            Modifier.fillMaxSize().padding(marges).verticalScroll(rememberScrollState()).navigationBarsPadding()
+            Modifier.fillMaxSize().padding(marges).defilementAvecOmbre().navigationBarsPadding()
                 .imePadding().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {

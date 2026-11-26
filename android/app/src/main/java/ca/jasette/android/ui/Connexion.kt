@@ -27,9 +27,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedTextField
@@ -262,7 +260,7 @@ private fun CodeXChat(cookies: Map<String, String>, fini: () -> Unit) {
         },
     ) { marges ->
         Column(
-            Modifier.fillMaxSize().padding(marges).verticalScroll(rememberScrollState()).imePadding().padding(16.dp),
+            Modifier.fillMaxSize().padding(marges).defilementAvecOmbre().imePadding().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Column(

@@ -11,9 +11,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
@@ -73,7 +71,7 @@ fun AssociationBluesky(fini: () -> Unit) {
         },
     ) { marges ->
         Column(
-            Modifier.fillMaxSize().padding(marges).verticalScroll(rememberScrollState())
+            Modifier.fillMaxSize().padding(marges).defilementAvecOmbre()
                 .navigationBarsPadding().imePadding().padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
