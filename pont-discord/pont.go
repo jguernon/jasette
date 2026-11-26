@@ -72,6 +72,10 @@ type Pont struct {
 
 	rest throttle // api discord.com
 	cdn  throttle // cdn.discordapp.com (images, pièces jointes)
+	// Les téléchargements de pièces jointes : au plus dlSimultanes à la
+	// fois, et un seul par fichier (media.go).
+	dl      chan struct{}
+	dlEnvol map[string]bool // sous mu
 
 	events chan any
 
@@ -99,6 +103,8 @@ func newPont(ctx context.Context) *Pont {
 		presence:    map[string]presenceState{},
 		rest:        throttle{gap: 400 * time.Millisecond},
 		cdn:         throttle{gap: 150 * time.Millisecond},
+		dl:          make(chan struct{}, dlSimultanes),
+		dlEnvol:     map[string]bool{},
 		events:      make(chan any, 8192),
 	}
 	p.notes = nouvellesNotesDiscord(p)

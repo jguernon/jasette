@@ -130,6 +130,10 @@ type mediaKey struct {
 	Channel string `json:"c,omitempty"`
 	Message string `json:"m,omitempty"`
 	ID      string `json:"a,omitempty"`
+	// Les dimensions et la taille : de quoi demander une vignette (media.go).
+	W    int `json:"w,omitempty"`
+	H    int `json:"h,omitempty"`
+	Size int `json:"s,omitempty"`
 }
 
 func attachmentsOf(m *discordgo.Message) []Attachment {
@@ -149,7 +153,7 @@ func attachmentsOf(m *discordgo.Message) []Attachment {
 		if m.Flags&discordgo.MessageFlagsIsVoiceMessage != 0 && strings.HasPrefix(mime, "audio/") {
 			name = "message vocal"
 		}
-		key, _ := json.Marshal(mediaKey{URL: a.URL, Channel: m.ChannelID, Message: m.ID, ID: a.ID})
+		key, _ := json.Marshal(mediaKey{URL: a.URL, Channel: m.ChannelID, Message: m.ID, ID: a.ID, W: a.Width, H: a.Height, Size: a.Size})
 		out = append(out, Attachment{
 			MediaID: "dc:" + a.ID,
 			Key:     key,

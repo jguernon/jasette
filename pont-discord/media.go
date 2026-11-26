@@ -15,6 +15,7 @@ import (
 	"io"
 	mimepkg "mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -71,27 +72,129 @@ func (p *Pont) httpClient() *http.Client {
 	return &http.Client{Timeout: 10 * time.Minute}
 }
 
-// download : une pièce jointe, téléchargée une seule fois. Les adresses du
-// CDN de Discord expirent (environ un jour) : une adresse refusée est
-// renouvelée en relisant le message.
+// Les téléchargements de pièces jointes en même temps, au plus.
+const dlSimultanes = 3
+
+// La vignette d'affichage : largeur et hauteur au plus, et en deçà de quoi
+// l'original suffit (petit fichier, petite image).
+const (
+	vignetteLargeur = 1024
+	vignetteHauteur = 2048
+	vignetteSeuil   = 300 << 10
+)
+
+// vignetteURL : l'adresse d'un aperçu redimensionné en WebP (proxy
+// media.discordapp.net, comme le client web), ou "" si l'original convient
+// (pas une image fixe, dimensions inconnues, ou déjà petite).
+func vignetteURL(k mediaKey, mime string) string {
+	switch mime {
+	case "image/jpeg", "image/png", "image/webp", "image/bmp", "image/avif", "":
+	default:
+		return "" // GIF animés, vidéos, sons, documents : l'original
+	}
+	if k.W <= 0 || k.H <= 0 {
+		return ""
+	}
+	if k.W <= vignetteLargeur && k.H <= vignetteHauteur && k.Size > 0 && k.Size <= vignetteSeuil {
+		return ""
+	}
+	u, err := url.Parse(k.URL)
+	if err != nil || u.Scheme != "https" {
+		return ""
+	}
+	switch u.Host {
+	case "cdn.discordapp.com", "media.discordapp.net":
+	default:
+		return ""
+	}
+	if !strings.HasPrefix(u.Path, "/attachments/") && !strings.HasPrefix(u.Path, "/ephemeral-attachments/") {
+		return ""
+	}
+	w, h := k.W, k.H
+	if w > vignetteLargeur {
+		h = max(1, h*vignetteLargeur/w)
+		w = vignetteLargeur
+	}
+	if h > vignetteHauteur {
+		w = max(1, w*vignetteHauteur/h)
+		h = vignetteHauteur
+	}
+	u.Host = "media.discordapp.net"
+	q := u.Query() // ex, is, hm : la signature de l'adresse, gardée
+	q.Set("format", "webp")
+	q.Set("width", strconv.Itoa(w))
+	q.Set("height", strconv.Itoa(h))
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// nomVignette : le fichier de la vignette d'une pièce (à côté de l'original,
+// sans le confondre avec lui : « <hash>.* » ne le trouve pas).
+func nomVignette(dir, mediaID string) string {
+	return filepath.Join(dir, hashName(mediaID)+"-v.webp")
+}
+
+// original : la copie déjà gardée de l'original, ou "".
+func original(dir, mediaID string) string {
+	matches, _ := filepath.Glob(filepath.Join(dir, hashName(mediaID)+".*"))
+	for _, m := range matches {
+		if !strings.HasSuffix(m, ".tmp") {
+			return m
+		}
+	}
+	return ""
+}
+
+// download : une pièce jointe, téléchargée une seule fois. Pour l'affichage,
+// une vignette (WebP, 1024 px de large au plus) ; l'original seulement sur
+// demande (`full` : ouvrir, enregistrer). Au plus dlSimultanes à la fois,
+// une seule fois par fichier en même temps (la réponse `media` sert tous
+// ceux qui l'attendent). Les adresses du CDN de Discord expirent (environ un
+// jour) : une adresse refusée est renouvelée en relisant le message.
 func (p *Pont) download(cmd Cmd) {
 	dir := filepath.Join(mediaDir(), "pieces")
-	if matches, _ := filepath.Glob(filepath.Join(dir, hashName(cmd.MediaID)+".*")); len(matches) > 0 {
-		for _, m := range matches {
-			if !strings.HasSuffix(m, ".tmp") {
-				emit("media", map[string]any{"media_id": cmd.MediaID, "path": m})
+	ok := func(path string, full bool) {
+		emit("media", map[string]any{"media_id": cmd.MediaID, "path": path, "full": full})
+	}
+	if m := original(dir, cmd.MediaID); m != "" {
+		ok(m, true)
+		return
+	}
+	var k mediaKey
+	if len(cmd.Key) == 0 || json.Unmarshal(cmd.Key, &k) != nil || !strings.HasPrefix(k.URL, "https://") {
+		emit("media", map[string]any{"media_id": cmd.MediaID, "error": "clé de pièce jointe illisible"})
+		return
+	}
+	vignette := ""
+	if !cmd.Full {
+		vignette = vignetteURL(k, cmd.Mime)
+		if vignette != "" {
+			if st, err := os.Stat(nomVignette(dir, cmd.MediaID)); err == nil && st.Size() > 0 {
+				ok(nomVignette(dir, cmd.MediaID), false)
 				return
 			}
 		}
 	}
+	// Un seul téléchargement à la fois par fichier (et par sorte).
+	cle := cmd.MediaID
+	if vignette != "" {
+		cle += "\x00v"
+	}
+	p.mu.Lock()
+	if p.dlEnvol[cle] {
+		p.mu.Unlock()
+		return
+	}
+	p.dlEnvol[cle] = true
+	p.mu.Unlock()
+	defer func() {
+		p.mu.Lock()
+		delete(p.dlEnvol, cle)
+		p.mu.Unlock()
+	}()
 	fail := func(err error) {
 		log.Warn().Str("err", err.Error()).Str("media", cmd.MediaID).Msg("téléchargement")
 		emit("media", map[string]any{"media_id": cmd.MediaID, "error": err.Error()})
-	}
-	var k mediaKey
-	if len(cmd.Key) == 0 || json.Unmarshal(cmd.Key, &k) != nil || !strings.HasPrefix(k.URL, "https://") {
-		fail(errors.New("clé de pièce jointe illisible"))
-		return
 	}
 	if !trustedCDN(k.URL) {
 		fail(errors.New("adresse de pièce jointe refusée"))
@@ -99,23 +202,49 @@ func (p *Pont) download(cmd Cmd) {
 	}
 	ctx, annule := context.WithTimeout(p.ctx, 10*time.Minute)
 	defer annule()
+	select {
+	case p.dl <- struct{}{}:
+		defer func() { <-p.dl }()
+	case <-ctx.Done():
+		fail(errors.New("Discord : délai dépassé"))
+		return
+	}
 	cli := p.httpClient()
-	data, status, err := p.cdnGet(ctx, cli, k.URL, maxDownload)
+	adresse := func(brute string) string {
+		if vignette == "" {
+			return brute
+		}
+		k2 := k
+		k2.URL = brute
+		if v := vignetteURL(k2, cmd.Mime); v != "" {
+			return v
+		}
+		return brute
+	}
+	data, status, err := p.cdnGet(ctx, cli, adresse(k.URL), maxDownload)
 	if err != nil && (status == http.StatusForbidden || status == http.StatusNotFound) && k.Channel != "" && k.Message != "" {
 		if fresh := p.freshURL(ctx, k); fresh != "" {
-			data, _, err = p.cdnGet(ctx, cli, fresh, maxDownload)
+			data, status, err = p.cdnGet(ctx, cli, adresse(fresh), maxDownload)
 		}
+	}
+	if err != nil && vignette != "" && status >= 400 && status < 500 && status != http.StatusForbidden && status != http.StatusNotFound && status != http.StatusTooManyRequests {
+		// Le proxy refuse ce redimensionnement : l'original.
+		vignette = ""
+		data, _, err = p.cdnGet(ctx, cli, k.URL, maxDownload)
 	}
 	if err != nil {
 		fail(fmt.Errorf("Discord : %w", err))
 		return
 	}
 	path := filepath.Join(dir, hashName(cmd.MediaID)+extension(cmd.Mime, data))
+	if vignette != "" {
+		path = nomVignette(dir, cmd.MediaID)
+	}
 	if err := writeWhole(path, data); err != nil {
 		fail(err)
 		return
 	}
-	emit("media", map[string]any{"media_id": cmd.MediaID, "path": path})
+	ok(path, vignette == "")
 }
 
 // trustedCDN : seulement les hôtes de fichiers de Discord.

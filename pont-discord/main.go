@@ -166,6 +166,8 @@ type Cmd struct {
 	Folder  string `json:"folder"`
 	Key     []byte `json:"key"`
 	Mime    string `json:"mime"`
+	// download : l'original plutôt que la vignette (ouvrir, enregistrer).
+	Full    bool   `json:"full"`
 	On      bool   `json:"on"`
 	ReplyTo string `json:"reply_to"`
 	// react : le message visé et l'emoji (vide = retirer ma réaction).
