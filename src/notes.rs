@@ -956,6 +956,20 @@ impl Jasette {
     }
 }
 
+/// Le message n'est-il qu'un seul émoji (un graphème : ZWJ, peau, drapeau,
+/// touche compris), espaces retirés ? Il s'affiche alors en grand, sans bulle
+/// (src/pop.rs). Deux émojis ou plus restent du texte ordinaire.
+pub(crate) fn emoji_seul(texte: &str) -> bool {
+    let t = texte.trim();
+    let Some(e) = premier_emoji(t) else { return false };
+    if e != t {
+        return false;
+    }
+    // Un symbole de texte seul (©, ®, ™, ↔…) n'est pas un émoji sans sa variante.
+    let c = e.chars().next().map(|c| c as u32).unwrap_or(0);
+    e.chars().count() > 1 || c >= 0x1F000 || (0x2600..=0x27BF).contains(&c) || (0x2B05..=0x2B55).contains(&c) || (0x2300..=0x23FF).contains(&c)
+}
+
 #[cfg(test)]
 mod essais_bulle_note {
     use super::*;
@@ -988,6 +1002,16 @@ mod essais_bulle_note {
         let bio = note("x", 3, 0, "main");
         assert_eq!(echeance([&a, &b].into_iter()), Some(900));
         assert_eq!(echeance([&a, &bio].into_iter()), None);
+    }
+
+    #[test]
+    fn seul() {
+        for oui in ["👍", "  ❤️ ", "👨‍👩‍👧‍👦", "👍🏽", "🇨🇦", "1️⃣", "🏴󠁧󠁢󠁳󠁣󠁴󠁿"] {
+            assert!(emoji_seul(oui), "{oui}");
+        }
+        for non in ["👍👍", "👍 ok", "ok", "", "©", "1", "😀😀😀"] {
+            assert!(!emoji_seul(non), "{non}");
+        }
     }
 
     #[test]

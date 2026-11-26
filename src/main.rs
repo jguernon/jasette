@@ -24,6 +24,7 @@ mod presence;
 mod ecrit;
 mod sons;
 mod notes;
+mod pop;
 mod musique;
 mod groupes;
 
@@ -4480,6 +4481,10 @@ impl Jasette {
                             self.descendre = true;
                         }
                     }
+                    if nouveau && ouverte {
+                        // Un émoji seul arrivé en direct : son pop (src/pop.rs).
+                        pop::arrive(&m.id, &m.text);
+                    }
                     if nouveau && !m.from_me {
                         // Le message est là : plus de « … ».
                         self.ecrit_fini(&m.conv);
@@ -4865,6 +4870,9 @@ impl Jasette {
     fn en_attente(&mut self, conv: &str, texte: String, media: String, pieces: Vec<Piece>) -> String {
         self.envoi_seq += 1;
         let tmp = format!("jasette_{}_{}", chrono::Utc::now().timestamp_millis(), self.envoi_seq);
+        if self.choisie.as_deref() == Some(conv) {
+            pop::arrive(&tmp, &texte);
+        }
         self.messages.entry(conv.to_string()).or_default().push(Msg {
             id: tmp.clone(),
             conv: conv.to_string(),
@@ -7131,9 +7139,11 @@ impl Jasette {
             // Mes messages : les coches, dans la bulle (en bas à droite).
             let coches = if m.from_me && !flou { coche(&m.status) } else { None };
             // En sombre, l'heure se loge dans la bulle, en bas à droite.
-            let heure_dedans = th().sombre && !m.text.is_empty() && !self.details_heures;
+            // Un émoji seul (src/pop.rs) : en grand, sans bulle ; l'heure dessous.
+            let seul = notes::emoji_seul(&m.text);
+            let heure_dedans = th().sombre && !m.text.is_empty() && !seul && !self.details_heures;
             // Sans bulles : l'heure est dans l'en-tête ; mes coches suivent la fin d'une suite.
-            if ligne_retro && !flou && !m.text.is_empty() {
+            if ligne_retro && !flou && !m.text.is_empty() && !seul {
                 let plage = (trouves.contains(m.id.as_str()) || courant == Some(m.id.as_str()))
                     .then(|| {
                         let q = if self.fil_requete.is_empty() { plier(&self.requete_globale) } else { self.fil_requete.clone() };
@@ -7167,7 +7177,10 @@ impl Jasette {
             }
             let trouve = trouves.contains(m.id.as_str());
             let est_courant = courant == Some(m.id.as_str());
-            if !m.text.is_empty() {
+            if seul {
+                let vue = self.emoji_seul_vue(m, flou);
+                ligne = ligne.child(if flou { vue } else { self.bulle_reactive(m, vue, flou, cx) });
+            } else if !m.text.is_empty() {
                 // Le coin du côté de l'expéditeur se resserre sur la dernière bulle d'une suite.
                 let r_bulle = mesure(20., 18.);
                 let pointu = 5.;
@@ -7301,7 +7314,7 @@ impl Jasette {
                         .text_color(couleur)
                         .child(pied)
                         // Sans texte, pas de bulle : les coches suivent l'heure.
-                        .when(m.text.is_empty(), |d| d.when_some(coches, |d, k| d.child(self.coches(m, k, couleur, cx)))),
+                        .when(m.text.is_empty() || seul, |d| d.when_some(coches, |d, k| d.child(self.coches(m, k, couleur, cx)))),
                 );
             } else if heure_dedans && dernier {
                 // La fin d'une suite garde son souffle.
