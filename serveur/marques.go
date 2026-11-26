@@ -1,5 +1,6 @@
 // Les marques : le Head, les favoris, les épinglées, les archives, les
-// privées, les moods, les emojis rapides, les personnes et les contacts perso (fiche de la
+// privées, les moods, les emojis rapides, les corrections du regroupement
+// automatique (groupes_auto), les personnes et les contacts perso (fiche de la
 // personne, personnes.go), l'ordre des services et les réglages garder_archives et
 // cacher_apres_jours de Jasette, partagés entre tous les appareils de l'utilisateur (voir
 // PROTOCOLE.md, §5.5).
@@ -54,6 +55,11 @@ type Marques struct {
 	// Emojis : l'« emoji rapide » d'une conversation, {id: emoji}, envoyé
 	// d'un appui par le bouton à droite de la saisie. Absent : aucun.
 	Emojis map[string]string `json:"emojis"`
+	// GroupesAuto : la correction à la main du regroupement automatique de
+	// la boîte (« Ce n'est pas une promo », « Mettre dans Codes »…), {id:
+	// "codes"|"promos"|"avis"|"aucun"}. Elle gagne toujours sur la détection,
+	// faite par chaque client. Absent (ancien fichier) : vide.
+	GroupesAuto map[string]string `json:"groupes_auto"`
 	// GarderArchives : « Garder les conversations archivées hors de la boîte
 	// de réception ». Vrai : un message reçu ne désarchive plus. Absent (ancien
 	// fichier) : faux.
@@ -119,6 +125,7 @@ func (m *Marques) normaliser() {
 	}
 	m.Moods = nettoyerMoods(m.Moods)
 	m.Emojis = nettoyerEmojis(m.Emojis)
+	m.GroupesAuto = nettoyerGroupesAuto(m.GroupesAuto)
 	m.CacherApresJours = bornerJours(m.CacherApresJours)
 	m.SonsConversation = jeuSons(m.SonsConversation)
 	m.NotesMusique = bornerAppareil(m.NotesMusique)
@@ -147,7 +154,7 @@ func (m *Marques) memesListes(n *Marques) bool {
 			return false
 		}
 	}
-	return egalesMoods(m.Moods, n.Moods) && egalesMoods(m.Emojis, n.Emojis) && m.GarderArchives == n.GarderArchives &&
+	return egalesMoods(m.Moods, n.Moods) && egalesMoods(m.Emojis, n.Emojis) && egalesMoods(m.GroupesAuto, n.GroupesAuto) && m.GarderArchives == n.GarderArchives &&
 		m.CacherApresJours == n.CacherApresJours && m.PresenceEnLigne == n.PresenceEnLigne &&
 		m.SonsConversation == n.SonsConversation && m.NotesContacts == n.NotesContacts &&
 		m.NotesMusique == n.NotesMusique && m.NotesMusiqueFormat == n.NotesMusiqueFormat && egales(m.NotesServices, n.NotesServices) &&
@@ -216,6 +223,27 @@ func unirMoods(dabord, ensuite map[string]string) map[string]string {
 // unirEmojis : de même pour les emojis rapides.
 func unirEmojis(dabord, ensuite map[string]string) map[string]string {
 	return nettoyerEmojis(unirObjets(dabord, ensuite))
+}
+
+// nettoyerGroupesAuto : comme les emojis, mais seules les valeurs connues
+// restent.
+func nettoyerGroupesAuto(m map[string]string) map[string]string {
+	r := nettoyerObjet(m, 16)
+	for id, g := range r {
+		if !groupeAutoConnu(g) {
+			delete(r, id)
+		}
+	}
+	return r
+}
+
+func groupeAutoConnu(g string) bool {
+	return g == "codes" || g == "promos" || g == "avis" || g == "aucun"
+}
+
+// unirGroupesAuto : de même pour les corrections du regroupement automatique.
+func unirGroupesAuto(dabord, ensuite map[string]string) map[string]string {
+	return nettoyerGroupesAuto(unirObjets(dabord, ensuite))
 }
 
 func unirObjets(dabord, ensuite map[string]string) map[string]string {
@@ -368,7 +396,7 @@ func ecrireAtomique(chemin string, data []byte) error {
 func trameMarques(m Marques, id json.RawMessage, refus string) []byte {
 	corps := map[string]any{
 		"head": m.Head, "favoris": m.Favoris, "epingles": m.Epingles, "archives": m.Archives,
-		"privees": m.Privees, "moods": m.Moods, "emojis": m.Emojis, "garder_archives": m.GarderArchives,
+		"privees": m.Privees, "moods": m.Moods, "emojis": m.Emojis, "groupes_auto": m.GroupesAuto, "garder_archives": m.GarderArchives,
 		"cacher_apres_jours": m.CacherApresJours, "presence_en_ligne": m.PresenceEnLigne,
 		"sons_conversation": jeuSons(m.SonsConversation), "notes_contacts": m.NotesContacts,
 		"notes_musique": m.NotesMusique, "notes_musique_format": formatMusique(m.NotesMusiqueFormat), "notes_services": nettoyerServicesNotes(m.NotesServices),
@@ -404,6 +432,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		Privees  *[]string          `json:"privees"`
 		Moods    *map[string]string `json:"moods"`
 		Emojis   *map[string]string `json:"emojis"`
+		Groupes  json.RawMessage    `json:"groupes_auto"`
 		Garder   *bool              `json:"garder_archives"`
 		Cacher   *int               `json:"cacher_apres_jours"`
 		Presence *bool              `json:"presence_en_ligne"`
@@ -445,6 +474,11 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	// Et pour `emojis` (un client d'avant les emojis rapides ne les efface pas).
 	if d.Emojis != nil {
 		nouv.Emojis = nettoyerEmojis(*d.Emojis)
+	}
+	// Et pour `groupes_auto` : absent, null ou mal formé, rien ne change (un
+	// client d'avant le regroupement automatique ne l'efface pas).
+	if g, ok := lireGroupesAuto(d.Groupes); ok {
+		nouv.GroupesAuto = g
 	}
 	// Et pour `garder_archives` : absent, le réglage ne change pas (un client
 	// d'avant ce réglage ne le remet jamais à faux). Présent, il est pris tel
@@ -525,6 +559,11 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 			repondre(cur, "version périmée : les emojis rapides du serveur seraient vidés")
 			return
 		}
+		if len(nouv.GroupesAuto) == 0 && len(cur.GroupesAuto) > 0 {
+			logf("marques de %q refusées : groupes_auto vides, version %d < %d", c.nom, d.Version, cur.Version)
+			repondre(cur, "version périmée : les corrections du regroupement automatique du serveur seraient vidées")
+			return
+		}
 		if len(nouv.Personnes) == 0 && len(cur.Personnes) > 0 {
 			logf("marques de %q refusées : personnes vides, version %d < %d", c.nom, d.Version, cur.Version)
 			repondre(cur, "version périmée : les personnes du serveur seraient vidées")
@@ -548,6 +587,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		nouv.PersonnesRefus = unirRefus(nouv.PersonnesRefus, cur.PersonnesRefus)
 		nouv.Moods = unirMoods(nouv.Moods, cur.Moods)
 		nouv.Emojis = unirEmojis(nouv.Emojis, cur.Emojis)
+		nouv.GroupesAuto = unirGroupesAuto(nouv.GroupesAuto, cur.GroupesAuto)
 	}
 	nouv.normaliser()
 	if nouv.memesListes(&cur) {
@@ -562,8 +602,8 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		return
 	}
 	s.marques = nouv
-	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s, notes_contacts %v, notes_services %v, ordre_services %v, personnes %d, refus %d, contacts perso %d",
-		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation, nouv.NotesContacts, nouv.NotesServices, nouv.OrdreServices, len(nouv.Personnes), len(nouv.PersonnesRefus), len(nouv.ContactsPerso))
+	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, groupes_auto %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s, notes_contacts %v, notes_services %v, ordre_services %v, personnes %d, refus %d, contacts perso %d",
+		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), len(nouv.GroupesAuto), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation, nouv.NotesContacts, nouv.NotesServices, nouv.OrdreServices, len(nouv.Personnes), len(nouv.PersonnesRefus), len(nouv.ContactsPerso))
 	if nouv.PresenceEnLigne != cur.PresenceEnLigne {
 		s.presenceChangee(nouv.PresenceEnLigne)
 	}
@@ -755,4 +795,18 @@ func lireOrdreServices(brute json.RawMessage) ([]string, bool) {
 		return nil, false
 	}
 	return nettoyerOrdreServices(l), true
+}
+
+// lireGroupesAuto : la valeur de `groupes_auto` d'une trame, nettoyée. Faux
+// si elle est absente, nulle ou n'est pas un objet de chaînes (rien ne
+// change, le reste de la trame compte).
+func lireGroupesAuto(brute json.RawMessage) (map[string]string, bool) {
+	if len(brute) == 0 || string(brute) == "null" {
+		return nil, false
+	}
+	var m map[string]string
+	if json.Unmarshal(brute, &m) != nil {
+		return nil, false
+	}
+	return nettoyerGroupesAuto(m), true
 }

@@ -597,7 +597,7 @@ linkedingo, la bibliothèque de mautrix-linkedin ; pur Go, sans CGO) :
   `send_media`, `react` et `read` ne partent pas (`error` / ignoré). Pas
   de Sales Navigator, pas d'InMail envoyé, pas de pages d'entreprise.
 
-### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, personnes, contacts perso, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*, ordre_services)
+### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, personnes, contacts perso, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*, ordre_services, groupes_auto)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
@@ -617,12 +617,15 @@ pour X, « t: » pour Telegram, « b: » pour Bluesky, « d: » pour Discord, «
 Un champ inconnu (par exemple `groupes_inbox`, essayé puis abandonné) est
 ignoré, d'un client comme d'un ancien `marques.json`.
 
-S'y ajoutent deux objets (facultatifs) :
+S'y ajoutent trois objets (facultatifs) :
 
 - `moods` : le **Mood** de chaque conversation, `{id: nom}` (voir « Règle
   des moods » plus bas) ;
 - `emojis` : l'**emoji rapide** de chaque conversation, `{id: "👍"}` (voir
-  « Règle des emojis rapides » plus bas).
+  « Règle des emojis rapides » plus bas) ;
+- `groupes_auto` : la **correction à la main du regroupement automatique**
+  de la boîte, `{id: "codes"|"promos"|"avis"|"aucun"}` (voir « Règle du
+  regroupement automatique » plus bas).
 
 Et deux listes pour la **fiche de la personne** (voir « Règle des
 personnes » plus bas) :
@@ -697,7 +700,7 @@ C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 changement, à **tous** les clients) :
 
 ```json
-{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"ordre_services":["google","signal","messenger"],"personnes":[{"id":"p1764160000000a3f","convs":["123","m:99"],"principal":"123"}],"personnes_refus":[["i:42","m:99"]],"contacts_perso":{"123":{"nom":"Maman","photo":"/srv/jasette/media/contacts/9f3c0a.jpg"}},"version":7}}
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"groupes_auto":{"72345":"codes","t:93372553":"aucun"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"ordre_services":["google","signal","messenger"],"personnes":[{"id":"p1764160000000a3f","convs":["123","m:99"],"principal":"123"}],"personnes_refus":[["i:42","m:99"]],"contacts_perso":{"123":{"nom":"Maman","photo":"/srv/jasette/media/contacts/9f3c0a.jpg"}},"version":7}}
 ```
 
 `version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
@@ -706,7 +709,7 @@ encore rien reçu (listes vides).
 **Client → serveur** :
 
 ```json
-{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"ordre_services":[…],"personnes":[…],"personnes_refus":[…],"contacts_perso":{…},"version":7,"id":12}}
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"groupes_auto":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"ordre_services":[…],"personnes":[…],"personnes_refus":[…],"contacts_perso":{…},"version":7,"id":12}}
 ```
 
 - `version` : la dernière version reçue du serveur (0 si aucune).
@@ -721,6 +724,11 @@ encore rien reçu (listes vides).
   id, 64 par nom. Le serveur envoie toujours `moods` (objet, jamais `null`).
   Même règle pour `emojis`, avec au plus **32 octets** par emoji (un
   graphème : 👍, ❤️, 👨‍👩‍👧…) ; plus long, l'entrée est retirée.
+  Même règle pour `groupes_auto` (absent, `null` ou mal formé : rien ne
+  change ; présent, c'est l'objet complet), mais seules les valeurs
+  `"codes"`, `"promos"`, `"avis"` et `"aucun"` restent : toute autre entrée
+  est retirée. Toujours envoyé (objet, jamais `null`) ; absent de
+  `marques.json` : `{}`.
 - `garder_archives` : absent, rien ne change (un client d'avant ce réglage
   ne le remet jamais à faux) ; présent, il est pris tel quel, même d'un
   client en retard (un oui/non : rien à unir, pas de garde-fou). Le serveur
@@ -790,7 +798,7 @@ Règles du serveur :
      serveur qu'elles n'ont pas. Pour `moods` (même garde-fou s'il est vide
      alors que celui du serveur ne l'est pas) : les entrées du client, puis
      celles du serveur pour les ids que le client n'a pas. De même pour
-     `emojis`. Pour `personnes` (même garde-fou) : les personnes du client
+     `emojis` et `groupes_auto`. Pour `personnes` (même garde-fou) : les personnes du client
      telles quelles (même id : celle du client gagne, entière), puis celles
      du serveur qu'il n'a pas, **moins** les conversations que le client
      relie déjà à une autre personne (une personne qui n'a plus deux
@@ -971,6 +979,27 @@ ce champ : le client garde les siens pour lui).
   compatibilité dans les deux sens (`emojis` absent : rien n'est effacé ;
   serveur d'avant `emojis` : le client garde les siens). Le serveur ne
   vérifie que la longueur.
+
+**Règle du regroupement automatique.**
+
+- Réglages → « Regrouper automatiquement » : trois cases, **décochées par
+  défaut** et propres à chaque appareil (jamais dans les marques) : 🔐 Codes
+  (codes de vérification), 🏷️ Promotions, 📦 Avis (livraisons, rendez-vous,
+  banque, factures, alertes). Chaque groupe coché devient **une seule
+  rangée** de la boîte de réception, qui s'ouvre sur ses conversations.
+- La **détection** est faite par chaque client, localement, sans IA ni
+  service externe, par expéditeur (bureau : src/groupes_auto.rs ; Android :
+  GroupesAuto.kt ; mêmes essais : assets/essais/groupes-auto.txt). Jamais
+  classés : contacts, favoris, Head, épinglées, groupes, grands espaces,
+  privées, et les conversations où j'ai écrit.
+- La **correction à la main** (menu d'une conversation : « Ce n'est pas une
+  promo », « Mettre dans Codes »…) est la marque `groupes_auto`, partagée
+  entre les appareils ; elle gagne toujours sur la détection. `"aucun"` :
+  jamais regroupée. Le serveur ne fait que la garder, la nettoyer et l'unir
+  comme `emojis` ; une valeur inconnue est retirée. Un client qui reçoit des
+  marques sans ce champ (serveur d'avant) garde les siennes.
+- Les Promotions ne notifient pas et ne comptent pas dans les non-lus (ni
+  dans Android Auto) ; les Codes et les Avis notifient comme avant.
 
 **Règle des archives.**
 
@@ -1900,8 +1929,8 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"svc":…,"ev":{"ev":"messages",…,"cache":true}}` | copie du cache, avant la réponse du pont (§5.8) |
 | C→S | `{"rejouer":"<svc>"}` | redemander l'état d'un service |
 | ↔ | `{"ping":n}` / `{"pong":n}` | signes de vie |
-| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","version"[,"id","refus"]}}` | rejeu, changement |
-| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","version"[,"id"]}}` | changement local |
+| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","groupes_auto","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","version"[,"id","refus"]}}` | rejeu, changement |
+| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","groupes_auto","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","version"[,"id"]}}` | changement local |
 | S→C | `{"svc":…,"ev":{"ev":"presence","item":{"conv","user","online","last_active"}}}` | présence (§5.10), aussi au rejeu |
 | S→C | `{"svc":…,"ev":{"ev":"typing","conv","on"[,"name","audio"]}}` | « en train d'écrire » (§5.11) |
 | C→S | `{"svc":…,"cmd":{"cmd":"note_set","text","audience","source"[,"req"]}}` | publier ma note (§5.12) |

@@ -19,14 +19,15 @@ func serveurEssai(t *testing.T) (*Serveur, *Client) {
 
 type trameEssai struct {
 	Marques struct {
-		Privees  []string          `json:"privees"`
-		Moods    map[string]string `json:"moods"`
-		Emojis   map[string]string `json:"emojis"`
-		Archives []string          `json:"archives"`
-		Garder   *bool             `json:"garder_archives"`
-		Cacher   *int              `json:"cacher_apres_jours"`
-		Version  int64             `json:"version"`
-		Refus    string            `json:"refus"`
+		Privees     []string          `json:"privees"`
+		Moods       map[string]string `json:"moods"`
+		Emojis      map[string]string `json:"emojis"`
+		GroupesAuto map[string]string `json:"groupes_auto"`
+		Archives    []string          `json:"archives"`
+		Garder      *bool             `json:"garder_archives"`
+		Cacher      *int              `json:"cacher_apres_jours"`
+		Version     int64             `json:"version"`
+		Refus       string            `json:"refus"`
 	} `json:"marques"`
 }
 
@@ -295,6 +296,59 @@ func TestGroupesInboxIgnoree(t *testing.T) {
 		t.Fatal(err)
 	}
 	if m := chargerMarques(); m.Version != 3 || len(m.Head) != 1 {
+		t.Fatalf("ancien fichier : %+v", m)
+	}
+}
+
+// groupes_auto : posé (valeurs inconnues écartées), gardé par un ancien
+// client, union d'un client en retard, protégé d'un client qui le viderait,
+// relu sur disque ; un fichier d'avant se lit (vide, jamais nul).
+func TestGroupesAuto(t *testing.T) {
+	s, c := serveurEssai(t)
+
+	s.recevoirMarques(c, json.RawMessage(`{"groupes_auto":{"12345":"codes","s:1":"pub","":"avis","x:2":""},"version":0}`))
+	tr := lireTrame(t, c)
+	if tr.Marques.Version != 1 || len(tr.Marques.GroupesAuto) != 1 || tr.Marques.GroupesAuto["12345"] != "codes" {
+		t.Fatalf("après pose : %+v", tr.Marques)
+	}
+
+	// Un ancien client (sans `groupes_auto`) ne les efface pas.
+	s.recevoirMarques(c, json.RawMessage(`{"head":["a"],"version":1}`))
+	tr = lireTrame(t, c)
+	if tr.Marques.Version != 2 || tr.Marques.GroupesAuto["12345"] != "codes" {
+		t.Fatalf("ancien client : %+v", tr.Marques)
+	}
+
+	// Une correction change : « Ce n'est pas un code ».
+	s.recevoirMarques(c, json.RawMessage(`{"head":["a"],"groupes_auto":{"12345":"aucun","t:7":"promos"},"version":2}`))
+	tr = lireTrame(t, c)
+	if tr.Marques.Version != 3 || tr.Marques.GroupesAuto["12345"] != "aucun" || tr.Marques.GroupesAuto["t:7"] != "promos" {
+		t.Fatalf("correction : %+v", tr.Marques)
+	}
+
+	// Client en retard : union, les siennes gagnent pour ses ids.
+	s.recevoirMarques(c, json.RawMessage(`{"head":["a"],"groupes_auto":{"t:7":"avis","m:4":"promos"},"version":1}`))
+	tr = lireTrame(t, c)
+	g := tr.Marques.GroupesAuto
+	if tr.Marques.Version != 4 || g["t:7"] != "avis" || g["m:4"] != "promos" || g["12345"] != "aucun" {
+		t.Fatalf("union : %+v", tr.Marques)
+	}
+
+	// Client en retard qui les viderait : refusé.
+	s.recevoirMarques(c, json.RawMessage(`{"head":["a"],"groupes_auto":{},"version":2}`))
+	tr = lireTrame(t, c)
+	if tr.Marques.Refus == "" || len(tr.Marques.GroupesAuto) != 3 {
+		t.Fatalf("garde-fou : %+v", tr.Marques)
+	}
+
+	if m := chargerMarques(); m.Version != 4 || m.GroupesAuto["m:4"] != "promos" {
+		t.Fatalf("relu : %+v", m)
+	}
+	t.Setenv("JASETTE_DATA", t.TempDir())
+	if err := ecrireAtomique(marquesPath(), []byte(`{"head":["a"],"version":3}`)); err != nil {
+		t.Fatal(err)
+	}
+	if m := chargerMarques(); m.GroupesAuto == nil || len(m.GroupesAuto) != 0 {
 		t.Fatalf("ancien fichier : %+v", m)
 	}
 }
