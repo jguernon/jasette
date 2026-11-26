@@ -59,6 +59,7 @@ type Pont struct {
 	// cette connexion.
 	presenceOn bool
 	subscribed map[string]bool
+	pstats     presenceStats
 
 	// « Quoi de neuf ? » (notes.go).
 	notes *notesPont
@@ -455,6 +456,7 @@ func (p *Pont) onEvent(cli *whatsmeow.Client, raw any) {
 		go p.refreshName(cli, evt.JID)
 	case *events.PushNameSetting:
 		go p.emitAccount(cli)
+		go p.presenceNomRecu(cli)
 	case *events.AppStateSyncComplete:
 		go func() {
 			p.reloadContacts(cli)
