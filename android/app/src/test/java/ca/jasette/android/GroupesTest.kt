@@ -64,7 +64,7 @@ class GroupesTest {
         val canal = conv("t:1", kind = "channel")
         // Un grand espace : seulement sur mention ou réponse.
         assertFalse(notifierMessage(canal, msg("t:1")))
-        assertTrue(notifierMessage(canal, msg("t:1", mentionsMe = true)))
+        assertFalse("un canal ne notifie jamais, même une mention", notifierMessage(canal, msg("t:1", mentionsMe = true)))
         // Une conversation ordinaire, ou inconnue : comme avant.
         assertTrue(notifierMessage(conv("w:2", large = false), msg("w:2")))
         assertTrue(notifierMessage(null, msg("w:3")))

@@ -4462,9 +4462,9 @@ impl Jasette {
             return;
         }
         let conv = self.conv(&m.conv);
-        // Un grand espace hors de la boîte : seulement une mention ou une
-        // réponse à moi (pas tout le bavardage d'un serveur Discord).
-        if conv.is_some_and(|c| self.hors_boite(c)) && !(m.mentions_me || m.reply_to_me) {
+        // Un grand espace (onglet Canaux) ne notifie jamais, même une mention
+        // ou une réponse à moi : la pastille « @ » de l'onglet suffit.
+        if conv.is_some_and(|c| self.hors_boite(c)) {
             return;
         }
         let nom = conv.map(|c| self.nom_affiche(c)).unwrap_or_else(|| "Jasette".into());

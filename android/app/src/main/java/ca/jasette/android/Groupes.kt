@@ -19,11 +19,12 @@ fun dansBoiteDeReception(c: Conv): Boolean = !c.large
 fun demandeAttention(m: Msg): Boolean = !m.fromMe && (m.mentionsMe || m.replyToMe)
 
 /**
- * Faut-il notifier [m] ? (§5.13, point 4) Une conversation `large` ne notifie
- * que sur une mention ou une réponse à moi ; les autres, comme avant.
+ * Faut-il notifier [m] ? (§5.13, point 4) Une conversation `large` (onglet
+ * Canaux) ne notifie jamais, même sur une mention : la pastille « @ » de
+ * l'onglet suffit. Les autres, comme avant.
  */
-fun notifierMessage(c: Conv?, m: Msg): Boolean =
-    c == null || !c.large || demandeAttention(m)
+fun notifierMessage(c: Conv?, @Suppress("UNUSED_PARAMETER") m: Msg): Boolean =
+    c == null || !c.large
 
 /** Les sortes de grands espaces connues (`kind`, §5.13). Une autre valeur : icône générique. */
 object Sorte {
