@@ -17,6 +17,7 @@ mod cache;
 mod pont;
 mod prive;
 mod mood;
+mod maj;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -2013,6 +2014,8 @@ struct Jasette {
     focus_page: gpui::FocusHandle,
     /// La Liste privée : le haché du code, le verrou, le pavé (src/prive.rs).
     prive: prive::EtatPrive,
+    /// La mise à jour dans l'app (src/maj.rs).
+    maj: EtatMaj,
 }
 
 // Les ids venant de Messenger portent le préfixe « m: » dans l'interface, ceux
@@ -2867,6 +2870,7 @@ impl Jasette {
             reaction_cible: None,
             focus_page: cx.focus_handle(),
             prive: prive::EtatPrive::charger(),
+            maj: EtatMaj::charger(),
         };
         // Le cache local montre déjà une liste : la première conversation s'ouvre
         // tout de suite (ses messages en cache ; la réponse du pont s'y fusionnera).
@@ -2874,6 +2878,7 @@ impl Jasette {
             jasette.choisir(id);
         }
         jasette.demarrer_prive();
+        jasette.maj_demarrage(cx);
         jasette
     }
 
@@ -5531,6 +5536,7 @@ impl Jasette {
                     })
                     .when(th().ega, |d| d.bg(givre(1.))),
             )
+            .children(self.carte_maj(cx))
     }
 
     /// Les marques ont changé ici (Head, favoris, épingles, ordre) : on les
@@ -8759,13 +8765,12 @@ impl Jasette {
                 carte_section("Langue").child(g).into_any_element()
             }
             Section::APropos => carte_section("À propos")
+                .child(self.apropos_maj(cx))
                 .child(
                     groupe()
                         .child(ligne_info("Créé par", "Jonathan Guernon".into()))
                         .child(separateur())
-                        .child(ligne_info("Version", env!("CARGO_PKG_VERSION").to_string()))
-                        .child(separateur())
-                        .child(ligne_info("Google Messages", "libgm (mautrix-gmessages)".into()))
+                                                .child(ligne_info("Google Messages", "libgm (mautrix-gmessages)".into()))
                         .child(separateur())
                         .child(ligne_info("Messenger", "messagix (mautrix-meta)".into()))
                         .child(separateur())
@@ -10578,6 +10583,444 @@ impl Jasette {
     }
 }
 
+// ---- La mise à jour dans l'app (src/maj.rs) ----
+
+#[derive(Clone, Debug, PartialEq)]
+enum PhaseMaj {
+    Repos,
+    Recherche,
+    /// Réponse au bouton : rien de plus récent.
+    AJour,
+    Erreur(String),
+    /// De 0 à 1, ou -1 si la taille est inconnue.
+    Telechargement(f32),
+    /// Extraction et remplacement (archive), ou pkexec (paquet .deb).
+    Installation,
+    /// Installée : reste à redémarrer.
+    Installee,
+}
+
+struct EtatMaj {
+    installation: maj::Installation,
+    /// La version publiée plus récente que celle-ci, s'il y en a une.
+    disponible: Option<maj::VersionDispo>,
+    phase: PhaseMaj,
+    memoire: maj::Memoire,
+    /// Les fichiers remplacés par la dernière installation.
+    remplaces: Vec<String>,
+    /// Le serveur Jasette tourne comme service systemd de l'utilisateur.
+    serveur_systemd: bool,
+    /// Un jasette-serveur tourne sur cette machine (systemd ou non).
+    serveur_tourne: bool,
+    serveur_redemarre: bool,
+}
+
+fn dossier_maj() -> PathBuf {
+    dossier_donnees().join("maj")
+}
+
+impl EtatMaj {
+    fn charger() -> Self {
+        let _ = maj::chemin_exe();
+        let memoire = maj::Memoire::charger(&dossier_maj());
+        let disponible =
+            maj::lire(&memoire.json, maj::local_permis()).filter(|v| maj::plus_recente(Some(v), maj::code_installe()));
+        // Les téléchargements déjà installés (ou abandonnés) ne restent pas.
+        if disponible.is_none() {
+            maj::nettoyer(&dossier_maj());
+        }
+        Self {
+            installation: maj::detecter(),
+            disponible,
+            phase: PhaseMaj::Repos,
+            memoire,
+            remplaces: Vec::new(),
+            serveur_systemd: false,
+            serveur_tourne: false,
+            serveur_redemarre: false,
+        }
+    }
+
+    fn occupe(&self) -> bool {
+        matches!(self.phase, PhaseMaj::Recherche | PhaseMaj::Telechargement(_) | PhaseMaj::Installation)
+    }
+
+    fn dev(&self) -> bool {
+        self.installation == maj::Installation::Dev
+    }
+
+    /// La carte de la liste : une version plus récente, pas remise à plus tard
+    /// (ou une mise à jour en cours), jamais pour une version de développement.
+    fn carte_visible(&self) -> bool {
+        let Some(d) = &self.disponible else { return false };
+        !self.dev() && (d.code != self.memoire.ignoree || !matches!(self.phase, PhaseMaj::Repos | PhaseMaj::AJour))
+    }
+
+    /// Le paquet qui convient à cette installation.
+    fn paquet(&self) -> Option<maj::Paquet> {
+        let d = self.disponible.as_ref()?;
+        match self.installation {
+            maj::Installation::Deb => d.deb.clone(),
+            maj::Installation::Archive(_) => d.targz.clone(),
+            _ => None,
+        }
+    }
+}
+
+impl Jasette {
+    /// Au démarrage : au plus une vérification toutes les 6 heures, discrète,
+    /// quelques secondes après l'ouverture ; jamais pour une version de développement.
+    fn maj_demarrage(&mut self, cx: &mut Context<Self>) {
+        if self.maj.dev() || maintenant_ms() - self.maj.memoire.derniere_verif < maj::INTERVALLE_MS {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(4)).await;
+            let _ = this.update(cx, |this, cx| this.maj_verifier(false, cx));
+        })
+        .detach();
+    }
+
+    /// Lit version-linux.json. `manuel` : le bouton des réglages (on dit le résultat).
+    fn maj_verifier(&mut self, manuel: bool, cx: &mut Context<Self>) {
+        if self.maj.occupe() {
+            return;
+        }
+        if manuel {
+            self.maj.phase = PhaseMaj::Recherche;
+            cx.notify();
+        }
+        cx.spawn(async move |this, cx| {
+            let r = cx.background_executor().spawn(async move { maj::chercher() }).await;
+            let _ = this.update(cx, |this, cx| {
+                let m = &mut this.maj;
+                match r {
+                    Err(e) => {
+                        eprintln!("jasette : mise à jour : {e}");
+                        // Hors ligne : silencieux au démarrage.
+                        if manuel {
+                            m.phase = PhaseMaj::Erreur(t("Impossible de joindre jonathanguernon.net. Réessaie plus tard.").into());
+                        }
+                    }
+                    Ok((v, texte)) => {
+                        m.memoire.derniere_verif = maintenant_ms();
+                        m.memoire.json = texte;
+                        m.disponible = Some(v).filter(|v| maj::plus_recente(Some(v), maj::code_installe()));
+                        if manuel {
+                            m.phase = if m.disponible.is_some() { PhaseMaj::Repos } else { PhaseMaj::AJour };
+                            // Le bouton montre de nouveau une version remise à plus tard.
+                            if m.disponible.is_some() {
+                                m.memoire.ignoree = 0;
+                            }
+                        }
+                        m.memoire.garder(&dossier_maj());
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// « Plus tard » : la carte reste cachée jusqu'à la version suivante.
+    fn maj_plus_tard(&mut self, cx: &mut Context<Self>) {
+        if let Some(d) = &self.maj.disponible {
+            self.maj.memoire.ignoree = d.code;
+            self.maj.memoire.garder(&dossier_maj());
+        }
+        self.maj.phase = PhaseMaj::Repos;
+        cx.notify();
+    }
+
+    /// « Mettre à jour » : télécharge le paquet de cette installation, vérifie
+    /// son SHA-256, puis l'installe (pkexec pour le .deb, remplacement des
+    /// binaires pour l'archive).
+    fn maj_installer(&mut self, cx: &mut Context<Self>) {
+        if self.maj.occupe() {
+            return;
+        }
+        let Some(p) = self.maj.paquet() else {
+            ouvrir_adresse(maj::PAGE);
+            return;
+        };
+        let code = self.maj.disponible.as_ref().map_or(0, |d| d.code);
+        let installation = self.maj.installation.clone();
+        let taille = p.taille;
+        let recu = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let etape = Arc::new(AtomicU8::new(0));
+        let (recu_t, etape_t) = (recu.clone(), etape.clone());
+        let travail = move || -> Result<Vec<String>, String> {
+            let dossier = dossier_maj();
+            let deb = installation == maj::Installation::Deb;
+            let fichier = dossier.join(if deb { format!("jasette-{code}.deb") } else { format!("jasette-{code}.tar.gz") });
+            maj::telecharger(&p, &fichier, &recu_t)?;
+            etape_t.store(1, Ordering::Relaxed);
+            let r = match &installation {
+                maj::Installation::Deb => maj::installer_deb(&fichier, &p.sha256).map(|_| vec!["jasette-serveur".to_string()]),
+                maj::Installation::Archive(install) => {
+                    let tmp = maj::dossier_extraction(install, code);
+                    let r = maj::extraire_tgz(&fichier, &tmp).and_then(|_| maj::remplacer(&tmp, install));
+                    let _ = std::fs::remove_dir_all(&tmp);
+                    r
+                }
+                _ => Err("installation inconnue".into()),
+            };
+            let _ = std::fs::remove_file(&fichier);
+            r
+        };
+        self.maj.phase = PhaseMaj::Telechargement(if taille > 0 { 0. } else { -1. });
+        self.maj.serveur_redemarre = false;
+        cx.notify();
+        // La progression, quatre fois par seconde.
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_millis(250)).await;
+                let encore = this.update(cx, |this, cx| {
+                    if !matches!(this.maj.phase, PhaseMaj::Telechargement(_)) {
+                        return false;
+                    }
+                    this.maj.phase = if etape.load(Ordering::Relaxed) > 0 {
+                        PhaseMaj::Installation
+                    } else if taille > 0 {
+                        PhaseMaj::Telechargement((recu.load(Ordering::Relaxed) as f32 / taille as f32).min(1.))
+                    } else {
+                        PhaseMaj::Telechargement(-1.)
+                    };
+                    cx.notify();
+                    true
+                });
+                if !matches!(encore, Ok(true)) {
+                    break;
+                }
+            }
+        })
+        .detach();
+        cx.spawn(async move |this, cx| {
+            let r = cx
+                .background_executor()
+                .spawn(async move {
+                    let r = travail();
+                    (r, (maj::serveur_systemd_actif(), maj::serveur_tourne()))
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                match r {
+                    (Ok(remplaces), (systemd, tourne)) => {
+                        this.maj.remplaces = remplaces;
+                        this.maj.serveur_systemd = systemd;
+                        this.maj.serveur_tourne = systemd || tourne;
+                        this.maj.phase = PhaseMaj::Installee;
+                    }
+                    (Err(e), _) => {
+                        this.maj.phase = PhaseMaj::Erreur(format!("{}{e}", t("Échec de la mise à jour : ")));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// « Redémarrer maintenant » : relance le nouvel exécutable et quitte.
+    fn maj_redemarrer(&mut self, cx: &mut Context<Self>) {
+        match maj::relancer() {
+            Ok(()) => cx.quit(),
+            Err(e) => {
+                self.maj.phase = PhaseMaj::Erreur(format!("{}{e}", t("Échec de la mise à jour : ")));
+                cx.notify();
+            }
+        }
+    }
+
+    fn maj_redemarrer_serveur(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let r = cx.background_executor().spawn(async move { maj::redemarrer_serveur() }).await;
+            let _ = this.update(cx, |this, cx| {
+                match r {
+                    Ok(()) => this.maj.serveur_redemarre = true,
+                    Err(e) => this.maj.phase = PhaseMaj::Erreur(format!("systemctl : {e}")),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Le titre, les notes, l'état et les boutons (la carte et les réglages).
+    fn contenu_maj(&self, plus_tard: bool, cx: &mut Context<Self>) -> Div {
+        let m = &self.maj;
+        let mut col = div().flex().flex_col().gap(px(8.));
+        let Some(d) = &m.disponible else { return col };
+        let petit = |texte: String, couleur: Hsla| div().text_size(px(13.)).text_color(couleur).child(texte);
+        col = col.child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(10.))
+                .child(div().size(px(8.)).flex_none().rounded(rayon(8.)).bg(th().accent))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(th().texte_fort)
+                        .child(t("Jasette %s est disponible").replace("%s", &d.nom)),
+                ),
+        );
+        let notes = d.notes(anglais());
+        if !notes.is_empty() {
+            col = col.child(div().text_size(px(13.)).text_color(th().texte).line_clamp(5).child(notes.to_string()));
+        }
+        match &m.phase {
+            PhaseMaj::Telechargement(f) => {
+                let texte = if *f >= 0. { format!("{} {} %", t("Téléchargement…"), (f * 100.) as u32) } else { t("Téléchargement…").into() };
+                col = col.child(petit(texte, th().texte_pale)).child(
+                    div().h(px(6.)).w_full().rounded(rayon(3.)).bg(th().trait_fin).child(
+                        div().h_full().rounded(rayon(3.)).bg(th().accent).w(gpui::relative(if *f >= 0. { *f } else { 0.3 })),
+                    ),
+                );
+            }
+            PhaseMaj::Installation => {
+                let texte = if m.installation == maj::Installation::Deb {
+                    t("SHA-256 vérifié. La fenêtre du système demande ton mot de passe pour installer le paquet.")
+                } else {
+                    t("SHA-256 vérifié. Installation…")
+                };
+                col = col.child(petit(texte.into(), th().texte_pale));
+            }
+            PhaseMaj::Erreur(e) => col = col.child(petit(e.clone(), th().danger)),
+            PhaseMaj::Installee => {
+                col = col.child(petit(t("Mise à jour installée. Redémarre Jasette pour l'utiliser.").into(), th().succes));
+                let serveur = m.remplaces.iter().any(|n| n == "jasette-serveur");
+                let proposer = serveur && m.serveur_systemd && self.reglages.mode_serveur == "serveur";
+                if m.serveur_redemarre {
+                    col = col.child(petit(t("Serveur Jasette redémarré.").into(), th().succes));
+                } else if serveur && (m.serveur_tourne || self.reglages.mode_serveur == "serveur") {
+                    col = col.child(petit(
+                        t("Le serveur Jasette doit aussi être redémarré : systemctl --user restart jasette-serveur").into(),
+                        th().texte_fort,
+                    ));
+                }
+                let mut boutons = div().flex().flex_row().flex_wrap().gap(px(8.)).child(
+                    bouton_texte("maj-relancer", t("Redémarrer maintenant"), ACCENT)
+                        .on_click(cx.listener(|this, _, _, cx| this.maj_redemarrer(cx))),
+                );
+                if proposer && !m.serveur_redemarre {
+                    boutons = boutons.child(
+                        bouton_texte("maj-serveur", t("Redémarrer le serveur Jasette"), AVERTI)
+                            .on_click(cx.listener(|this, _, _, cx| this.maj_redemarrer_serveur(cx))),
+                    );
+                }
+                return col.child(boutons);
+            }
+            _ => {}
+        }
+        if m.occupe() {
+            return col;
+        }
+        let paquet = m.paquet();
+        let mut detail = Vec::new();
+        if let Some(p) = &paquet {
+            if p.taille > 0 {
+                let mo = (p.taille + (1 << 19)) >> 20;
+                detail.push(format!("{mo} {}", if anglais() { "MB" } else { "Mo" }));
+            }
+            detail.push(t(if m.installation == maj::Installation::Deb { "paquet .deb" } else { "archive .tar.gz" }).to_string());
+        } else {
+            col = col.child(petit(
+                t("Jasette ne peut pas se mettre à jour lui-même ici : télécharge la nouvelle version sur le site.").into(),
+                th().texte,
+            ));
+        }
+        if !detail.is_empty() {
+            col = col.child(div().text_size(px(12.)).text_color(th().texte_pale).child(detail.join(" · ")));
+        }
+        let mut boutons = div().flex().flex_row().flex_wrap().gap(px(8.)).child(
+            bouton_texte("maj-installer", t(if paquet.is_some() { "Mettre à jour" } else { "Ouvrir la page" }), ACCENT)
+                .on_click(cx.listener(|this, _, _, cx| this.maj_installer(cx))),
+        );
+        if plus_tard {
+            boutons = boutons.child(
+                bouton_texte("maj-plus-tard", t("Plus tard"), 0x8e8e93)
+                    .on_click(cx.listener(|this, _, _, cx| this.maj_plus_tard(cx))),
+            );
+        }
+        col.child(boutons)
+    }
+
+    /// La carte « Jasette X est disponible », au bas de la liste.
+    fn carte_maj(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.maj.carte_visible() {
+            return None;
+        }
+        Some(
+            div()
+                .id("carte-maj")
+                .absolute()
+                .left(px(12.))
+                .right(px(12.))
+                .bottom(px(14.))
+                .occlude()
+                // Posée sur la liste : un verre presque opaque, pour que les
+                // conversations dessous ne se mêlent pas au texte.
+                .child(
+                    groupe()
+                        .when(!th().sombre && !th().ega, |d| d.bg(blanc(0.97)))
+                        .px(px(16.))
+                        .py(px(14.))
+                        .child(self.contenu_maj(true, cx)),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// Réglages > À propos : la version installée, comment elle est installée,
+    /// et « Chercher une mise à jour ».
+    fn apropos_maj(&self, cx: &mut Context<Self>) -> Div {
+        let m = &self.maj;
+        let installation = match &m.installation {
+            maj::Installation::Deb => t("paquet .deb").to_string(),
+            maj::Installation::Archive(d) => format!("{} · {}", t("archive .tar.gz"), d.display()),
+            maj::Installation::Dev => t("cargo (développement)").to_string(),
+            maj::Installation::Autre => t("autre").to_string(),
+        };
+        let mut corps = div().flex().flex_col().gap(px(10.)).px(px(16.)).py(px(14.));
+        if m.dev() {
+            corps = corps.child(
+                div().text_size(px(13.)).text_color(th().texte).child(t("Version de développement : mise à jour par git et cargo.")),
+            );
+        }
+        let petit = |texte: String, couleur: Hsla| div().text_size(px(13.)).text_color(couleur).child(texte);
+        match (&m.disponible, &m.phase) {
+            (Some(d), _) if m.dev() => {
+                corps = corps.child(petit(
+                    t("La version %s est publiée sur jonathanguernon.net/jasette.").replace("%s", &d.nom),
+                    th().texte_fort,
+                ))
+            }
+            (Some(_), _) => corps = corps.child(self.contenu_maj(false, cx)),
+            (None, PhaseMaj::Recherche) => corps = corps.child(petit(t("Recherche…").into(), th().texte_pale)),
+            (None, PhaseMaj::AJour) => corps = corps.child(petit(t("Jasette est à jour.").into(), th().succes)),
+            (None, PhaseMaj::Erreur(e)) => corps = corps.child(petit(e.clone(), th().danger)),
+            _ => {}
+        }
+        if m.disponible.is_none() || m.dev() {
+            corps = corps.child(div().flex().flex_row().child(
+                bouton_texte("maj-chercher", t(if m.phase == PhaseMaj::Recherche { "Recherche…" } else { "Chercher une mise à jour" }), ACCENT)
+                    .on_click(cx.listener(|this, _, _, cx| this.maj_verifier(true, cx))),
+            ));
+        }
+        groupe()
+            .mb(px(18.))
+            .child(ligne_info("Version installée", maj::nom_installe().to_string()))
+            .child(separateur())
+            .child(ligne_info("Installé par", installation))
+            .child(separateur())
+            .child(corps)
+    }
+}
+
 // ---- Petites pièces ----
 
 fn pastille_nombre(n: usize, couleur: Hsla) -> impl IntoElement {
@@ -11282,6 +11725,42 @@ fn t(fr: &'static str) -> &'static str {
         "Se connecter à x.com" => "Sign in to x.com",
         "Nouveau code QR" => "New QR code",
         "← Retour" => "← Back",
+        // La mise à jour dans l'app (src/maj.rs).
+        "Jasette %s est disponible" => "Jasette %s is available",
+        "Mettre à jour" => "Update",
+        "Plus tard" => "Later",
+        "Ouvrir la page" => "Open the page",
+        "Chercher une mise à jour" => "Check for updates",
+        "Recherche…" => "Checking…",
+        "Jasette est à jour." => "Jasette is up to date.",
+        "Impossible de joindre jonathanguernon.net. Réessaie plus tard." => {
+            "Can't reach jonathanguernon.net. Try again later."
+        }
+        "SHA-256 vérifié. Installation…" => "SHA-256 verified. Installing…",
+        "SHA-256 vérifié. La fenêtre du système demande ton mot de passe pour installer le paquet." => {
+            "SHA-256 verified. The system window asks for your password to install the package."
+        }
+        "Mise à jour installée. Redémarre Jasette pour l'utiliser." => "Update installed. Restart Jasette to use it.",
+        "Redémarrer maintenant" => "Restart now",
+        "Le serveur Jasette doit aussi être redémarré : systemctl --user restart jasette-serveur" => {
+            "The Jasette server must be restarted too: systemctl --user restart jasette-serveur"
+        }
+        "Redémarrer le serveur Jasette" => "Restart the Jasette server",
+        "Serveur Jasette redémarré." => "Jasette server restarted.",
+        "Échec de la mise à jour : " => "Update failed: ",
+        "Jasette ne peut pas se mettre à jour lui-même ici : télécharge la nouvelle version sur le site." => {
+            "Jasette can't update itself here: download the new version from the website."
+        }
+        "Version de développement : mise à jour par git et cargo." => "Development build: update with git and cargo.",
+        "La version %s est publiée sur jonathanguernon.net/jasette." => {
+            "Version %s is published on jonathanguernon.net/jasette."
+        }
+        "Version installée" => "Installed version",
+        "Installé par" => "Installed from",
+        "paquet .deb" => ".deb package",
+        "archive .tar.gz" => ".tar.gz archive",
+        "cargo (développement)" => "cargo (development)",
+        "autre" => "other",
         _ => fr,
     }
 }
@@ -11332,6 +11811,12 @@ fn statut(s: &str) -> &'static str {
 }
 
 fn main() {
+    // « jasette --version » : la version et son numéro (paquets/empaqueter.sh
+    // le lit pour écrire version-linux.json).
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!("jasette {} {}", maj::nom_installe(), maj::code_installe());
+        return;
+    }
     // Sans fenêtre : faire de cette machine le serveur Jasette (comme le
     // bouton des réglages), pour une installation à distance.
     if std::env::args().any(|a| a == "--devenir-serveur") {

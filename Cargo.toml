@@ -22,3 +22,5 @@ ring = "0.17"
 base64 = "0.22"
 # Aperçus de liens sans serveur Jasette (src/apercu.rs) : rustls, sans OpenSSL.
 ureq = { version = "2.12", default-features = false, features = ["tls", "gzip"] }
+# La mise à jour dans l'app (src/maj.rs) : lire l'archive .tar.gz (déjà dans l'arbre par ureq).
+flate2 = "1"

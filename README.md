@@ -58,6 +58,33 @@ SHA-256 et son certificat, puis l'installe (`MiseAJour.kt`). Le versionCode
 vaut 10 000 + le nombre de commits git : chaque release est plus récente que la
 précédente. Une version debug (adb) ne se met pas à jour elle-même.
 
+**Mise à jour dans l'app du bureau** (`src/maj.rs`). `empaqueter.sh` écrit
+aussi `version-linux.json` : versionCode et versionName (lus dans le binaire,
+`jasette --version` ; `build.rs` y inscrit 10 000 + le nombre de commits, comme
+Android), les notes, et pour le `.deb` et le `.tar.gz` leur adresse, leur
+SHA-256 et leur taille. À publier dans `jasette/telecharger/` avec les deux
+paquets. L'app le lit au démarrage (au plus toutes les 6 heures) ou par
+Réglages > À propos ; « Mettre à jour » dépend de l'installation :
+
+- paquet `.deb` (`/usr/lib/jasette`, connu de `dpkg -S`) : le `.deb` est
+  téléchargé dans `<données>/maj/` (0600), son SHA-256 vérifié, puis installé
+  par `pkexec apt-get install -y` (ou `pkexec dpkg -i`) : c'est la fenêtre du
+  système qui demande le mot de passe, jamais Jasette ;
+- archive `.tar.gz` dans un dossier de l'utilisateur (`~/.local/lib/jasette`) :
+  l'archive est téléchargée et vérifiée, extraite à côté (sans chemin absolu,
+  `..` ni lien), puis chaque exécutable est remplacé par un renommage ; l'ancien
+  reste en `<nom>.ancien` (pour revenir en arrière : le renommer à sa place).
+  « Redémarrer maintenant » relance Jasette. Si `jasette-serveur` tourne, il
+  faut aussi `systemctl --user restart jasette-serveur` (bouton proposé en mode
+  Serveur quand il tourne sous systemd) ;
+- version de développement (dossier `target` de cargo) : rien d'automatique,
+  le bouton dit seulement si une version publiée est plus récente.
+
+HTTPS seulement, sur `https://jonathanguernon.net` seulement, sans redirection.
+Pour les essais, une version debug accepte `JASETTE_MAJ_URL` (un
+`version-linux.json` servi en HTTP sur 127.0.0.1) ; une version release
+l'ignore.
+
 Signal demande `libsignal_ffi.a` : voir `pont-signal/build.sh` et
 `android/build-libsignal.sh`.
 

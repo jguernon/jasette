@@ -6,6 +6,10 @@
 #   version.json                             la mise à jour dans l'app Android (MiseAJour.kt) :
 #                                            versionCode, versionName, adresse et SHA-256 de cet APK,
 #                                            notes de paquets/notes-maj.json
+#   version-linux.json                       la mise à jour dans l'app du bureau (src/maj.rs) :
+#                                            versionCode et versionName (lus dans le binaire,
+#                                            jasette --version), notes, et pour le .deb et le
+#                                            .tar.gz : adresse, SHA-256, taille
 #   SHA256SUMS
 #
 #   paquets/empaqueter.sh            tout
@@ -26,7 +30,8 @@ PROJET="$(dirname "$ICI")"
 C="$PROJET/.cache"
 TRAVAIL="$C/paquets-build"
 BIN="$TRAVAIL/bin"
-SORTIE="$C/paquets"
+# JASETTE_PAQUETS : un autre dossier de sortie (essais), sinon .cache/paquets.
+SORTIE="${JASETTE_PAQUETS:-$C/paquets}"
 APK=1
 LINUX=1
 [[ "${1:-}" == "--sans-apk" ]] && APK=0
@@ -44,8 +49,10 @@ if [[ $LINUX == 1 ]]; then
 
 # ---- 1. Le bureau (Rust), en release, strippé ----
 echo "== jasette (cargo build --release)"
+# CARGO_TARGET_DIR respecté (sinon .cache/target, celui de .cargo/config.toml).
+CIBLE="${CARGO_TARGET_DIR:-$C/target}"
 PATH="$HOME/.cargo/bin:$PATH" cargo build --release
-strip -o "$BIN/jasette" "$C/target/release/jasette"
+strip -o "$BIN/jasette" "$CIBLE/release/jasette"
 
 # ---- 2. Les ponts et le serveur (Go) ----
 export GOMODCACHE="$C/gomod" GOCACHE="$C/gocache" GOPATH="$C/gopath"
@@ -190,6 +197,41 @@ EOF
 TGZ="$SORTIE/$NOM.tar.gz"
 find "$TRAVAIL/tar" -type d -exec chmod 755 {} +
 tar --owner=0 --group=0 --numeric-owner -C "$TRAVAIL/tar" -czf "$TGZ" "$NOM"
+
+# ---- 4b. version-linux.json : la mise à jour dans l'app du bureau ----
+# Le numéro vient du binaire lui-même (build.rs : 10 000 + le nombre de
+# commits, comme le versionCode d'Android) : « jasette 0.1.0 (123) 10123 ».
+LIGNE="$("$BIN/jasette" --version)"
+CODE_LINUX="${LIGNE##* }"
+NOM_LINUX="$(sed 's/^jasette //; s/ [0-9]*$//' <<<"$LIGNE")"
+[[ "$CODE_LINUX" =~ ^[0-9]+$ && -n "$NOM_LINUX" ]] || { echo "jasette --version illisible : $LIGNE" >&2; exit 1; }
+BASE_URL="https://jonathanguernon.net/jasette/telecharger"
+python3 -I - "$SORTIE/version-linux.json" "$CODE_LINUX" "$NOM_LINUX" "$ICI/notes-maj.json" \
+	"$BASE_URL/$(basename "$DEB")?v=$CODE_LINUX" "$DEB" \
+	"$BASE_URL/$(basename "$TGZ")?v=$CODE_LINUX" "$TGZ" <<'PY2'
+import hashlib, json, os, sys
+sortie, code, nom, notes, url_deb, deb, url_tgz, tgz = sys.argv[1:]
+n = {"fr": "", "en": ""}
+if os.path.isfile(notes):
+    with open(notes, encoding="utf-8") as f:
+        lu = json.load(f)
+    n = {"fr": str(lu.get("fr", "")).strip(), "en": str(lu.get("en", "")).strip()}
+def paquet(url, chemin):
+    h = hashlib.sha256()
+    with open(chemin, "rb") as f:
+        for bloc in iter(lambda: f.read(1 << 20), b""):
+            h.update(bloc)
+    return {"url": url, "sha256": h.hexdigest(), "taille": os.path.getsize(chemin)}
+v = {"versionCode": int(code), "versionName": nom, "notes": n,
+     "deb": paquet(url_deb, deb), "targz": paquet(url_tgz, tgz)}
+with open(sortie + ".tmp", "w", encoding="utf-8") as f:
+    json.dump(v, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+os.replace(sortie + ".tmp", sortie)
+PY2
+chmod 644 "$SORTIE/version-linux.json"
+echo "== version-linux.json"
+cat "$SORTIE/version-linux.json"
 
 fi # LINUX
 
