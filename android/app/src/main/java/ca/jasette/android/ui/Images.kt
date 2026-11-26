@@ -43,8 +43,8 @@ fun oublierImage(chemin: String) {
  * Décode [chemin] : un fichier, ou une URI « content:// » (photo d'un contact,
  * lue directement par le ContentResolver, sans copie sur le disque).
  */
-private fun decoder(chemin: String, cote: Int, resolveur: ContentResolver): ImageBitmap? {
-    val cle = "$chemin@$cote"
+private fun decoder(chemin: String, cote: Int, resolveur: ContentResolver, pixels: Int = 0): ImageBitmap? {
+    val cle = if (pixels > 0) "$chemin@$cote@px$pixels" else "$chemin@$cote"
     cache.get(cle)?.let { return it }
     return try {
         val contenu = chemin.startsWith("content:")
@@ -60,7 +60,16 @@ private fun decoder(chemin: String, cote: Int, resolveur: ContentResolver): Imag
         while (bornes.outWidth / (echantillon * 2) >= cote && bornes.outHeight / (echantillon * 2) >= cote) echantillon *= 2
         val bmp = lire(BitmapFactory.Options().apply { inSampleSize = echantillon })
             ?: return null
-        bmp.asImageBitmap().also { cache.put(cle, it) }
+        val fin = if (pixels > 0) {
+            // Live et Sirène : l'avatar en gros pixels d'époque (carré central
+            // réduit à pixels × pixels, agrandi ensuite sans lissage).
+            val c = minOf(bmp.width, bmp.height)
+            val carre = android.graphics.Bitmap.createBitmap(bmp, (bmp.width - c) / 2, (bmp.height - c) / 2, c, c)
+            android.graphics.Bitmap.createScaledBitmap(carre, pixels, pixels, true)
+        } else {
+            bmp
+        }
+        fin.asImageBitmap().also { cache.put(cle, it) }
     } catch (_: Throwable) {
         null
     }
@@ -73,16 +82,25 @@ fun ImageFichier(
     cote: Int = 1024,
     contentScale: ContentScale = ContentScale.Crop,
     filtre: androidx.compose.ui.graphics.ColorFilter? = null,
+    /** > 0 : l'image réduite à pixels × pixels et dessinée en gros pixels (avatars rétro). */
+    pixels: Int = 0,
     enAttente: @Composable () -> Unit = {},
 ) {
     val resolveur = LocalContext.current.applicationContext.contentResolver
-    val image by produceState(cache.get("$chemin@$cote"), chemin, cote) {
-        if (value == null) value = withContext(Dispatchers.IO) { decoder(chemin, cote, resolveur) }
+    val cle = if (pixels > 0) "$chemin@$cote@px$pixels" else "$chemin@$cote"
+    val image by produceState(cache.get(cle), chemin, cote, pixels) {
+        if (value == null) value = withContext(Dispatchers.IO) { decoder(chemin, cote, resolveur, pixels) }
     }
     val img = image
     if (img != null) {
-        Image(img, contentDescription = null, modifier = modifier, contentScale = contentScale, colorFilter = filtre)
+        Image(
+            img, contentDescription = null, modifier = modifier, contentScale = contentScale, colorFilter = filtre,
+            filterQuality = if (pixels > 0) androidx.compose.ui.graphics.FilterQuality.None else androidx.compose.ui.graphics.drawscope.DrawScope.DefaultFilterQuality,
+        )
     } else {
         Box(modifier) { enAttente() }
     }
 }
+
+/** Live et Sirène : les avatars en 24 × 24 gros pixels, comme les photos d'époque. */
+const val PIXELS_RETRO = 24

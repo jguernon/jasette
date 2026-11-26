@@ -72,7 +72,7 @@ fun AvatarMoi(taille: Dp, source: String = Marques.avatarSource) {
     }
     val rond = Modifier.cadreAvatar(taille)
     if (photo != null) {
-        ImageFichier(photo, rond.background(P.surface), cote = 256)
+        ImageFichier(photo, rond.background(P.surface), cote = 256, pixels = if (P.retro) PIXELS_RETRO else 0)
     } else {
         Box(rond.background(fondAvatar(P.avatarDefaut)), contentAlignment = Alignment.Center) {
             val i = initialeMoi()

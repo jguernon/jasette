@@ -94,6 +94,7 @@ fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false
             ImageFichier(
                 photo, rond.background(P.surface).then(if (grise) Modifier.alpha(0.7f) else Modifier), cote = 256,
                 filtre = if (grise) filtreGris else null,
+                pixels = if (P.retro) PIXELS_RETRO else 0,
             )
         } else {
             val base = if (grise) GRIS_ABSENT else couleurHex(conv.color) ?: P.avatarDefaut
