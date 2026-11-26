@@ -25,8 +25,12 @@ object Sons {
     /** Les jeux, dans l'ordre des Réglages : (id, nom). */
     val JEUX = listOf("bulle" to "Bulle", "bois" to "Bois", "verre" to "Verre", "aucun" to "Aucun son")
 
-    /** Le volume au cran 100 % (celui d'avant le curseur), relatif aux mp3 d'assets/sons. */
-    private const val VOLUME = 0.5f
+    /**
+     * Le volume au cran 100 %, relatif aux mp3 d'assets/sons. Depuis l'égalisation
+     * (tous au niveau de Bois et Verre, Bulle -16 à -20 dB), 0,5 était trop doux
+     * sur le haut-parleur d'un téléphone : +9 dB (1,4).
+     */
+    private const val VOLUME = 1.4f
 
     /**
      * Les crans du curseur de volume (Réglages > Sons), en % : 100 garde le
