@@ -8,7 +8,7 @@
 //
 // Les services google, messenger et instagram sont les services de base :
 // sans leur pont, le serveur le signale. Les services whatsapp, signal et x
-// (et telegram, bluesky, discord, reddit) sont facultatifs : sans leur binaire, ils sont simplement omis.
+// (et telegram, bluesky, discord, reddit, linkedin) sont facultatifs : sans leur binaire, ils sont simplement omis.
 package main
 
 import (
@@ -78,7 +78,7 @@ type demande struct {
 var sortesRejouees = []string{"hello", "state", "account", "avatar_moi", "note_moi", "api", "qr", "pair_code", "login_step", "history_pin"}
 
 // Tous les services connus, dans l'ordre où on les présente aux clients.
-var ordreServices = []string{"google", "messenger", "instagram", "whatsapp", "signal", "x", "telegram", "bluesky", "discord", "reddit"}
+var ordreServices = []string{"google", "messenger", "instagram", "whatsapp", "signal", "x", "telegram", "bluesky", "discord", "reddit", "linkedin"}
 
 // Les services facultatifs : binaire, variable d'environnement qui peut le
 // désigner, et dossier de données (sous <données>) que le pont utilise.
@@ -90,6 +90,7 @@ var pontsFacultatifs = map[string]struct{ bin, variable, dossier string }{
 	"bluesky":  {"jasette-bluesky", "JASETTE_BLUESKY", "bluesky"},
 	"discord":  {"jasette-discord", "JASETTE_DISCORD", "discord"},
 	"reddit":   {"jasette-reddit", "JASETTE_REDDIT", "reddit"},
+	"linkedin": {"jasette-linkedin", "JASETTE_LINKEDIN", "linkedin"},
 }
 
 // errAbsent : le binaire d'un service facultatif n'est pas là ; ce n'est pas
@@ -140,7 +141,7 @@ func nouveauPont(srv *Serveur, svc, binDir string) (*Pont, error) {
 			p.bin = trouverPont("jasette-meta", "JASETTE_META", binDir)
 		}
 		p.env = append(p.env, "JASETTE_META_SERVICE=instagram")
-	case "whatsapp", "signal", "x", "telegram", "bluesky", "discord", "reddit":
+	case "whatsapp", "signal", "x", "telegram", "bluesky", "discord", "reddit", "linkedin":
 		f := pontsFacultatifs[svc]
 		p.bin = trouverPont(f.bin, f.variable, binDir)
 		if p.bin == "" {

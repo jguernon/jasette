@@ -48,6 +48,9 @@ var prechargeParService = map[string]struct {
 	"discord": {nombre: 8, compte: 30, total: 15, pause: 4 * time.Second},
 	// Reddit : même prudence (pas d'API officielle pour le chat).
 	"reddit": {nombre: 8, compte: 30, total: 15, pause: 4 * time.Second},
+	// LinkedIn : surveille l'automatisation ; peu de conversations, petites
+	// pages, longues pauses.
+	"linkedin": {nombre: 5, compte: 20, total: 10, pause: 6 * time.Second},
 }
 
 // reglagesPrecharge : nombre de conversations récentes, messages par

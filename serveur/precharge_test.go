@@ -52,7 +52,7 @@ func TestServiceReddit(t *testing.T) {
 	if f, ok := pontsFacultatifs["reddit"]; !ok || f.bin != "jasette-reddit" || f.dossier != "reddit" {
 		t.Fatalf("pont facultatif : %+v", f)
 	}
-	if ordreServices[len(ordreServices)-1] != "reddit" {
+	if !contient(ordreServices, "reddit") {
 		t.Fatalf("ordre : %v", ordreServices)
 	}
 	_, compte, total, pause := reglagesPrecharge("reddit")
@@ -61,5 +61,25 @@ func TestServiceReddit(t *testing.T) {
 	}
 	if ids := idsDuService([]string{"r:!a:reddit.com", "d:1", "123"}, "google"); len(ids) != 1 || ids[0] != "123" {
 		t.Fatalf("idsDuService : %v", ids)
+	}
+}
+
+// LinkedIn : service facultatif, préfixe « l: », préchargement plus prudent encore.
+func TestServiceLinkedIn(t *testing.T) {
+	if prefixeService["linkedin"] != "l:" {
+		t.Fatalf("préfixe de LinkedIn : %q", prefixeService["linkedin"])
+	}
+	if svc, id := svcDeId("l:2-ZDhk+/ab=="); svc != "linkedin" || id != "2-ZDhk+/ab==" {
+		t.Fatalf("svcDeId : %s %s", svc, id)
+	}
+	if f, ok := pontsFacultatifs["linkedin"]; !ok || f.bin != "jasette-linkedin" || f.variable != "JASETTE_LINKEDIN" || f.dossier != "linkedin" {
+		t.Fatalf("pont facultatif : %+v", f)
+	}
+	if ordreServices[len(ordreServices)-1] != "linkedin" {
+		t.Fatalf("ordre : %v", ordreServices)
+	}
+	nombre, compte, total, pause := reglagesPrecharge("linkedin")
+	if nombre > 5 || compte > 20 || total > 10 || pause < 5e9 {
+		t.Fatalf("préchargement de LinkedIn : %d, %d, %d, %v", nombre, compte, total, pause)
 	}
 }
