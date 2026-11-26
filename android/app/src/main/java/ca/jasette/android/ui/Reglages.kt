@@ -267,6 +267,7 @@ private fun PageSection(
                 ChoixGrilleHead()
                 ChoixTailleMessages()
                 ChoixHeures()
+                ChoixPastilles()
                 ChoixApercus()
                 ChoixContacts()
                 ChoixVolets()
@@ -1254,6 +1255,39 @@ private fun ChoixHeures() {
             // L'interrupteur du bureau : piste d'accent allumé, grise et visible éteint.
             Interrupteur(oui) { ca.jasette.android.Marques.choisirHeureChaqueMessage(it) }
         }
+    }
+}
+
+/** Réglages → Apparence : les pastilles des onglets Canaux et Archives (comme au bureau). */
+@Composable
+private fun ChoixPastilles() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Groupe {
+        LignePastille(
+            t("Pastille sur l'onglet Canaux"),
+            t("Le nombre d'espaces non lus, et le @ d'une mention, sur l'onglet Canaux."),
+            Pastilles.canaux,
+        ) { Pastilles.choisirCanaux(ctx, it) }
+        LignePastille(
+            t("Pastille sur l'onglet Archives"),
+            t("Le nombre de conversations archivées non lues sur l'onglet Archives."),
+            Pastilles.archives,
+        ) { Pastilles.choisirArchives(ctx, it) }
+    }
+}
+
+@Composable
+private fun LignePastille(titre: String, detail: String, oui: Boolean, changer: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable { changer(!oui) }.padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(titre, color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(detail, color = P.textePale, fontSize = 13.sp)
+        }
+        Spacer(Modifier.width(12.dp))
+        Interrupteur(oui) { changer(it) }
     }
 }
 

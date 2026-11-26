@@ -313,6 +313,10 @@ private val ANGLAIS: Map<String, String> = mapOf(
     // Rail, vues, menu d'une conversation, nouveau message, recherche, apparence.
     "Affichage en deux volets sur grand écran" to "Two-pane layout on large screens",
     "Afficher l'heure de chaque message" to "Show the time of every message",
+    "Pastille sur l'onglet Canaux" to "Badge on the Channels tab",
+    "Le nombre d'espaces non lus, et le @ d'une mention, sur l'onglet Canaux." to "The number of unread spaces, and the @ of a mention, on the Channels tab.",
+    "Pastille sur l'onglet Archives" to "Badge on the Archives tab",
+    "Le nombre de conversations archivées non lues sur l'onglet Archives." to "The number of unread archived conversations on the Archives tab.",
     "Ajouter au Head" to "Add to Head",
     "Ajouter aux favoris" to "Add to favorites",
     "Annuler" to "Cancel",

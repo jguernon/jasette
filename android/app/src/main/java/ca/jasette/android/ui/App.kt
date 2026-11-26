@@ -100,6 +100,7 @@ const val LARGEUR_RAIL = 600
 @Composable
 fun App(activite: Activity, prive: Boolean = false) {
     Taille.charger(activite)
+    Pastilles.charger(activite)
     ServicesCaches.charger(activite)
     var pile by remember { mutableStateOf(listOf<Ecran>(Ecran.Liste)) }
     var vue by remember { mutableStateOf<Vue>(if (prive) Vue.Privees else Vue.Tout) }

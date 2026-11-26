@@ -113,10 +113,11 @@ fun nonLus(v: Vue): Int = when (v) {
     Vue.Favoris -> Marques.favoris.count { id ->
         !Marques.estPrivee(id) && !ServicesCaches.cache(Service.de(id)) && Depot.conv(id)?.unread == true
     }
-    Vue.Archives -> Depot.toutesArchives.count { it.unread && !ServicesCaches.cache(it.service) }
+    // « Pastille sur l'onglet Archives » / « … Canaux » décochée (Réglages → Apparence) : aucune.
+    Vue.Archives -> if (!Pastilles.archives) 0 else Depot.toutesArchives.count { it.unread && !ServicesCaches.cache(it.service) }
     is Vue.DuService -> Depot.inbox.count { it.service == v.service && it.unread }
     // Groupes : les grands espaces non lus (PROTOCOLE.md §5.13).
-    Vue.Groupes -> Depot.groupes.count { it.unread }
+    Vue.Groupes -> if (!Pastilles.canaux) 0 else Depot.groupes.count { it.unread }
     Vue.Privees -> Depot.privees.count { it.unread }
 }
 

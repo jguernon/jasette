@@ -1765,6 +1765,14 @@ struct Reglages {
     /// titres des Head un point et demi plus gros.
     #[serde(default)]
     liste_grosse: bool,
+    /// « Pastille sur l'onglet Canaux » : le nombre d'espaces non lus (rouge
+    /// sur une mention) sur l'icône Canaux du rail. Propre à cet appareil.
+    #[serde(default = "vrai")]
+    pastille_canaux: bool,
+    /// « Pastille sur l'onglet Archives » : le nombre de conversations
+    /// archivées non lues sur l'icône Archives du rail. Propre à cet appareil.
+    #[serde(default = "vrai")]
+    pastille_archives: bool,
     /// « Aperçus des liens » : Jasette va chercher l'aperçu d'une adresse (par
     /// le serveur Jasette, sinon elle-même). Ceux du service restent affichés.
     #[serde(default = "vrai")]
@@ -1916,6 +1924,8 @@ impl Default for Reglages {
             heures_messages: true,
             taille_messages: 1.,
             liste_grosse: false,
+            pastille_canaux: true,
+            pastille_archives: true,
             apercus_liens: true,
             services_caches: Vec::new(),
             ordre_services: Vec::new(),
@@ -4256,9 +4266,25 @@ impl Jasette {
         self.convs.iter().any(|c| c.large && c.unread && !self.privee(&c.id) && (c.mentions > 0 || self.attention.contains(&c.id)))
     }
 
-    /// Les grands espaces non lus (la pastille de l'onglet Groupes).
+    /// Les grands espaces non lus (la pastille de l'onglet Groupes) ; 0 sans
+    /// « Pastille sur l'onglet Canaux » (ni nombre ni « @ »).
     fn non_lus_groupes(&self) -> usize {
+        if !self.reglages.pastille_canaux {
+            return 0;
+        }
         self.convs.iter().filter(|c| c.large && c.unread && !self.privee(&c.id)).count()
+    }
+
+    /// Les archives non lues (la pastille de l'onglet Archives, comme sur
+    /// Android : sans les services cachés) ; 0 sans « Pastille sur l'onglet Archives ».
+    fn non_lus_archives(&self) -> usize {
+        if !self.reglages.pastille_archives {
+            return 0;
+        }
+        self.toutes_archives()
+            .iter()
+            .filter(|c| c.unread && !self.reglages.service_cache(service_de(&c.id)))
+            .count()
     }
 
     /// Les non-lues d'un service (son icône du rail, quand il est caché de la boîte).
@@ -6122,6 +6148,7 @@ impl Jasette {
         let haut_rail = self.haut_rail.clone();
         let non_lus = self.non_lus();
         let non_lus_groupes = self.non_lus_groupes();
+        let non_lus_archives = self.non_lus_archives();
         let initiale = self
             .reglages
             .email
@@ -6201,7 +6228,8 @@ impl Jasette {
                         }
                         cx.notify();
                     }))
-                    .child(icone("archive", 22., ton(th().texte_fort, th().icone))),
+                    .child(icone("archive", 22., ton(th().texte_fort, th().icone)))
+                    .when(non_lus_archives > 0, |d| d.child(pastille_nombre(non_lus_archives, ton(th().texte_pale, th().accent)))),
             )
             // La vue Privées : seulement tant qu'elle est déverrouillée.
             .when(self.prive.deverrouille, |d| {
@@ -10310,6 +10338,33 @@ impl Jasette {
                         }),
                     )))
                     .child(div().h(px(14.)))
+                    .child(
+                        groupe()
+                            .child(ligne_interrupteur(
+                                "a-pastille-canaux",
+                                t("Pastille sur l'onglet Canaux"),
+                                t("Le nombre d'espaces non lus, et le @ d'une mention, sur l'onglet Canaux."),
+                                self.reglages.pastille_canaux,
+                                cx.listener(|this, _, _, cx| {
+                                    this.reglages.pastille_canaux = !this.reglages.pastille_canaux;
+                                    this.reglages.garder();
+                                    cx.notify();
+                                }),
+                            ))
+                            .child(separateur())
+                            .child(ligne_interrupteur(
+                                "a-pastille-archives",
+                                t("Pastille sur l'onglet Archives"),
+                                t("Le nombre de conversations archivées non lues sur l'onglet Archives."),
+                                self.reglages.pastille_archives,
+                                cx.listener(|this, _, _, cx| {
+                                    this.reglages.pastille_archives = !this.reglages.pastille_archives;
+                                    this.reglages.garder();
+                                    cx.notify();
+                                }),
+                            )),
+                    )
+                    .child(div().h(px(14.)))
                     .child(groupe().child(ligne_interrupteur(
                         "a-garder-archives",
                         t("Garder les conversations archivées hors de la boîte de réception"),
@@ -13643,6 +13698,10 @@ fn t(fr: &'static str) -> &'static str {
         "Lu par" => "Read by",
         "Réessayer" => "Retry",
         "Afficher l'heure de chaque message" => "Show the time of every message",
+        "Pastille sur l'onglet Canaux" => "Badge on the Channels tab",
+        "Le nombre d'espaces non lus, et le @ d'une mention, sur l'onglet Canaux." => "The number of unread spaces, and the @ of a mention, on the Channels tab.",
+        "Pastille sur l'onglet Archives" => "Badge on the Archives tab",
+        "Le nombre de conversations archivées non lues sur l'onglet Archives." => "The number of unread archived conversations on the Archives tab.",
         "Le jour et l'heure sous chaque message. Le bouton (i) d'une conversation les bascule." => "The day and time under every message. A conversation's (i) button toggles them.",
         "Archiver" => "Archive",
         "Épingler en haut" => "Pin to top",
