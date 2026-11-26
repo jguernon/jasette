@@ -411,7 +411,7 @@ modifiée de mautrix-discord) :
   (§5.8). Pas d'archives chez Discord (celles de Jasette, §5.5) ; 10 Mo au
   plus par fichier envoyé.
 
-### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*)
+### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, personnes, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
@@ -437,6 +437,14 @@ S'y ajoutent deux objets (facultatifs) :
   des moods » plus bas) ;
 - `emojis` : l'**emoji rapide** de chaque conversation, `{id: "👍"}` (voir
   « Règle des emojis rapides » plus bas).
+
+Et deux listes pour la **fiche de la personne** (voir « Règle des
+personnes » plus bas) :
+
+- `personnes` : les conversations reliées **à la main**,
+  `[{"id":"p…","convs":["<id>","m:<id>"],"principal":"<id>"}]` ;
+- `personnes_refus` : les paires « Pas la même personne »,
+  `[["<id A>","<id B>"]]`.
 
 Et des réglages (facultatifs) :
 
@@ -489,7 +497,7 @@ C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 changement, à **tous** les clients) :
 
 ```json
-{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"version":7}}
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"personnes":[{"id":"p1764160000000a3f","convs":["123","m:99"],"principal":"123"}],"personnes_refus":[["i:42","m:99"]],"version":7}}
 ```
 
 `version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
@@ -498,7 +506,7 @@ encore rien reçu (listes vides).
 **Client → serveur** :
 
 ```json
-{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"version":7,"id":12}}
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"personnes":[…],"personnes_refus":[…],"version":7,"id":12}}
 ```
 
 - `version` : la dernière version reçue du serveur (0 si aucune).
@@ -538,6 +546,19 @@ encore rien reçu (listes vides).
   telle quelle (sans doublon ni nom vide, 32 noms de 32 octets au plus) ;
   vide, ou contenant `"tout"` : `["tout"]`. Pas d'union : c'est un réglage.
   Toujours envoyé ; absent de `marques.json` : `["tout"]`.
+- `personnes` : absent ou `null`, rien ne change (un client d'avant la fiche
+  de la personne ne les efface pas) ; présent, c'est la liste complète. Un
+  élément mal formé est sauté (pas toute la trame). Nettoyage : id de
+  personne non vide, unique, 64 octets au plus ; chaque conversation dans
+  **une seule** personne (la première qui la nomme) ; 32 conversations au
+  plus par personne ; une personne de moins de **deux** conversations
+  disparaît ; `principal` gardé seulement s'il est une de ses `convs` ;
+  2000 personnes au plus. Toujours envoyé (liste, jamais `null`) ; absent
+  de `marques.json` : `[]`.
+- `personnes_refus` : même règle (absent ou `null`, rien ne change). Chaque
+  refus est une paire de deux ids différents, rangée (le plus petit
+  d'abord), sans doublon ; 5000 paires au plus. Toujours envoyé ; absent de
+  `marques.json` : `[]`.
 
 Règles du serveur :
 
@@ -551,7 +572,12 @@ Règles du serveur :
      serveur qu'elles n'ont pas. Pour `moods` (même garde-fou s'il est vide
      alors que celui du serveur ne l'est pas) : les entrées du client, puis
      celles du serveur pour les ids que le client n'a pas. De même pour
-     `emojis`.
+     `emojis`. Pour `personnes` (même garde-fou) : les personnes du client
+     telles quelles (même id : celle du client gagne, entière), puis celles
+     du serveur qu'il n'a pas, **moins** les conversations que le client
+     relie déjà à une autre personne (une personne qui n'a plus deux
+     conversations tombe). Pour `personnes_refus` (même garde-fou) : l'union
+     des paires.
 3. Si rien ne change, seul l'expéditeur reçoit l'état courant (avec son
    `id`). Sinon le serveur écrit `marques.json`, passe à `version+1` et
    diffuse les nouvelles marques à tous (l'expéditeur les reçoit avec son `id`).
@@ -579,7 +605,56 @@ client garde le sien pour lui (il l'applique alors lui-même). Union de deux
 copies : `garder_archives` de celle qui passe d'abord. Idem pour
 `cacher_apres_jours`, `presence_en_ligne`, `sons_conversation`,
 `notes_contacts`, `notes_musique`, `notes_musique_format` et
-`notes_services`.
+`notes_services`. Pour `personnes` et `personnes_refus`, l'union suit la
+règle du serveur (personnes par id, celles de la copie qui passe d'abord
+gagnent ; union des refus) ; un serveur d'avant ces champs ne les envoie
+pas, et le client garde les siens pour lui.
+
+**Règle des personnes** (fiche de la personne).
+
+- Toucher le nom ou l'avatar dans l'en-tête d'une conversation **à deux**
+  ouvre la fiche de la personne : grand avatar (la meilleure photo parmi
+  les conversations reliées), présence, nom (et le nom sur chaque service
+  s'il diffère), sa **pensée** (la note de §5.12, avec le temps restant),
+  et une ligne par conversation reliée (service, nom, dernier message,
+  non-lus, présence). Toucher une ligne ouvre cette conversation
+  (« changer de service ») ; la conversation actuelle est marquée active.
+  Les conversations restent **séparées** partout ailleurs (boîte de
+  réception, non-lus, marques) : la fiche ne fait que les montrer ensemble.
+- **Correspondance automatique**, faite par chaque client, **localement**,
+  sans aucune requête aux services, avec les données déjà reçues (listes
+  `conversations`, contacts du téléphone, notes, présence) :
+  - **sûre** : le même numéro de téléphone (clé : les 10 derniers chiffres,
+    7 au moins ; `(418) 555-1234`, `+1 418 555 1234` et `1-418-555-1234`
+    sont le même). Les numéros connus : Google (`number` d'une conversation
+    à deux, sinon son membre ou son nom s'il est un numéro), WhatsApp (l'id
+    `<numéro>@s.whatsapp.net` ; un `@lid` n'en a pas), Signal et Telegram
+    (champ `number` de la conversation à deux, quand le pont le connaît :
+    contact Signal avec son E.164, contact Telegram dont le numéro est
+    visible). Messenger, Instagram, X, Bluesky et Discord n'en donnent
+    aucun ;
+  - **suggérée** seulement, jamais sûre : un nom très proche (sans accents,
+    ni casse, ni ponctuation, quel que soit l'ordre prénom/nom ; une faute
+    de frappe tolérée sur les noms longs), ou le nom exact d'un contact du
+    téléphone qui porte le numéro d'une conversation de la personne. La
+    fiche demande « Est-ce la même personne ? Oui / Non ».
+- **Correspondance à la main** : « Lier une autre conversation… » (une
+  conversation à deux de n'importe quel service, choisie avec une recherche
+  et des puces par service) ; « Oui » sur une suggestion fait de même. La
+  conversation est ajoutée à la personne de la fiche (créée au besoin, avec
+  un id neuf `p<ms><hasard>`), retirée de toute autre personne, et ses refus
+  avec les conversations de la fiche sont effacés.
+- « **Délier** » une ligne : la retire de sa personne et ajoute un refus
+  entre elle et chaque autre conversation de la fiche (un même numéro ne la
+  ramène donc pas). « **Pas la même personne** » sur une suggestion : un
+  refus entre elle et chaque conversation de la fiche. Un refus l'emporte
+  sur un numéro commun ; un lien à la main l'emporte sur un refus (lier
+  efface les refus en cause).
+- `principal` : « Utiliser ce nom » sur une ligne : le nom de cette
+  conversation devient celui de la personne. Sans `principal`, la fiche
+  prend le nom de la conversation d'où on l'a ouverte.
+- Le serveur ne fait **aucune** correspondance : il garde, nettoie, unit et
+  diffuse les deux listes.
 
 **Règle des moods.**
 

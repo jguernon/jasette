@@ -1,5 +1,6 @@
 // Les marques : le Head, les favoris, les épinglées, les archives, les
-// privées, les moods, les emojis rapides et les réglages garder_archives et
+// privées, les moods, les emojis rapides, les personnes (fiche de la
+// personne, personnes.go) et les réglages garder_archives et
 // cacher_apres_jours de Jasette, partagés entre tous les appareils de l'utilisateur (voir
 // PROTOCOLE.md, §5.5).
 //
@@ -79,7 +80,12 @@ type Marques struct {
 	NotesMusiqueFormat string `json:"notes_musique_format"`
 	// NotesServices : où « Quoi de neuf ? » publie, ["tout"] ou une liste.
 	NotesServices []string `json:"notes_services"`
-	Version       int64    `json:"version"`
+	// Personnes : les conversations reliées à la main (fiche de la personne,
+	// personnes.go). PersonnesRefus : les paires « Pas la même personne ».
+	// Absents (ancien fichier) : vides.
+	Personnes      []Personne `json:"personnes"`
+	PersonnesRefus [][]string `json:"personnes_refus"`
+	Version        int64      `json:"version"`
 	// Propre au serveur, jamais envoyé aux clients : depuis quand (ms, horloge
 	// du serveur) chaque id est dans Archives. Seul un message reçu après
 	// cette heure ramène la conversation dans l'Inbox (une réaction ou une
@@ -108,6 +114,8 @@ func (m *Marques) normaliser() {
 	m.NotesMusique = bornerAppareil(m.NotesMusique)
 	m.NotesMusiqueFormat = formatMusique(m.NotesMusiqueFormat)
 	m.NotesServices = nettoyerServicesNotes(m.NotesServices)
+	m.Personnes = nettoyerPersonnes(m.Personnes)
+	m.PersonnesRefus = nettoyerRefus(m.PersonnesRefus)
 	depuis := make(map[string]int64, len(m.Archives))
 	maintenant := time.Now().UnixMilli()
 	for _, id := range m.Archives {
@@ -130,7 +138,8 @@ func (m *Marques) memesListes(n *Marques) bool {
 	return egalesMoods(m.Moods, n.Moods) && egalesMoods(m.Emojis, n.Emojis) && m.GarderArchives == n.GarderArchives &&
 		m.CacherApresJours == n.CacherApresJours && m.PresenceEnLigne == n.PresenceEnLigne &&
 		m.SonsConversation == n.SonsConversation && m.NotesContacts == n.NotesContacts &&
-		m.NotesMusique == n.NotesMusique && m.NotesMusiqueFormat == n.NotesMusiqueFormat && egales(m.NotesServices, n.NotesServices)
+		m.NotesMusique == n.NotesMusique && m.NotesMusiqueFormat == n.NotesMusiqueFormat && egales(m.NotesServices, n.NotesServices) &&
+		egalesPersonnes(m.Personnes, n.Personnes) && egalesRefus(m.PersonnesRefus, n.PersonnesRefus)
 }
 
 // cacherApresJoursMax : au-delà de dix ans, autant tout afficher.
@@ -348,7 +357,8 @@ func trameMarques(m Marques, id json.RawMessage, refus string) []byte {
 		"privees": m.Privees, "moods": m.Moods, "emojis": m.Emojis, "garder_archives": m.GarderArchives,
 		"cacher_apres_jours": m.CacherApresJours, "presence_en_ligne": m.PresenceEnLigne,
 		"sons_conversation": jeuSons(m.SonsConversation), "notes_contacts": m.NotesContacts,
-		"notes_musique": m.NotesMusique, "notes_musique_format": formatMusique(m.NotesMusiqueFormat), "notes_services": nettoyerServicesNotes(m.NotesServices), "version": m.Version,
+		"notes_musique": m.NotesMusique, "notes_musique_format": formatMusique(m.NotesMusiqueFormat), "notes_services": nettoyerServicesNotes(m.NotesServices),
+		"personnes": nettoyerPersonnes(m.Personnes), "personnes_refus": nettoyerRefus(m.PersonnesRefus), "version": m.Version,
 	}
 	if len(id) > 0 {
 		corps["id"] = id
@@ -387,6 +397,8 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		NotesM   *string            `json:"notes_musique"`
 		NotesF   *string            `json:"notes_musique_format"`
 		NotesS   *[]string          `json:"notes_services"`
+		Pers     json.RawMessage    `json:"personnes"`
+		PersR    json.RawMessage    `json:"personnes_refus"`
 		Version  int64              `json:"version"`
 		ID       json.RawMessage    `json:"id"`
 	}
@@ -399,13 +411,9 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cur := s.marques
-	nouv := Marques{
-		Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Archives: cur.Archives,
-		Privees: cur.Privees, Moods: cur.Moods, Emojis: cur.Emojis, GarderArchives: cur.GarderArchives,
-		CacherApresJours: cur.CacherApresJours, PresenceEnLigne: cur.PresenceEnLigne, SonsConversation: cur.SonsConversation,
-		NotesContacts: cur.NotesContacts, NotesMusique: cur.NotesMusique, NotesMusiqueFormat: cur.NotesMusiqueFormat, NotesServices: cur.NotesServices,
-		ArchivesDepuis: cur.ArchivesDepuis,
-	}
+	// Une copie : chaque champ que la trame porte est remplacé ci-dessous,
+	// jamais modifié sur place.
+	nouv := cur
 	// Une liste absente de la trame ne change pas (un ancien client, qui ne
 	// connaît pas `archives` ou `privees`, ne les vide donc jamais).
 	for i, l := range []*[]string{d.Head, d.Favoris, d.Epingles, d.Archives, d.Privees} {
@@ -455,6 +463,15 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	if d.NotesS != nil {
 		nouv.NotesServices = *d.NotesS
 	}
+	// Les personnes et leurs refus : absents (ou null), rien ne change (un
+	// client d'avant la fiche de la personne ne les efface pas) ; présents,
+	// c'est la liste complète.
+	if l, ok := lirePersonnes(d.Pers); ok {
+		nouv.Personnes = l
+	}
+	if l, ok := lireRefus(d.PersR); ok {
+		nouv.PersonnesRefus = l
+	}
 	repondre := func(m Marques, refus string) {
 		select {
 		case c.evs <- trameMarques(m, d.ID, refus):
@@ -479,9 +496,21 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 			repondre(cur, "version périmée : les emojis rapides du serveur seraient vidés")
 			return
 		}
+		if len(nouv.Personnes) == 0 && len(cur.Personnes) > 0 {
+			logf("marques de %q refusées : personnes vides, version %d < %d", c.nom, d.Version, cur.Version)
+			repondre(cur, "version périmée : les personnes du serveur seraient vidées")
+			return
+		}
+		if len(nouv.PersonnesRefus) == 0 && len(cur.PersonnesRefus) > 0 {
+			logf("marques de %q refusées : refus vides, version %d < %d", c.nom, d.Version, cur.Version)
+			repondre(cur, "version périmée : les refus de personnes du serveur seraient vidés")
+			return
+		}
 		for i, l := range nouv.listes() {
 			*l = unir(*l, *cur.listes()[i])
 		}
+		nouv.Personnes = unirPersonnes(nouv.Personnes, cur.Personnes)
+		nouv.PersonnesRefus = unirRefus(nouv.PersonnesRefus, cur.PersonnesRefus)
 		nouv.Moods = unirMoods(nouv.Moods, cur.Moods)
 		nouv.Emojis = unirEmojis(nouv.Emojis, cur.Emojis)
 	}
@@ -498,8 +527,8 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		return
 	}
 	s.marques = nouv
-	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s, notes_contacts %v, notes_services %v",
-		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation, nouv.NotesContacts, nouv.NotesServices)
+	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s, notes_contacts %v, notes_services %v, personnes %d, refus %d",
+		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation, nouv.NotesContacts, nouv.NotesServices, len(nouv.Personnes), len(nouv.PersonnesRefus))
 	if nouv.PresenceEnLigne != cur.PresenceEnLigne {
 		s.presenceChangee(nouv.PresenceEnLigne)
 	}
@@ -557,10 +586,9 @@ func (s *Serveur) desarchiverSiRecu(svc string, ligne []byte) {
 		return
 	}
 	cur := s.marques
-	nouv := Marques{Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Privees: cur.Privees, Moods: cur.Moods, Emojis: cur.Emojis,
-		GarderArchives: cur.GarderArchives, CacherApresJours: cur.CacherApresJours, PresenceEnLigne: cur.PresenceEnLigne,
-		SonsConversation: cur.SonsConversation, NotesContacts: cur.NotesContacts, NotesMusique: cur.NotesMusique, NotesMusiqueFormat: cur.NotesMusiqueFormat,
-		NotesServices: cur.NotesServices, ArchivesDepuis: cur.ArchivesDepuis}
+	// Tout sauf `archives`, refaite ci-dessous.
+	nouv := cur
+	nouv.Archives = nil
 	for _, a := range cur.Archives {
 		if a != id {
 			nouv.Archives = append(nouv.Archives, a)
