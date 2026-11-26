@@ -1048,7 +1048,7 @@ func (m *ServiceMCP) outilLire(ctx context.Context, _ *mcp.CallToolRequest, e en
 			items, more, out.Source = copie, cMore, "copie du serveur"
 		case pret:
 			r, err := m.demanderPont(ctx, p, "messages", cleMessages(brut, false),
-				map[string]any{"cmd": "messages", "conv": brut, "count": nombre}, mcpDelaiPont)
+				map[string]any{"cmd": "messages", "conv": brut, "count": nombre, "auto": true}, mcpDelaiPont)
 			if err == nil && r.erreur != "" {
 				err = fmt.Errorf("%s : %s", svc, r.erreur)
 			}
@@ -1078,7 +1078,7 @@ func (m *ServiceMCP) outilLire(ctx context.Context, _ *mcp.CallToolRequest, e en
 			return nil, out, fmt.Errorf("%s n'est pas prêt (%s) : impossible de remonter plus loin", svc, m.etatDe(p).etat)
 		}
 		r, err := m.demanderPont(ctx, p, "messages", cleMessages(brut, true),
-			map[string]any{"cmd": "messages", "conv": brut, "count": nombre, "before": avantID, "before_time": avantT}, mcpDelaiPont)
+			map[string]any{"cmd": "messages", "conv": brut, "count": nombre, "before": avantID, "before_time": avantT, "auto": true}, mcpDelaiPont)
 		if err == nil && r.erreur != "" {
 			err = fmt.Errorf("%s : %s", svc, r.erreur)
 		}
@@ -1339,7 +1339,7 @@ func (m *ServiceMCP) outilEnvoyer(ctx context.Context, _ *mcp.CallToolRequest, e
 	}
 	tmp := "mcp_" + hex.EncodeToString([]byte(aleatoireBrut(8)))
 	r, err := m.demanderPont(ctx, p, "sent", tmp,
-		map[string]any{"cmd": "send", "conv": brut, "text": texte, "tmp_id": tmp}, mcpDelaiEnvoi)
+		map[string]any{"cmd": "send", "conv": brut, "text": texte, "tmp_id": tmp, "auto": true}, mcpDelaiEnvoi)
 	if err != nil {
 		return nil, out, err
 	}

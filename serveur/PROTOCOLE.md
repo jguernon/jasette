@@ -942,6 +942,19 @@ Tous les ponts annoncent qu'une personne écrit dans une conversation :
   conversation.
 - WhatsApp ne transmet les « en train d'écrire » qu'à un appareil
   disponible : voir §5.10.
+- Messenger, fils **chiffrés** (cadenas) : ils passent par l'infrastructure
+  de WhatsApp, qui ne les transmet qu'à un appareil disponible. Comme
+  mautrix-meta, le pont se déclare disponible quand l'utilisateur ouvre un
+  fil chiffré (`messages` sans `before`, `read`, `send`, `send_media`) et
+  redevient indisponible 5 minutes après la dernière de ces commandes. Le
+  réglage désactivé : jamais. Fils non chiffrés : la table lightspeed
+  `LSUpdateTypingIndicator`, sans rien demander. Le pont note dans son
+  journal le premier « en train d'écrire » reçu de chaque sorte (« premier
+  « en train d'écrire » Messenger reçu », fil chiffré ou non chiffré) et
+  chaque changement de disponibilité (« canal chiffré : disponible… »).
+- Les commandes que le serveur envoie lui-même aux ponts (préchargement
+  §5.8, outils MCP §9) portent `"auto":true` : ce n'est pas l'utilisateur
+  qui ouvre le fil, le pont Messenger ne se déclare pas disponible.
 
 Le serveur le relaie à tous les clients, sans le garder ni le rejouer. Les
 clients le montrent (bulle reçue aux trois points qui rebondissent en bas du

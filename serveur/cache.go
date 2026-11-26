@@ -664,7 +664,7 @@ func (p *Pont) passePrecharge() {
 		}
 		p.precharge = k.conv
 		srv.mu.Unlock()
-		cmd, _ := json.Marshal(map[string]any{"cmd": "messages", "conv": k.conv, "count": compte})
+		cmd, _ := json.Marshal(map[string]any{"cmd": "messages", "conv": k.conv, "count": compte, "auto": true})
 		if err := p.envoyer(cmd); err != nil {
 			srv.mu.Lock()
 			p.precharge = ""
