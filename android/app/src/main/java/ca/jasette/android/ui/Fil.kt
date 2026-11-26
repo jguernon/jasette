@@ -333,6 +333,18 @@ fun Fil(
         // Le plus récent en bas : la liste est inversée.
         val inverse = liste.asReversed()
         LaunchedEffect(liste.lastOrNull()?.id) { if (liste.isNotEmpty()) etat.animateScrollToItem(0) }
+        // La bulle « … » s'insère sous le dernier message : la liste garde sa place sur lui
+        // et la bulle resterait cachée sous la saisie. Si l'on était en bas (à 80 dp près),
+        // on descend doucement jusqu'à elle ; remonté dans l'historique, on ne bouge pas.
+        val ecritIci = Depot.ecritDe(id) != null
+        val seuilBas = with(LocalDensity.current) { 80.dp.roundToPx() }
+        LaunchedEffect(ecritIci) {
+            if (ecritIci && etat.firstVisibleItemIndex <= 1 &&
+                (etat.firstVisibleItemIndex == 0 || etat.firstVisibleItemScrollOffset <= seuilBas)
+            ) {
+                etat.animateScrollToItem(0)
+            }
+        }
         // Les aperçus des liens (PROTOCOLE.md, §5.9) : ils arrivent quand ils sont prêts.
         LaunchedEffect(liste, ca.jasette.android.Apercus.actifs) {
             ca.jasette.android.Apercus.demander(liste, Depot.connexionServeur())

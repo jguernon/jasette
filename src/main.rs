@@ -2143,6 +2143,8 @@ struct Jasette {
     /// Le défilement de la liste des conversations (le fondu du haut n'apparaît qu'une fois défilée).
     defil_liste: ScrollHandle,
     descendre: bool,
+    /// Descendre en douceur au prochain dessin (la bulle « … » apparaît).
+    descendre_doux: bool,
     envoi_seq: u64,
     emojis_ouverts: bool,
     /// Le choix de l'avatar « Moi » est ouvert ; la photo que Google Messages connaît.
@@ -3071,6 +3073,7 @@ impl Jasette {
             defile: ScrollHandle::new(),
             defil_liste: ScrollHandle::new(),
             descendre: false,
+            descendre_doux: false,
             envoi_seq: 0,
             emojis_ouverts: false,
             menu_avatar: false,
@@ -5499,6 +5502,34 @@ impl Jasette {
         }
     }
 
+    /// Le fil est-il en bas (à 80 px près) ?
+    fn fil_pres_du_bas(&self) -> bool {
+        -self.defile.offset().y >= self.defile.max_offset().y - px(80.)
+    }
+
+    /// Descend en douceur jusqu'en bas du fil (environ 180 ms), le temps que
+    /// la nouvelle bulle prenne sa place.
+    fn descendre_doucement(&self, cx: &mut Context<Self>) {
+        let h = self.defile.clone();
+        cx.spawn(async move |_, cx| {
+            // Une image : la bulle entre dans la mise en page.
+            cx.background_executor().timer(Duration::from_millis(16)).await;
+            cx.update(|cx| cx.refresh_windows());
+            cx.background_executor().timer(Duration::from_millis(16)).await;
+            for k in 1..=8 {
+                let o = h.offset();
+                let but = -h.max_offset().y;
+                let y = o.y + (but - o.y) * (k as f32 / 8.);
+                h.set_offset(point(o.x, y));
+                cx.update(|cx| cx.refresh_windows());
+                cx.background_executor().timer(Duration::from_millis(22)).await;
+            }
+            h.scroll_to_bottom();
+            cx.update(|cx| cx.refresh_windows());
+        })
+        .detach();
+    }
+
     fn descendre_bientot(&self, cx: &mut Context<Self>) {
         let h = self.defile.clone();
         cx.spawn(async move |_, cx| {
@@ -6720,7 +6751,12 @@ impl Jasette {
         }
         if self.descendre {
             self.descendre = false;
+            self.descendre_doux = false;
             self.descendre_bientot(cx);
+        }
+        if self.descendre_doux {
+            self.descendre_doux = false;
+            self.descendre_doucement(cx);
         }
         div()
             .id("fil")

@@ -30,9 +30,10 @@ impl Jasette {
             let nom = v.get("name").and_then(Value::as_str).unwrap_or_default().to_string();
             let nouveau = !self.ecrits.contains_key(conv);
             self.ecrits.insert(conv.to_string(), Ecrit { nom, depuis: Instant::now() });
-            if nouveau && self.choisie.as_deref() == Some(conv) {
-                // La bulle apparaît en bas du fil.
-                self.descendre = true;
+            if nouveau && self.choisie.as_deref() == Some(conv) && self.fil_pres_du_bas() {
+                // La bulle apparaît en bas du fil : on la montre si l'on y est
+                // déjà (à 80 px près) ; remonté dans l'historique, on ne bouge pas.
+                self.descendre_doux = true;
             }
             if nouveau {
                 self.son_ecrit(conv);
