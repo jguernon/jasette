@@ -420,7 +420,7 @@ impl Jasette {
                             .text_size(px(15. + self.plus_liste()))
                             .font_weight(if non_lus > 0 { FontWeight::BOLD } else { FontWeight::SEMIBOLD })
                             .text_color(th().texte_fort)
-                            .child(nom),
+                            .child(texte_emoji(nom, th().texte_fort, Some(if non_lus > 0 { FontWeight::BOLD } else { FontWeight::SEMIBOLD }))),
                     )
                     .child(div().text_size(px(12. + self.plus_liste())).text_color(th().texte_pale).child(detail)),
             )
@@ -476,7 +476,7 @@ impl Jasette {
                         .text_size(px(16. + self.plus_liste()))
                         .font_weight(FontWeight::BOLD)
                         .text_color(th().texte_fort)
-                        .child(nom.clone()),
+                        .child(texte_emoji(nom.clone(), th().texte_fort, Some(FontWeight::BOLD))),
                 )
                 .children(self.bouton_tout_lu("lu-parent".into(), nom, a_marquer, cx)),
         );
@@ -534,7 +534,7 @@ impl Jasette {
                     .text_size(px(14.5 + self.plus_liste()))
                     .font_weight(if conv.unread { FontWeight::BOLD } else { FontWeight::NORMAL })
                     .text_color(couleur)
-                    .child(conv.name.clone()),
+                    .child(texte_emoji(conv.name.clone(), couleur, Some(if conv.unread { FontWeight::BOLD } else { FontWeight::NORMAL }))),
             )
             .when(conv.read_only, |d| d.child(icone("lock", 12., th().texte_pale)))
             .when(mentions > 0, |d| d.child(compteur(format!("@{mentions}"), ton(c(DANGER), th().danger))))
@@ -589,7 +589,7 @@ impl Jasette {
                                     .text_size(px(14.5 + self.plus_liste()))
                                     .font_weight(if conv.unread { FontWeight::BOLD } else { FontWeight::SEMIBOLD })
                                     .text_color(th().texte_fort)
-                                    .child(nom),
+                                    .child(texte_emoji(nom, th().texte_fort, Some(if conv.unread { FontWeight::BOLD } else { FontWeight::SEMIBOLD }))),
                             )
                             .child(
                                 div()
@@ -611,7 +611,7 @@ impl Jasette {
                                     .truncate()
                                     .text_size(px(12.5 + self.plus_liste()))
                                     .text_color(if conv.unread { th().texte_fort } else { th().apercu })
-                                    .child(apercu),
+                                    .child(texte_emoji(apercu, if conv.unread { th().texte_fort } else { th().apercu }, None)),
                             )
                             .when(mentions > 0, |d| d.child(compteur(format!("@{mentions}"), ton(c(DANGER), th().danger))))
                             .when(conv.unread && mentions == 0, |d| {

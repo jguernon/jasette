@@ -149,6 +149,24 @@ const GROUPES_EMOJI: [(&str, &str); 10] = [
 /// alors sur Adwaita Sans, qui a des versions noir et blanc de bien des emojis.
 const POLICE_EMOJI: &str = "Jasette Emoji";
 
+/// Le repli des glyphes absents de la police du texte : la police d'émojis
+/// embarquée. Posé sur la racine de la fenêtre (hérité par tout le texte) et
+/// sur les morceaux de `texte_liens` : un émoji que `est_emoji` ne reconnaît
+/// pas, ou un nom affiché sans `texte_emoji`, ne tombe plus en carré vide (ou
+/// sur un glyphe d'une autre police) quand la police du thème ne l'a pas.
+/// Les symboles que la police du thème a en noir et blanc restent à
+/// `texte_emoji`, qui force la police couleur.
+fn repli_emoji() -> gpui::FontFallbacks {
+    static R: std::sync::OnceLock<gpui::FontFallbacks> = std::sync::OnceLock::new();
+    R.get_or_init(|| gpui::FontFallbacks::from_fonts(vec![POLICE_EMOJI.to_string()])).clone()
+}
+
+/// Pose `repli_emoji` sur un élément et tout le texte qu'il contient.
+fn avec_repli_emoji<E: Styled>(mut e: E) -> E {
+    e.text_style().font_fallbacks = Some(repli_emoji());
+    e
+}
+
 /// Un caractère qui s'affiche en emoji (Adwaita Sans a des versions noir et
 /// blanc de plusieurs symboles : on force la police couleur pour eux).
 fn est_emoji(c: char) -> bool {
@@ -190,6 +208,9 @@ fn texte_liens(
     let fond = plage.as_ref().map(|(_, f)| *f);
     let run = |len: usize, (emoji, marque, lien): (bool, bool, bool)| {
         let mut f = gpui::font(if emoji { POLICE_EMOJI } else { police() });
+        if !emoji {
+            f.fallbacks = Some(repli_emoji());
+        }
         if let Some(g) = gras {
             f.weight = g;
         }
@@ -6458,7 +6479,7 @@ impl Jasette {
                             .truncate()
                             .text_size(px(mesures.texte + self.plus_liste()))
                             .text_color(if conv.unread { th().texte_fort } else { th().texte })
-                            .child(prenom),
+                            .child(texte_emoji(prenom, if conv.unread { th().texte_fort } else { th().texte }, None)),
                     ),
             );
         }
@@ -6603,7 +6624,7 @@ impl Jasette {
                                             .text_size(px(15. + self.plus_liste()))
                                             .text_color(th().texte_fort)
                                             .font_weight(if conv.unread { FontWeight::BOLD } else { FontWeight::SEMIBOLD })
-                                            .child(nom),
+                                            .child(texte_emoji(nom, th().texte_fort, Some(if conv.unread { FontWeight::BOLD } else { FontWeight::SEMIBOLD }))),
                                     )
                                     .child(
                                         div()
@@ -6800,7 +6821,7 @@ impl Jasette {
                                     .flex_row()
                                     .justify_between()
                                     .gap(px(8.))
-                                    .child(div().truncate().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(nom))
+                                    .child(div().truncate().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(texte_emoji(nom, th().texte_fort, Some(FontWeight::SEMIBOLD))))
                                     .child(div().flex_none().text_size(px(12.)).text_color(th().texte_pale).child(heure(r.time, true))),
                             )
                             .child(
@@ -8540,7 +8561,7 @@ impl Jasette {
                                         .flex_col()
                                         .flex_1()
                                         .min_w(px(0.))
-                                        .child(div().truncate().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(nom))
+                                        .child(div().truncate().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(texte_emoji(nom, th().texte_fort, Some(FontWeight::SEMIBOLD))))
                                         .child(div().truncate().text_size(px(12.)).text_color(th().texte_pale).child(detail)),
                                 ),
                         )
@@ -11664,6 +11685,7 @@ impl Jasette {
             .overflow_hidden()
             .bg(th().fond)
             .font_family(police())
+            .map(avec_repli_emoji)
             // La police IBM 8x16 n'est nette qu'à 16 px.
             .text_size(px(if th().ega { 16. } else { 15. }))
             .text_color(th().texte_fort)

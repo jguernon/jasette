@@ -437,7 +437,7 @@ impl Jasette {
                                 .flex_row()
                                 .gap(px(5.))
                                 .text_size(px(14.))
-                                .child(div().truncate().font_weight(FontWeight::BOLD).text_color(c(0x12335e)).child(nom))
+                                .child(div().truncate().font_weight(FontWeight::BOLD).text_color(c(0x12335e)).child(texte_emoji(nom, c(0x12335e), Some(FontWeight::BOLD))))
                                 .child(div().flex_none().text_color(if n > 0 { c(0x3a7d1e) } else { c(0x6d7f96) }).child(format!("({etat})"))),
                         )
                         .child(div().text_size(px(12.)).italic().text_color(c(0x4d6c92)).child(services)),
@@ -455,7 +455,7 @@ impl Jasette {
             .bg(c(0xffffff))
             .shadow(relief(true))
             .child(pastille(if n > 0 { Niveau::Vert } else { Niveau::Gris }, 18.))
-            .child(div().truncate().font_weight(FontWeight::BOLD).text_color(c(0x000000)).child(nom))
+            .child(div().truncate().font_weight(FontWeight::BOLD).text_color(c(0x000000)).child(texte_emoji(nom, c(0x000000), Some(FontWeight::BOLD))))
             .child(div().flex_none().text_color(c(0x1f6f2a)).child(format!("· {etat}")))
             .child(div().flex_1())
             .child(div().flex_none().text_size(px(12.)).text_color(c(0x404040)).child(services));
@@ -574,7 +574,7 @@ impl Jasette {
                                         .text_size(px(14. + plus))
                                         .font_weight(FontWeight::BOLD)
                                         .text_color(texte)
-                                        .child(nom),
+                                        .child(texte_emoji(nom, texte, Some(FontWeight::BOLD))),
                                 )
                                 .when(self.en_ligne(conv), |d| d.child(presence::carre_en_ligne())),
                         )
@@ -625,7 +625,7 @@ impl Jasette {
                     .text_size(px(14. + plus))
                     .when(conv.unread, |d| d.font_weight(FontWeight::BOLD))
                     .text_color(texte)
-                    .child(nom),
+                    .child(texte_emoji(nom, texte, conv.unread.then_some(FontWeight::BOLD))),
             )
             .when(self.en_ligne(conv), |d| d.child(presence::carre_en_ligne()))
             .when(self.ecrit(&conv.id).is_some(), |d| d.child(div().flex_1().min_w(px(0.)).child(ecrit::apercu_ecrit(12. + plus))))
@@ -681,7 +681,7 @@ impl Jasette {
                 div()
                     .font_weight(FontWeight::BOLD)
                     .text_color(if m.from_me { c(0x1838c0) } else { c(0xc01818) })
-                    .child(nom),
+                    .child(texte_emoji(nom, if m.from_me { c(0x1838c0) } else { c(0xc01818) }, Some(FontWeight::BOLD))),
             )
             .child(div().text_color(c(0x6a6a6a)).child(format!("({quand})")))
             .into_any_element()
@@ -772,7 +772,7 @@ impl Jasette {
                                 .text_size(px(15.))
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(if live { c(0x12335e) } else { c(0x000000) })
-                                .child(nom),
+                                .child(texte_emoji(nom, if live { c(0x12335e) } else { c(0x000000) }, Some(FontWeight::BOLD))),
                         )
                         .child(div().truncate().text_size(px(12.)).text_color(if live { c(0x4d6c92) } else { c(0x404040) }).child(detail)),
                 )
