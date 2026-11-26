@@ -8,7 +8,26 @@
 //   Jasette s'il y en a un (marque `moods`, PROTOCOLE.md §5.5). Android a la
 //   même table (ui/Mood.kt) : mêmes noms, mêmes couleurs.
 // - L'EGA n'en a pas : ni l'item, ni les couleurs (un mood posé est ignoré).
+// - La même feuille choisit l'« emoji rapide » de la conversation (aucun par
+//   défaut) : un bouton rond à droite de la saisie, à la place de l'envoi
+//   quand le champ est vide, qui l'envoie d'un clic. Il existe aussi en EGA :
+//   le menu ⋮ y a l'item « Emoji rapide », et la feuille n'a que cette rangée.
+//   Marque `emojis` (id → emoji, 32 octets au plus), comme `moods`.
 use super::*;
+
+/// L'état de la feuille ouverte : la conversation, le mood essayé, l'emoji
+/// rapide essayé (None : aucun) et le sélecteur « Autre… » déplié.
+#[derive(Clone)]
+pub(crate) struct FeuilleMood {
+    pub id: String,
+    pub essai: Option<&'static str>,
+    pub emoji: Option<String>,
+    pub autre: bool,
+}
+
+/// Les emojis rapides proposés (« Aucun » vient avant, « Autre… » après).
+pub(crate) const EMOJIS_RAPIDES: [&str; 16] =
+    ["👍", "❤️", "😂", "😍", "🥰", "🔥", "🎉", "😘", "🤗", "👋", "🌹", "✨", "🙏", "😎", "💯", "😊"];
 
 /// Un mood : mes bulles (dégradé début → fin, et leur texte), puis trois
 /// taches de couleur, d'où viennent le fond du fil et la bulle reçue.
@@ -135,10 +154,117 @@ impl Jasette {
         mood(self.reglages.moods.get(id)?)
     }
 
-    /// L'item « Mood » du menu ⋮ (absent en EGA).
+    /// L'emoji rapide de la conversation ouverte (aucun par défaut).
+    pub(crate) fn emoji_rapide_fil(&self) -> Option<&str> {
+        let id = self.choisie.as_deref()?;
+        self.reglages.emojis.get(id).map(String::as_str).filter(|e| !e.is_empty())
+    }
+
+    /// Le bouton rond de l'emoji rapide, à droite de la saisie : un clic
+    /// l'envoie seul, comme un message texte.
+    pub(crate) fn bouton_emoji_rapide(&self, e: &str, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .id("emoji-rapide")
+            .size(px(42.))
+            .flex_none()
+            .rounded(rayon(999.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .bg(th().surface)
+            .border_1()
+            .border_color(th().surface_bord)
+            .shadow(ombre_flottante())
+            .font_family(POLICE_EMOJI)
+            .text_size(px(24.))
+            .hover(|s| s.bg(th().survol))
+            // La pression : le bouton pâlit et l'emoji rapetisse sous le clic.
+            .active(|s| s.opacity(0.6).text_size(px(19.)))
+            .on_click(cx.listener(|this, _, _, cx| this.envoyer_emoji_rapide(cx)))
+            .child(e.to_string())
+            .into_any_element()
+    }
+
+    /// Envoie l'emoji rapide de la conversation ouverte, par le même chemin
+    /// qu'un message texte (message en attente, tmp_id, coches).
+    pub(crate) fn envoyer_emoji_rapide(&mut self, cx: &mut Context<Self>) {
+        let Some(e) = self.emoji_rapide_fil().map(str::to_string) else { return };
+        let Some(conv) = self.choisie.clone() else { return };
+        if self.etat != Etat::Pret {
+            return;
+        }
+        let tmp = self.en_attente(&conv, e.clone(), String::new(), Vec::new());
+        self.commande(json!({"cmd": "send", "conv": conv, "text": e, "tmp_id": tmp}));
+        self.emojis_ouverts = false;
+        cx.notify();
+    }
+
+    /// Pose (ou retire, avec None) l'emoji rapide d'une conversation.
+    pub(crate) fn poser_emoji_rapide(&mut self, id: &str, e: Option<String>) {
+        let e = e.filter(|e| !e.is_empty() && e.len() <= pont::distant::EMOJI_RAPIDE_MAX);
+        if self.reglages.emojis.get(id) == e.as_ref() {
+            return;
+        }
+        match e {
+            Some(e) => {
+                self.reglages.emojis.insert(id.to_string(), e);
+            }
+            None => {
+                self.reglages.emojis.remove(id);
+            }
+        }
+        self.marques_changees();
+    }
+
+    /// Ouvre la feuille pour une conversation, avec ses choix actuels.
+    fn ouvrir_feuille_mood(&mut self, id: &str) {
+        self.menu_conv = false;
+        self.emojis_ouverts = false;
+        self.reaction_cible = None;
+        let essai = self.reglages.moods.get(id).and_then(|n| mood(n)).map(|m| m.id);
+        let emoji = self.reglages.emojis.get(id).cloned();
+        self.mood_feuille = Some(FeuilleMood { id: id.to_string(), essai, emoji, autre: false });
+    }
+
+    /// Applique ce que la feuille a d'essayé, et la ferme.
+    fn appliquer_feuille_mood(&mut self) {
+        if let Some(f) = self.mood_feuille.take() {
+            if !th().ega {
+                self.poser_mood(&f.id, f.essai);
+            }
+            self.poser_emoji_rapide(&f.id, f.emoji);
+        }
+    }
+
+    /// L'item « Mood » du menu ⋮ ; en EGA, « Emoji rapide » (sans mood).
     pub(crate) fn item_menu_mood(&self, id: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let emoji = self.reglages.emojis.get(id).cloned();
         if th().ega {
-            return None;
+            let id = id.to_string();
+            return Some(
+                div()
+                    .id("menu-emoji-rapide")
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(10.))
+                    .px(px(12.))
+                    .py(px(9.))
+                    .rounded(rayon(10.))
+                    .text_size(px(14.))
+                    .text_color(th().texte_fort)
+                    .cursor_pointer()
+                    .hover(|s| s.bg(th().survol))
+                    .child(icone("face-slightly-smiling", 16., th().texte_fort))
+                    .child(div().flex_1().child(tr("Emoji rapide", "Quick emoji")))
+                    .when_some(emoji, |d, e| d.child(div().font_family(POLICE_EMOJI).child(e)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.ouvrir_feuille_mood(&id);
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            );
         }
         let id = id.to_string();
         let actuel = self.reglages.moods.get(&id).and_then(|n| mood(n));
@@ -158,13 +284,12 @@ impl Jasette {
                 .hover(|s| s.bg(th().survol))
                 .child(icone("palette", 16., th().texte_fort))
                 .child(div().flex_1().child("Mood"))
+                .when_some(emoji, |d, e| d.child(div().font_family(POLICE_EMOJI).text_size(px(13.)).child(e)))
                 .when_some(actuel, |d, m| {
                     d.child(div().size(px(14.)).rounded(px(999.)).bg(m.envoye()).border_1().border_color(blanc(0.6)))
                 })
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.menu_conv = false;
-                    let essai = this.reglages.moods.get(&id).and_then(|n| mood(n)).map(|m| m.id);
-                    this.mood_feuille = Some((id.clone(), essai));
+                    this.ouvrir_feuille_mood(&id);
                     cx.notify();
                 }))
                 .into_any_element(),
@@ -332,15 +457,13 @@ impl Jasette {
                     .child(nom),
             )
             .on_click(cx.listener(move |this, ev: &gpui::ClickEvent, _, cx| {
-                if let Some((id, essai)) = this.mood_feuille.as_mut() {
+                if let Some(f) = this.mood_feuille.as_mut() {
                     // Un double clic (ou un clic sur la carte déjà choisie) applique.
                     let nouveau = m.map(|m| m.id);
-                    if ev.click_count() >= 2 || *essai == nouveau {
-                        let id = id.clone();
-                        this.mood_feuille = None;
-                        this.poser_mood(&id, nouveau);
-                    } else {
-                        *essai = nouveau;
+                    let appliquer = ev.click_count() >= 2 || f.essai == nouveau;
+                    f.essai = nouveau;
+                    if appliquer {
+                        this.appliquer_feuille_mood();
                     }
                 }
                 cx.notify();
@@ -348,12 +471,96 @@ impl Jasette {
             .into_any_element()
     }
 
-    /// La feuille « Mood » : aperçu en direct, grille, Annuler / Appliquer.
-    pub(crate) fn feuille_mood(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let (id, essai) = self.mood_feuille.clone()?;
-        if th().ega {
-            return None;
+    /// La rangée « Emoji rapide » de la feuille : Aucun, les emojis courants,
+    /// celui choisi ailleurs s'il n'y est pas, et « Autre… » (le sélecteur).
+    fn rangee_emoji_rapide(&self, f: &FeuilleMood, cx: &mut Context<Self>) -> AnyElement {
+        let pastille = |cle: SharedString, choisi: bool| {
+            div()
+                .id(cle)
+                .h(px(40.))
+                .min_w(px(40.))
+                .px(px(6.))
+                .rounded(rayon(999.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .border_2()
+                .border_color(if choisi { th().accent } else { hsla(0., 0., 0., 0.) })
+                .when(choisi, |d| d.bg(th().menu_champ))
+                .hover(|s| s.bg(th().survol))
+        };
+        let choisir = |e: Option<String>| {
+            cx.listener(move |this: &mut Self, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                if let Some(f) = this.mood_feuille.as_mut() {
+                    f.emoji = e.clone();
+                    f.autre = false;
+                }
+                cx.notify();
+            })
+        };
+        let mut rangee = div().flex().flex_row().flex_wrap().items_center().gap(px(4.));
+        rangee = rangee.child(
+            pastille("emoji-rapide-aucun".into(), f.emoji.is_none())
+                .px(px(12.))
+                .text_size(px(13.))
+                .text_color(th().texte_fort)
+                .on_click(choisir(None))
+                .child(tr("Aucun", "None")),
+        );
+        let mut liste: Vec<String> = EMOJIS_RAPIDES.iter().map(|e| e.to_string()).collect();
+        if let Some(e) = &f.emoji
+            && !liste.contains(e)
+        {
+            liste.push(e.clone());
         }
+        for (i, e) in liste.into_iter().enumerate() {
+            let choisi = f.emoji.as_deref() == Some(e.as_str());
+            rangee = rangee.child(
+                pastille(format!("emoji-rapide-{i}").into(), choisi)
+                    .font_family(POLICE_EMOJI)
+                    .text_size(px(22.))
+                    .on_click(choisir(Some(e.clone())))
+                    .child(e),
+            );
+        }
+        rangee = rangee.child(
+            pastille("emoji-rapide-autre".into(), f.autre)
+                .px(px(12.))
+                .text_size(px(13.))
+                .text_color(th().texte_fort)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if let Some(f) = this.mood_feuille.as_mut() {
+                        f.autre = !f.autre;
+                    }
+                    cx.notify();
+                }))
+                .child(tr("Autre…", "Other…")),
+        );
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(tr("Emoji rapide", "Quick emoji")))
+                    .child(div().text_size(px(12.)).text_color(th().texte_pale).child(tr(
+                        "Un bouton à droite de la zone d'écriture l'envoie d'un clic quand le champ est vide.",
+                        "A button right of the message box sends it in one click when the box is empty.",
+                    ))),
+            )
+            .child(rangee)
+            .into_any_element()
+    }
+
+    /// La feuille « Mood » : aperçu en direct, grille, emoji rapide, Annuler /
+    /// Appliquer. En EGA : l'emoji rapide seul.
+    pub(crate) fn feuille_mood(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let f = self.mood_feuille.clone()?;
+        let (id, essai) = (f.id.clone(), f.essai);
+        let ega = th().ega;
         let m = essai.and_then(mood);
         let nom_conv = self.conv(&id).map(|c| c.name.clone()).filter(|n| !n.is_empty()).unwrap_or_default();
         let titre = div()
@@ -369,16 +576,24 @@ impl Jasette {
                     .items_center()
                     .justify_center()
                     .bg(m.map(|m| m.envoye()).unwrap_or_else(degrade_accent))
-                    .child(icone("palette", 18., m.map(|m| m.texte_envoye()).unwrap_or(blanc(1.)))),
+                    .child(icone(if ega { "face-slightly-smiling" } else { "palette" }, 18., m.map(|m| m.texte_envoye()).unwrap_or(blanc(1.)))),
             )
             .child(
                 div()
                     .flex_1()
                     .flex()
                     .flex_col()
-                    .child(div().text_size(px(18.)).font_weight(FontWeight::BOLD).text_color(th().texte_fort).child("Mood"))
                     .child(
-                        div().text_size(px(12.)).text_color(th().texte_pale).truncate().child(if nom_conv.is_empty() {
+                        div()
+                            .text_size(px(18.))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(th().texte_fort)
+                            .child(if ega { tr("Emoji rapide", "Quick emoji") } else { "Mood" }),
+                    )
+                    .child(
+                        div().text_size(px(12.)).text_color(th().texte_pale).truncate().child(if ega {
+                            nom_conv.clone()
+                        } else if nom_conv.is_empty() {
                             tr("Les couleurs de cette conversation", "This conversation's colours").to_string()
                         } else {
                             format!("{} · {}", nom_conv, m.map(|m| m.nom()).unwrap_or_else(|| tr("Par défaut", "Default")))
@@ -401,10 +616,49 @@ impl Jasette {
                     }))
                     .child(icone("x", 16., th().texte_pale)),
             );
-        // L'aperçu en direct : le fond choisi, trois bulles, dans le thème actuel.
+        // La saisie en miniature : le bouton de l'emoji rapide essayé à droite
+        // (champ vide), sinon celui d'envoi.
+        let rond = |d: Div| d.size(px(34.)).flex_none().rounded(rayon(999.)).flex().items_center().justify_center();
+        let mini_saisie = || {
+            div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(8.))
+            .child(rond(div()).bg(th().surface).border_1().border_color(th().surface_bord).child(icone("plus", 16., th().texte_fort)))
+            .child(
+                div()
+                    .flex_1()
+                    .h(px(36.))
+                    .rounded(rayon(999.))
+                    .bg(th().surface)
+                    .border_1()
+                    .border_color(th().surface_bord)
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .px(px(14.))
+                    .text_size(px(13.))
+                    .text_color(th().texte_pale)
+                    .child(div().flex_1().child("Message"))
+                    .child(icone("face-slightly-smiling", 17., th().icone)),
+            )
+            .child(match f.emoji.as_deref() {
+                Some(e) => rond(div())
+                    .bg(th().surface)
+                    .border_1()
+                    .border_color(th().accent)
+                    .shadow(ombre_flottante())
+                    .font_family(POLICE_EMOJI)
+                    .text_size(px(19.))
+                    .child(e.to_string()),
+                None => rond(div()).bg(degrade_accent()).shadow(ombre_flottante()).child(icone("arrow-up", 16., blanc(1.))),
+            })
+        };
+        // L'aperçu en direct : le fond choisi, trois bulles et la saisie, dans le thème actuel.
         let apercu = Self::fond_apercu(
             m,
-            div().relative().w_full().h(px(186.)).border_1().border_color(if th().sombre { blanc(0.06) } else { blanc(0.85) }),
+            div().relative().w_full().h(px(if ega { 64. } else { 220. })).border_1().border_color(if th().sombre { blanc(0.06) } else { blanc(0.85) }),
             260.,
             18.,
         )
@@ -440,8 +694,14 @@ impl Jasette {
                     true,
                     14.,
                     true,
-                ))),
+                )))
+                .child(div().pt(px(8.)).child(mini_saisie())),
         );
+        let apercu = if ega {
+            div().w_full().p(px(14.)).border_1().border_color(th().trait_fin).child(mini_saisie())
+        } else {
+            apercu
+        };
         let mut grille = div().flex().flex_row().flex_wrap().gap_x(px(9.)).gap_y(px(14.)).justify_center();
         grille = grille.child(self.carte_mood(None, essai.is_none(), cx));
         for mo in MOODS.iter() {
@@ -461,7 +721,6 @@ impl Jasette {
                 .hover(|s| s.opacity(0.88))
                 .child(texte)
         };
-        let id_ok = id.clone();
         let boutons = div()
             .flex()
             .flex_row()
@@ -472,10 +731,10 @@ impl Jasette {
                 cx.notify();
             })))
             .child(bouton("mood-ok", tr("Appliquer", "Apply"), true).on_click(cx.listener(move |this, _, _, cx| {
-                this.mood_feuille = None;
-                this.poser_mood(&id_ok, essai);
+                this.appliquer_feuille_mood();
                 cx.notify();
             })));
+        let emojis = self.rangee_emoji_rapide(&f, cx);
         let feuille = verre(0.97, 26.)
             .when(th().sombre, |d| d.bg(th().menu).border_1().border_color(th().trait_fin))
             .shadow(ombre_verre())
@@ -490,8 +749,11 @@ impl Jasette {
             // Un clic dans la feuille ne la ferme pas.
             .on_click(|_, _, cx| cx.stop_propagation())
             .child(titre)
-            .child(apercu)
-            .child(grille)
+            // La feuille défile si la fenêtre est basse : ses parties gardent leur taille.
+            .child(apercu.flex_none())
+            .when(!ega, |d| d.child(grille.flex_none()))
+            .child(div().flex_none().child(emojis))
+            .when(f.autre, |d| d.child(div().flex().flex_row().justify_center().child(self.panneau_emojis(cx))))
             .child(boutons);
         Some(
             div()

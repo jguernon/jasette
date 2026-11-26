@@ -1,5 +1,5 @@
 // Les marques : le Head, les favoris, les épinglées, les archives, les
-// privées et les moods de Jasette, partagés entre tous les appareils de l'utilisateur (voir
+// privées, les moods et les emojis rapides de Jasette, partagés entre tous les appareils de l'utilisateur (voir
 // PROTOCOLE.md, §5.5).
 //
 // Le serveur en garde la copie de référence dans <données>/serveur/marques.json
@@ -22,6 +22,7 @@ const (
 	marquesParListe = 5000 // ids au plus par liste
 	tailleIdMax     = 512  // octets au plus par id
 	tailleMoodMax   = 64   // octets au plus par nom de mood
+	tailleEmojiMax  = 32   // octets au plus par emoji rapide (un graphème)
 )
 
 // Marques : cinq listes ordonnées d'ids de conversations (préfixés « m: »
@@ -44,7 +45,10 @@ type Marques struct {
 	// Moods : le « Mood » choisi pour une conversation (couleurs des bulles et
 	// fond du fil), {id: nom}. Le serveur ne connaît pas les noms : il les
 	// garde tels quels ; un client ignore un nom qu'il ne connaît pas.
-	Moods   map[string]string `json:"moods"`
+	Moods map[string]string `json:"moods"`
+	// Emojis : l'« emoji rapide » d'une conversation, {id: emoji}, envoyé
+	// d'un appui par le bouton à droite de la saisie. Absent : aucun.
+	Emojis  map[string]string `json:"emojis"`
 	Version int64             `json:"version"`
 	// Propre au serveur, jamais envoyé aux clients : depuis quand (ms, horloge
 	// du serveur) chaque id est dans Archives. Seul un message reçu après
@@ -68,6 +72,7 @@ func (m *Marques) normaliser() {
 		*l = nettoyerIds(*l)
 	}
 	m.Moods = nettoyerMoods(m.Moods)
+	m.Emojis = nettoyerEmojis(m.Emojis)
 	depuis := make(map[string]int64, len(m.Archives))
 	maintenant := time.Now().UnixMilli()
 	for _, id := range m.Archives {
@@ -87,15 +92,26 @@ func (m *Marques) memesListes(n *Marques) bool {
 			return false
 		}
 	}
-	return egalesMoods(m.Moods, n.Moods)
+	return egalesMoods(m.Moods, n.Moods) && egalesMoods(m.Emojis, n.Emojis)
 }
 
 // nettoyerMoods : jamais nul, sans id ni nom vide ou démesuré, borné.
 func nettoyerMoods(m map[string]string) map[string]string {
+	return nettoyerObjet(m, tailleMoodMax)
+}
+
+// nettoyerEmojis : de même, un emoji de 32 octets au plus.
+func nettoyerEmojis(m map[string]string) map[string]string {
+	return nettoyerObjet(m, tailleEmojiMax)
+}
+
+// nettoyerObjet : {id: valeur}, jamais nul, sans id ni valeur vide ou
+// démesurée (valeur de `max` octets au plus), borné.
+func nettoyerObjet(m map[string]string, max int) map[string]string {
 	r := make(map[string]string, len(m))
 	for id, nom := range m {
 		if id == "" || len(id) > tailleIdMax || !utf8.ValidString(id) ||
-			nom == "" || len(nom) > tailleMoodMax || !utf8.ValidString(nom) {
+			nom == "" || len(nom) > max || !utf8.ValidString(nom) {
 			continue
 		}
 		if len(r) >= marquesParListe {
@@ -121,6 +137,15 @@ func egalesMoods(a, b map[string]string) bool {
 // unirMoods : les moods de `dabord`, puis ceux de `ensuite` pour les ids
 // qu'il n'a pas.
 func unirMoods(dabord, ensuite map[string]string) map[string]string {
+	return nettoyerMoods(unirObjets(dabord, ensuite))
+}
+
+// unirEmojis : de même pour les emojis rapides.
+func unirEmojis(dabord, ensuite map[string]string) map[string]string {
+	return nettoyerEmojis(unirObjets(dabord, ensuite))
+}
+
+func unirObjets(dabord, ensuite map[string]string) map[string]string {
 	r := make(map[string]string, len(dabord)+len(ensuite))
 	for id, nom := range ensuite {
 		r[id] = nom
@@ -128,7 +153,7 @@ func unirMoods(dabord, ensuite map[string]string) map[string]string {
 	for id, nom := range dabord {
 		r[id] = nom
 	}
-	return nettoyerMoods(r)
+	return r
 }
 
 // nettoyerIds : sans doublon, sans id vide ni démesuré, borné.
@@ -269,7 +294,7 @@ func ecrireAtomique(chemin string, data []byte) error {
 func trameMarques(m Marques, id json.RawMessage, refus string) []byte {
 	corps := map[string]any{
 		"head": m.Head, "favoris": m.Favoris, "epingles": m.Epingles, "archives": m.Archives,
-		"privees": m.Privees, "moods": m.Moods, "version": m.Version,
+		"privees": m.Privees, "moods": m.Moods, "emojis": m.Emojis, "version": m.Version,
 	}
 	if len(id) > 0 {
 		corps["id"] = id
@@ -299,6 +324,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		Archives *[]string          `json:"archives"`
 		Privees  *[]string          `json:"privees"`
 		Moods    *map[string]string `json:"moods"`
+		Emojis   *map[string]string `json:"emojis"`
 		Version  int64              `json:"version"`
 		ID       json.RawMessage    `json:"id"`
 	}
@@ -313,7 +339,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	cur := s.marques
 	nouv := Marques{
 		Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Archives: cur.Archives,
-		Privees: cur.Privees, Moods: cur.Moods, ArchivesDepuis: cur.ArchivesDepuis,
+		Privees: cur.Privees, Moods: cur.Moods, Emojis: cur.Emojis, ArchivesDepuis: cur.ArchivesDepuis,
 	}
 	// Une liste absente de la trame ne change pas (un ancien client, qui ne
 	// connaît pas `archives` ou `privees`, ne les vide donc jamais).
@@ -325,6 +351,10 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	// De même pour `moods` (un client d'avant les moods ne les efface pas).
 	if d.Moods != nil {
 		nouv.Moods = nettoyerMoods(*d.Moods)
+	}
+	// Et pour `emojis` (un client d'avant les emojis rapides ne les efface pas).
+	if d.Emojis != nil {
+		nouv.Emojis = nettoyerEmojis(*d.Emojis)
 	}
 	repondre := func(m Marques, refus string) {
 		select {
@@ -345,10 +375,16 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 			repondre(cur, "version périmée : les moods du serveur seraient vidés")
 			return
 		}
+		if len(nouv.Emojis) == 0 && len(cur.Emojis) > 0 {
+			logf("marques de %q refusées : emojis vides, version %d < %d", c.nom, d.Version, cur.Version)
+			repondre(cur, "version périmée : les emojis rapides du serveur seraient vidés")
+			return
+		}
 		for i, l := range nouv.listes() {
 			*l = unir(*l, *cur.listes()[i])
 		}
 		nouv.Moods = unirMoods(nouv.Moods, cur.Moods)
+		nouv.Emojis = unirEmojis(nouv.Emojis, cur.Emojis)
 	}
 	nouv.normaliser()
 	if nouv.memesListes(&cur) {
@@ -363,8 +399,8 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		return
 	}
 	s.marques = nouv
-	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d",
-		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods))
+	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d",
+		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis))
 	tous := trameMarques(nouv, nil, "")
 	for autre := range s.clients {
 		if autre == c {
@@ -414,7 +450,7 @@ func (s *Serveur) desarchiverSiRecu(svc string, ligne []byte) {
 		return
 	}
 	cur := s.marques
-	nouv := Marques{Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Privees: cur.Privees, Moods: cur.Moods, ArchivesDepuis: cur.ArchivesDepuis}
+	nouv := Marques{Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Privees: cur.Privees, Moods: cur.Moods, Emojis: cur.Emojis, ArchivesDepuis: cur.ArchivesDepuis}
 	for _, a := range cur.Archives {
 		if a != id {
 			nouv.Archives = append(nouv.Archives, a)

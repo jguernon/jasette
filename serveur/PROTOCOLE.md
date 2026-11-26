@@ -353,7 +353,7 @@ compte et le relais `did:web:api.bsky.chat`) :
   conversation Bluesky ; un message : `<conversation>/<id>`. Les résultats de
   `search` ont le DID de la personne pour id (à passer à `new`).
 
-### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods)
+### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
@@ -370,10 +370,12 @@ pour X, « t: » pour Telegram, « b: » pour Bluesky, sans préfixe pour Google
   vont pas ;
 - `privees` : la **Liste privée** (voir « Règle des privées » plus bas).
 
-S'y ajoute un objet (facultatif) :
+S'y ajoutent deux objets (facultatifs) :
 
 - `moods` : le **Mood** de chaque conversation, `{id: nom}` (voir « Règle
-  des moods » plus bas).
+  des moods » plus bas) ;
+- `emojis` : l'**emoji rapide** de chaque conversation, `{id: "👍"}` (voir
+  « Règle des emojis rapides » plus bas).
 
 C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 
@@ -381,7 +383,7 @@ C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 changement, à **tous** les clients) :
 
 ```json
-{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"version":7}}
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"version":7}}
 ```
 
 `version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
@@ -390,7 +392,7 @@ encore rien reçu (listes vides).
 **Client → serveur** :
 
 ```json
-{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"version":7,"id":12}}
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"version":7,"id":12}}
 ```
 
 - `version` : la dernière version reçue du serveur (0 si aucune).
@@ -403,6 +405,8 @@ encore rien reçu (listes vides).
   l'objet complet (une clé absente = plus de mood pour cette conversation).
   Entrées à id ou nom vide retirées ; au plus 5000 entrées, 512 octets par
   id, 64 par nom. Le serveur envoie toujours `moods` (objet, jamais `null`).
+  Même règle pour `emojis`, avec au plus **32 octets** par emoji (un
+  graphème : 👍, ❤️, 👨‍👩‍👧…) ; plus long, l'entrée est retirée.
 
 Règles du serveur :
 
@@ -415,7 +419,8 @@ Règles du serveur :
    - sinon, union : les listes du client dans leur ordre, puis les ids du
      serveur qu'elles n'ont pas. Pour `moods` (même garde-fou s'il est vide
      alors que celui du serveur ne l'est pas) : les entrées du client, puis
-     celles du serveur pour les ids que le client n'a pas.
+     celles du serveur pour les ids que le client n'a pas. De même pour
+     `emojis`.
 3. Si rien ne change, seul l'expéditeur reçoit l'état courant (avec son
    `id`). Sinon le serveur écrit `marques.json`, passe à `version+1` et
    diffuse les nouvelles marques à tous (l'expéditeur les reçoit avec son `id`).
@@ -457,6 +462,21 @@ archives (ou ses privées) pour lui seul, sans les vider.
   garde les moods) ; un serveur d'avant `moods` ne l'envoie pas (le client
   garde les siens pour lui, sans les vider). Une conversation privée garde
   son mood.
+
+**Règle des emojis rapides.**
+
+- Facultatif, aucun par défaut. Choisi dans la feuille Mood (rangée
+  « Emoji rapide » ; en EGA, item « Emoji rapide » du menu ⋮, car l'EGA n'a
+  pas de mood) ; « Aucun » retire l'entrée.
+- Le client montre alors un bouton rond avec l'emoji à droite de la zone
+  d'écriture, à la place du bouton d'envoi tant que le champ est vide. Un
+  appui l'envoie seul, comme un message texte ordinaire (`send`, avec son
+  `tmp_id`) : rien de neuf pour les ponts.
+- Comme les moods : gardé sur chaque appareil (bureau : `emojis` de
+  `reglages.json` ; Android : préférences privées), union par id, et
+  compatibilité dans les deux sens (`emojis` absent : rien n'est effacé ;
+  serveur d'avant `emojis` : le client garde les siens). Le serveur ne
+  vérifie que la longueur.
 
 **Règle des archives.**
 

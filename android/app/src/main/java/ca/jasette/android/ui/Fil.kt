@@ -2,6 +2,9 @@ package ca.jasette.android.ui
 
 import ca.jasette.android.t
 import android.app.Activity
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -711,10 +714,10 @@ private fun BarreReactions(m: Msg, choisir: (String) -> Unit, plus: () -> Unit, 
     }
 }
 
-/** Le « + » des réactions : une grille simple d'emojis. */
+/** Le « + » des réactions (et « Autre… » de l'emoji rapide) : une grille simple d'emojis. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun GrilleEmojis(fermer: () -> Unit, choisir: (String) -> Unit) {
+internal fun GrilleEmojis(fermer: () -> Unit, choisir: (String) -> Unit) {
     ModalBottomSheet(onDismissRequest = fermer, containerColor = P.menu) {
         LazyVerticalGrid(
             GridCells.Adaptive(48.dp),
@@ -901,7 +904,7 @@ private fun Saisie(conv: String, actif: Boolean) {
                 // Comme au bureau : le + dans un rond plein.
                 IconButton(
                     onClick = { choix = true }, enabled = actif,
-                    modifier = Modifier.size(44.dp).carte(22.dp),
+                    modifier = Modifier.size(HAUT_SAISIE).carte(HAUT_SAISIE / 2),
                 ) {
                     Icon(Icons.Filled.Add, t("Joindre"), tint = if (actif) P.texteFort else P.textePale)
                 }
@@ -954,9 +957,11 @@ private fun Saisie(conv: String, actif: Boolean) {
             // « Message à <nom> sur <service> ».
             val service = ca.jasette.android.Service.de(conv)
             val nomConv = Depot.conv(conv)?.name?.ifEmpty { null } ?: t("ce contact")
+            // Hauteur minimale : exactement celle du + (et du bouton de droite), texte
+            // centré ; sur plusieurs lignes, la pastille grandit comme avant.
             Row(
-                Modifier.weight(1f).heightIn(min = 44.dp).carte(22.dp)
-                    .padding(start = 12.dp, end = 16.dp, top = 11.dp, bottom = 11.dp),
+                Modifier.weight(1f).heightIn(min = HAUT_SAISIE).carte(HAUT_SAISIE / 2)
+                    .padding(start = 12.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 LogoService(service, 20.dp)
@@ -979,9 +984,10 @@ private fun Saisie(conv: String, actif: Boolean) {
                 }
             }
             val peut = actif && (texte.isNotBlank() || pieces.isNotEmpty())
-            // Le bouton d'envoi n'apparaît que lorsqu'il y a quelque chose à envoyer.
-            if (peut) Spacer(Modifier.width(8.dp))
-            if (peut) IconButton(
+            // L'emoji rapide de la conversation (Mood.kt), s'il y en a un : son
+            // bouton prend la place de l'envoi tant que le champ est vide.
+            val rapide = Marques.emojiRapide(conv)
+            val envoi: @Composable () -> Unit = { IconButton(
                 onClick = {
                     val l = pieces.toList()
                     val tx = texte.trim()
@@ -995,12 +1001,55 @@ private fun Saisie(conv: String, actif: Boolean) {
                     }
                 },
                 enabled = peut,
-                modifier = Modifier.size(44.dp).clip(formeRonde)
-                    .let { if (peut) it.background(P.degrade) else it.carte(22.dp) },
+                modifier = Modifier.size(HAUT_SAISIE).clip(formeRonde)
+                    .let { if (peut) it.background(P.degrade) else it.carte(HAUT_SAISIE / 2) },
             ) {
                 Icon(Icons.AutoMirrored.Filled.Send, t("Envoyer"), tint = if (peut) P.surAccent else P.textePale)
+            } }
+            if (rapide == null) {
+                // Le bouton d'envoi n'apparaît que lorsqu'il y a quelque chose à envoyer.
+                if (peut) Spacer(Modifier.width(8.dp))
+                if (peut) envoi()
+            } else {
+                Spacer(Modifier.width(8.dp))
+                // Un fondu court quand l'emoji et l'envoi se relaient.
+                androidx.compose.animation.Crossfade(peut, animationSpec = androidx.compose.animation.core.tween(160), label = "emoji-rapide") {
+                    if (it) envoi() else BoutonEmojiRapide(rapide, actif) { Depot.envoyer(conv, rapide) }
+                }
             }
         }
+    }
+}
+
+/** La hauteur de la barre d'envoi : le +, la pastille (au moins) et le bouton de droite. */
+private val HAUT_SAISIE = 44.dp
+
+/**
+ * Le bouton rond de l'emoji rapide : un appui l'envoie seul, comme un message
+ * texte (même chemin, mêmes coches). Il s'enfonce un peu sous le doigt.
+ */
+@Composable
+private fun BoutonEmojiRapide(emoji: String, actif: Boolean, envoyer: () -> Unit) {
+    val source = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val presse by source.collectIsPressedAsState()
+    val echelle by animateFloatAsState(if (presse) 0.82f else 1f, label = "emoji-rapide-presse")
+    val haptique = LocalHapticFeedback.current
+    Box(
+        Modifier.size(HAUT_SAISIE).carte(HAUT_SAISIE / 2)
+            .clickable(source, indication = null, enabled = actif, onClickLabel = t("Envoyer")) {
+                haptique.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                envoyer()
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            emoji, fontSize = 24.sp,
+            modifier = Modifier.graphicsLayer {
+                scaleX = echelle
+                scaleY = echelle
+                alpha = if (actif) 1f else 0.45f
+            },
+        )
     }
 }
 

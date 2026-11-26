@@ -1363,6 +1363,11 @@ struct Reglages {
     /// ici, et partagé par le serveur Jasette s'il y en a un (marque `moods`).
     #[serde(default)]
     moods: std::collections::BTreeMap<String, String>,
+    /// L'emoji rapide de chaque conversation (id → emoji), envoyé d'un clic
+    /// par le bouton à droite de la saisie : gardé ici, et partagé par le
+    /// serveur Jasette s'il y en a un (marque `emojis`). Aucun par défaut.
+    #[serde(default)]
+    emojis: std::collections::BTreeMap<String, String>,
     /// La grille du Head : son nombre de colonnes, de 3 à 6 (« 5 ») ; vide = 4.
     /// Une ancienne valeur « colonnes x rangées » (« 8x3 ») donne ses colonnes,
     /// ramenées entre 3 et 6. Propre à cet appareil.
@@ -1491,6 +1496,7 @@ impl Default for Reglages {
             archives_depuis: HashMap::new(),
             privees: Vec::new(),
             moods: Default::default(),
+            emojis: Default::default(),
             head_grille: String::new(),
             marques_cache: HashMap::new(),
             heures_messages: false,
@@ -1600,6 +1606,7 @@ impl Reglages {
                     archives: self.archives.clone(),
                     privees: self.privees.clone(),
                     moods: self.moods.clone(),
+                    emojis: self.emojis.clone(),
                 },
                 version: self.marques_version,
                 a_envoyer: self.marques_a_envoyer,
@@ -1615,6 +1622,7 @@ impl Reglages {
         self.archives = b.copie.listes.archives;
         self.privees = b.copie.listes.privees;
         self.moods = b.copie.listes.moods;
+        self.emojis = b.copie.listes.emojis;
         self.marques_version = b.copie.version;
         self.marques_a_envoyer = b.copie.a_envoyer;
         self.marques_serveur = b.serveur;
@@ -1901,7 +1909,8 @@ struct Jasette {
     /// Le menu « … » de la conversation ouverte, et la confirmation de suppression.
     menu_conv: bool,
     /// La feuille « Mood » ouverte : la conversation et le mood essayé (None : par défaut).
-    mood_feuille: Option<(String, Option<&'static str>)>,
+    /// (Et l'emoji rapide essayé ; en EGA, la feuille n'a que lui.)
+    mood_feuille: Option<mood::FeuilleMood>,
     /// Le menu du clic droit sur l'icône d'un service, dans le rail.
     menu_rail: Option<Service>,
     /// La vue Favoris en mode « réorganiser » (flèches sur chaque rangée).
@@ -2395,8 +2404,9 @@ impl Jasette {
             if let InputEvent::PressEnter { shift: false, .. } = ev {
                 this.envoyer(window, cx);
             }
-            // Le bouton d'envoi du thème sombre s'allume dès qu'il y a du texte.
-            if matches!(ev, InputEvent::Change) && th().sombre {
+            // Le bouton d'envoi du thème sombre s'allume dès qu'il y a du texte ;
+            // l'emoji rapide laisse la place au bouton d'envoi.
+            if matches!(ev, InputEvent::Change) && (th().sombre || this.emoji_rapide_fil().is_some()) {
                 cx.notify();
             }
         })
@@ -3553,7 +3563,7 @@ impl Jasette {
         r.epingles.retain(|x| x != id);
         r.archives.retain(|x| x != id);
         r.privees.retain(|x| x != id);
-        let mood = r.moods.remove(id).is_some();
+        let mood = r.moods.remove(id).is_some() | r.emojis.remove(id).is_some();
         if mood || r.head.len() + r.etoiles.len() + r.epingles.len() + r.archives.len() + r.privees.len() != avant {
             self.marques_changees();
         }
@@ -7298,15 +7308,31 @@ impl Jasette {
                             .child(icone("audio-lines", 21., if self.vocal.is_some() { th().danger } else { th().icone })),
                     ),
             )
-            .child(
-                // En sombre, le bouton d'envoi ne s'allume que s'il y a quelque chose à envoyer.
-                Self::bouton_rond(
-                    "envoyer",
-                    "arrow-up",
-                    !th().sombre || self.vocal.is_some() || !self.saisie.read(cx).value().trim().is_empty(),
-                )
-                    .on_click(cx.listener(|this, _, window, cx| this.envoyer(window, cx))),
-            )
+            .child({
+                let vide = self.saisie.read(cx).value().trim().is_empty();
+                let rapide = self.emoji_rapide_fil();
+                // Un fondu court quand l'emoji rapide et l'envoi se relaient.
+                use gpui::{Animation, AnimationExt};
+                let fondu = |d: AnyElement, cle: &'static str| {
+                    div()
+                        .flex_none()
+                        .child(d)
+                        .with_animation(cle, Animation::new(Duration::from_millis(160)), |d, t| d.opacity(t))
+                        .into_any_element()
+                };
+                match rapide.filter(|_| vide && self.vocal.is_none()) {
+                    // Champ vide et un emoji rapide choisi : son bouton prend la
+                    // place de l'envoi (comme le pouce de Messenger).
+                    Some(e) => fondu(self.bouton_emoji_rapide(e, cx), "fondu-emoji-rapide"),
+                    // En sombre, le bouton d'envoi ne s'allume que s'il y a quelque chose à envoyer.
+                    None => {
+                        let envoi = Self::bouton_rond("envoyer", "arrow-up", !th().sombre || self.vocal.is_some() || !vide)
+                            .on_click(cx.listener(|this, _, window, cx| this.envoyer(window, cx)))
+                            .into_any_element();
+                        if rapide.is_some() { fondu(envoi, "fondu-envoyer") } else { envoi }
+                    }
+                }
+            })
             .into_any_element()
     }
 
@@ -7373,6 +7399,15 @@ impl Jasette {
                     .cursor_pointer()
                     .hover(|s| s.bg(ton(blanc(0.95), th().menu_champ)))
                     .on_click(cx.listener(move |this, _, window, cx| {
+                        // Ouvert par « Autre… » de la feuille Mood : c'est l'emoji rapide essayé.
+                        if let Some(f) = this.mood_feuille.as_mut()
+                            && f.autre
+                        {
+                            f.emoji = Some(e.to_string());
+                            f.autre = false;
+                            cx.notify();
+                            return;
+                        }
                         // Ouvert par le « + » des réactions : c'est une réaction.
                         if let Some(msg) = this.reaction_cible.take() {
                             this.emojis_ouverts = false;

@@ -22,6 +22,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -152,16 +154,31 @@ fun Modifier.fondMood(m: Mood, clair: Boolean): Modifier = drawBehind {
 
 private data class Tache(val c: Long, val a: Float, val x: Float, val y: Float)
 
-/** La feuille « Mood » d'une conversation : aperçu en direct, puis la grille des moods. */
+/** Les emojis rapides proposés (« Aucun » vient avant, « Autre… » après). */
+val EMOJIS_RAPIDES = listOf("👍", "❤️", "😂", "😍", "🥰", "🔥", "🎉", "😘", "🤗", "👋", "🌹", "✨", "🙏", "😎", "💯", "😊")
+
+/**
+ * La feuille « Mood » d'une conversation : aperçu en direct, puis la grille des
+ * moods et la rangée « Emoji rapide » (aucun par défaut). En EGA, qui n'a pas
+ * de mood, elle n'a que l'emoji rapide (item « Emoji rapide » du menu ⋮).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FeuilleMood(conv: String, nom: String, fermer: () -> Unit) {
     val actuel = Marques.mood(conv)
     var choix by remember { mutableStateOf(actuel) }
+    var emoji by remember { mutableStateOf(Marques.emojiRapide(conv)) }
+    var autre by remember { mutableStateOf(false) }
+    val ega = P.ega
     val etat = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     fun appliquer(id: String?) {
-        Marques.choisirMood(conv, id)
+        if (!ega) Marques.choisirMood(conv, id)
+        Marques.choisirEmojiRapide(conv, emoji)
         fermer()
+    }
+    if (autre) GrilleEmojis(fermer = { autre = false }) { e ->
+        emoji = e
+        autre = false
     }
     ModalBottomSheet(onDismissRequest = fermer, sheetState = etat, containerColor = P.menu) {
         Column(
@@ -171,7 +188,7 @@ fun FeuilleMood(conv: String, nom: String, fermer: () -> Unit) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(t("Mood"), color = P.texteFort, fontWeight = FontWeight.Bold, fontSize = 22.sp)
+                    Text(if (ega) t("Emoji rapide") else t("Mood"), color = P.texteFort, fontWeight = FontWeight.Bold, fontSize = 22.sp)
                     if (nom.isNotEmpty()) {
                         Text(nom, color = P.textePale, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
@@ -181,9 +198,9 @@ fun FeuilleMood(conv: String, nom: String, fermer: () -> Unit) {
                         .padding(horizontal = 18.dp, vertical = 9.dp),
                 ) { Text(t("Appliquer"), color = P.surAccent, fontWeight = FontWeight.SemiBold, fontSize = 14.sp) }
             }
-            Apercu(moodDe(choix))
+            Apercu(moodDe(choix), emoji)
             // La grille : « Par défaut », puis les moods, trois par rangée.
-            val cases: List<Mood?> = listOf<Mood?>(null) + MOODS
+            val cases: List<Mood?> = if (ega) emptyList() else listOf<Mood?>(null) + MOODS
             for (rangee in cases.chunked(3)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     for (m in rangee) {
@@ -195,17 +212,84 @@ fun FeuilleMood(conv: String, nom: String, fermer: () -> Unit) {
                     repeat(3 - rangee.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
+            RangeeEmojiRapide(emoji, choisir = { emoji = it }, autre = { autre = true })
         }
     }
 }
 
-/** L'aperçu en direct : le fond du mood (ou du thème) et trois bulles d'exemple. */
+/** La rangée « Emoji rapide » : Aucun, les emojis courants (et celui choisi ailleurs), Autre…. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun Apercu(m: Mood?) {
+private fun RangeeEmojiRapide(emoji: String?, choisir: (String?) -> Unit, autre: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(t("Emoji rapide"), color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+        Text(
+            t("Un bouton à droite de la zone d'écriture l'envoie d'un appui quand le champ est vide."),
+            color = P.textePale, fontSize = 13.sp,
+        )
+        @Composable
+        fun Pastille(choisi: Boolean, toucher: () -> Unit, contenu: @Composable () -> Unit) {
+            val bord by animateColorAsState(if (choisi) P.accent else Color.Transparent, label = "bord-emoji")
+            Box(
+                Modifier.height(44.dp).widthIn(min = 44.dp).clip(formeRonde)
+                    .let { if (choisi) it.background(P.surface) else it }
+                    .border(2.dp, bord, formeRonde)
+                    .clickable(onClick = toucher).padding(horizontal = 6.dp),
+                contentAlignment = Alignment.Center,
+            ) { contenu() }
+        }
+        val liste = if (emoji != null && emoji !in EMOJIS_RAPIDES) EMOJIS_RAPIDES + emoji else EMOJIS_RAPIDES
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Pastille(emoji == null, { choisir(null) }) {
+                Text(t("Aucun"), color = P.texteFort, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 8.dp))
+            }
+            for (e in liste) Pastille(emoji == e, { choisir(e) }) { Text(e, fontSize = 24.sp) }
+            Pastille(false, autre) {
+                Text(t("Autre…"), color = P.texteFort, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 8.dp))
+            }
+        }
+    }
+}
+
+/** La saisie en miniature : le bouton de l'emoji rapide à droite (champ vide), sinon celui d'envoi. */
+@Composable
+private fun MiniSaisie(emoji: String?) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(36.dp).carte(18.dp), contentAlignment = Alignment.Center) {
+            Icon(Icons.Filled.Add, null, tint = P.texteFort, modifier = Modifier.size(18.dp))
+        }
+        Spacer(Modifier.width(6.dp))
+        Box(
+            Modifier.weight(1f).height(36.dp).carte(18.dp).padding(horizontal = 12.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) { Text("Message", color = P.textePale, fontSize = 14.sp) }
+        Spacer(Modifier.width(6.dp))
+        if (emoji != null) {
+            Box(Modifier.size(36.dp).carte(18.dp, bord = P.accent), contentAlignment = Alignment.Center) {
+                Text(emoji, fontSize = 19.sp)
+            }
+        } else {
+            Box(Modifier.size(36.dp).clip(formeRonde).background(P.degrade), contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Filled.Send, null, tint = P.surAccent, modifier = Modifier.size(17.dp))
+            }
+        }
+    }
+}
+
+/** L'aperçu en direct : le fond du mood (ou du thème), trois bulles d'exemple et la saisie. */
+@Composable
+private fun Apercu(m: Mood?, emoji: String?) {
     val clair = P.clair
     val forme = forme(22.dp)
+    if (P.ega) {
+        Box(Modifier.fillMaxWidth().border(1.dp, P.traitFin, forme).padding(12.dp)) { MiniSaisie(emoji) }
+        return
+    }
     Box(
-        Modifier.fillMaxWidth().height(196.dp).clip(forme)
+        Modifier.fillMaxWidth().height(246.dp).clip(forme)
             .let { if (m != null) it.fondMood(m, clair) else it.background(if (clair) P.fond else P.fil) }
             .border(1.dp, if (clair) Color.White.copy(alpha = 0.7f) else P.traitFin, forme)
             .padding(14.dp),
@@ -214,6 +298,8 @@ private fun Apercu(m: Mood?) {
             BulleExemple(t("Tu viens au chalet vendredi ?"), moi = false, m, 15.sp)
             BulleExemple(t("Oui ! J'apporte les guimauves 🔥"), moi = true, m, 15.sp)
             BulleExemple(t("Parfait, on t'attend !"), moi = false, m, 15.sp)
+            Spacer(Modifier.height(4.dp))
+            MiniSaisie(emoji)
         }
     }
 }

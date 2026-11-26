@@ -571,8 +571,10 @@ fun MenuConversation(
             }
         }
         Item(t("Médias"), Icones.images, action = medias)
-        // Le Mood (couleurs des bulles et fond du fil) : pas en EGA.
-        if (!P.ega) Item(t("Mood"), Icones.palette) { feuilleMood = true }
+        // Le Mood (couleurs des bulles et fond du fil, et l'emoji rapide) ; l'EGA
+        // n'a pas de mood : son item ne choisit que l'emoji rapide.
+        if (P.ega) Item(t("Emoji rapide"), Icones.sourire) { feuilleMood = true }
+        else Item(t("Mood"), Icones.palette) { feuilleMood = true }
         Item(
             if (archivee) t("Désarchiver") else t("Archiver"),
             if (archivee) Icones.desarchiver else Icones.archive,
@@ -593,7 +595,7 @@ fun MenuConversation(
         Item(t("Rechercher"), Icons.Filled.Search, action = rechercher)
     }
 
-    if (feuilleMood && !P.ega) FeuilleMood(c.id, c.name) { feuilleMood = false }
+    if (feuilleMood) FeuilleMood(c.id, c.name) { feuilleMood = false }
 
     if (confirmer) {
         AlertDialog(

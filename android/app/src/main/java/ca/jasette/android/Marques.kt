@@ -13,6 +13,9 @@ import androidx.compose.runtime.snapshots.SnapshotStateMap
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** Un emoji rapide fait au plus 32 octets (un graphème, PROTOCOLE.md §5.5). */
+const val EMOJI_RAPIDE_MAX = 32
+
 /**
  * Les favoris et les épingles (`etoiles`/`head` et `epingles` des réglages du
  * bureau) : des listes d'ids de conversations, dans leur ordre, gardées dans
@@ -61,6 +64,12 @@ object Marques {
      * (champ `moods` des marques, §5.5). Ignoré en EGA.
      */
     val moods: SnapshotStateMap<String, String> = mutableStateMapOf()
+    /**
+     * L'« emoji rapide » de chaque conversation (id préfixé → emoji) : un bouton
+     * rond à droite de la saisie l'envoie d'un appui. Aucun par défaut. Partagé
+     * comme les moods (champ `emojis` des marques, §5.5), en EGA aussi.
+     */
+    val emojis: SnapshotStateMap<String, String> = mutableStateMapOf()
     /**
      * Depuis quand (ms, horloge du téléphone) chaque id est dans [archives], ici :
      * seul un message reçu après cette heure la désarchive (pas une réaction
@@ -160,6 +169,8 @@ object Marques {
         privees.addAll(lire(p, "privees"))
         moods.clear()
         moods.putAll(lireMoods(p.getString("moods", "{}") ?: "{}"))
+        emojis.clear()
+        emojis.putAll(lireObjet("emojis", p.getString("emojis", "{}") ?: "{}", EMOJI_RAPIDE_MAX))
         archivesDepuis.clear()
         try {
             val o = JSONObject(p.getString("archives_depuis", "{}") ?: "{}")
@@ -176,20 +187,23 @@ object Marques {
     }
 
     /** Un objet {id: mood} ; les valeurs vides ou non textuelles sont ignorées. */
-    private fun lireMoods(brut: String): Map<String, String> = try {
-        objetMoods(JSONObject(brut))
+    private fun lireMoods(brut: String): Map<String, String> = lireObjet("moods", brut, 64)
+
+    private fun lireObjet(cle: String, brut: String, max: Int): Map<String, String> = try {
+        objetMoods(JSONObject(brut), max)
     } catch (_: Exception) {
-        Log.w("jasette", "marques « moods » illisibles : mises de côté")
-        prefs?.edit()?.putString("moods_illisible", brut)?.commit()
+        Log.w("jasette", "marques « $cle » illisibles : mises de côté")
+        prefs?.edit()?.putString("${cle}_illisible", brut)?.commit()
         emptyMap()
     }
 
-    private fun objetMoods(o: JSONObject?): Map<String, String> {
+    /** {id: texte} ; vides, non textuelles ou de plus de [max] octets : ignorées. */
+    private fun objetMoods(o: JSONObject?, max: Int = 64): Map<String, String> {
         val r = LinkedHashMap<String, String>()
         if (o == null) return r
         for (k in o.keys()) {
             val v = o.opt(k) as? String ?: continue
-            if (k.isNotEmpty() && v.isNotEmpty()) r[k] = v
+            if (k.isNotEmpty() && v.isNotEmpty() && v.toByteArray().size <= max) r[k] = v
         }
         return r
     }
@@ -218,6 +232,7 @@ object Marques {
             ?.putString("archives", JSONArray(archives.toList()).toString())
             ?.putString("privees", JSONArray(privees.toList()).toString())
             ?.putString("moods", JSONObject(moods.toMap()).toString())
+            ?.putString("emojis", JSONObject(emojis.toMap()).toString())
             ?.putString("archives_depuis", JSONObject(archivesDepuis.toMap()).toString())
             ?.putLong("version", version)
             ?.putBoolean("a_envoyer", aEnvoyer)
@@ -238,6 +253,17 @@ object Marques {
     fun choisirMood(id: String, mood: String?) {
         if ((moods[id] ?: "") == (mood ?: "")) return
         if (mood.isNullOrEmpty()) moods.remove(id) else moods[id] = mood
+        changement()
+    }
+
+    /** L'emoji rapide de [id], ou null : aucun (par défaut). */
+    fun emojiRapide(id: String): String? = emojis[id]?.takeIf { it.isNotEmpty() }
+
+    /** Choisit l'emoji rapide de [id] ; null ou vide le retire (« Aucun »). */
+    fun choisirEmojiRapide(id: String, emoji: String?) {
+        val e = emoji?.takeIf { it.isNotEmpty() && it.toByteArray().size <= EMOJI_RAPIDE_MAX }
+        if (emojis[id] == e) return
+        if (e == null) emojis.remove(id) else emojis[id] = e
         changement()
     }
 
@@ -316,8 +342,9 @@ object Marques {
         val d = archives.remove(id)
         val e = privees.remove(id)
         val f = moods.remove(id) != null
+        val g = emojis.remove(id) != null
         if (d) majDepuis()
-        if (a || b || c || d || e || f) changement()
+        if (a || b || c || d || e || f || g) changement()
     }
 
     // ---- La synchronisation avec le serveur Jasette (§5.5) ----
@@ -330,9 +357,10 @@ object Marques {
         val archives: List<String>,
         val privees: List<String>,
         val moods: Map<String, String>,
+        val emojis: Map<String, String>,
     ) {
         fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty() && privees.isEmpty() &&
-            moods.isEmpty()
+            moods.isEmpty() && emojis.isEmpty()
 
         /** Chaque liste de this, dans son ordre, puis les ids de [b] qui n'y sont pas. */
         fun union(b: Listes) = Listes(
@@ -343,6 +371,8 @@ object Marques {
             (privees + b.privees).filter { it.isNotEmpty() }.distinct(),
             // Les moods : ceux de this gagnent, puis les conversations que seul [b] a.
             b.moods + moods,
+            // De même pour les emojis rapides.
+            b.emojis + emojis,
         )
 
         /** Les ids de this absents de [b], liste par liste. */
@@ -350,11 +380,12 @@ object Marques {
             head - b.head.toSet(), favoris - b.favoris.toSet(), epingles - b.epingles.toSet(),
             archives - b.archives.toSet(), privees - b.privees.toSet(),
             moods.filter { (k, v) -> b.moods[k] != v },
+            emojis.filter { (k, v) -> b.emojis[k] != v },
         )
     }
 
     private fun listes() =
-        Listes(head.toList(), favoris.toList(), epingles.toList(), archives.toList(), privees.toList(), moods.toMap())
+        Listes(head.toList(), favoris.toList(), epingles.toList(), archives.toList(), privees.toList(), moods.toMap(), emojis.toMap())
 
     private fun poser(l: Listes) {
         if (head.toList() != l.head) { head.clear(); head.addAll(l.head) }
@@ -367,6 +398,7 @@ object Marques {
             Raccourcis.privees()
         }
         if (moods.toMap() != l.moods) { moods.clear(); moods.putAll(l.moods) }
+        if (emojis.toMap() != l.emojis) { emojis.clear(); emojis.putAll(l.emojis) }
     }
 
     /** Envoie une trame au serveur ; faux si la connexion est coupée. Posé par [Depot] en mode client. */
@@ -404,6 +436,7 @@ object Marques {
             .put("epingles", JSONArray(l.epingles)).put("archives", JSONArray(l.archives))
             .put("privees", JSONArray(l.privees))
             .put("moods", JSONObject(l.moods))
+            .put("emojis", JSONObject(l.emojis))
             .put("version", version).put("id", prochain)
         if (!envoi(JSONObject().put("marques", corps))) {
             // La connexion tombe : le rejeu suivant tranchera.
@@ -430,6 +463,8 @@ object Marques {
             if (m.has("privees")) m.optJSONArray("privees").chaines().distinct() else privees.toList(),
             // Et pour les moods (serveur d'avant `moods`) : les nôtres restent, jamais vidés.
             if (m.optJSONObject("moods") != null) objetMoods(m.optJSONObject("moods")) else moods.toMap(),
+            // Et pour les emojis rapides (serveur d'avant `emojis`).
+            if (m.optJSONObject("emojis") != null) objetMoods(m.optJSONObject("emojis"), EMOJI_RAPIDE_MAX) else emojis.toMap(),
         )
         val v = m.optLong("version", -1)
         if (v < 0) return

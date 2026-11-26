@@ -1074,6 +1074,8 @@ pub struct Marques {
     pub privees: Vec<String>,
     /// Le Mood de chaque conversation (id → nom), PROTOCOLE.md §5.5.
     pub moods: BTreeMap<String, String>,
+    /// L'emoji rapide de chaque conversation (id → emoji), PROTOCOLE.md §5.5.
+    pub emojis: BTreeMap<String, String>,
 }
 
 impl Marques {
@@ -1084,6 +1086,7 @@ impl Marques {
             && self.archives.is_empty()
             && self.privees.is_empty()
             && self.moods.is_empty()
+            && self.emojis.is_empty()
     }
 
     /// Chaque liste de `dabord`, dans son ordre, puis les ids de `ensuite` qui n'y sont pas.
@@ -1105,6 +1108,8 @@ impl Marques {
             privees: unir(&dabord.privees, &ensuite.privees),
             // Les moods de `dabord` gagnent, `ensuite` ajoute les ids qui manquent.
             moods: ensuite.moods.iter().chain(dabord.moods.iter()).map(|(k, v)| (k.clone(), v.clone())).collect(),
+            // De même pour les emojis rapides.
+            emojis: ensuite.emojis.iter().chain(dabord.emojis.iter()).map(|(k, v)| (k.clone(), v.clone())).collect(),
         }
     }
 
@@ -1118,6 +1123,7 @@ impl Marques {
             archives: garder(&self.archives, &autre.archives),
             privees: garder(&self.privees, &autre.privees),
             moods: self.moods.iter().filter(|(k, v)| autre.moods.get(*k) != Some(*v)).map(|(k, v)| (k.clone(), v.clone())).collect(),
+            emojis: self.emojis.iter().filter(|(k, v)| autre.emojis.get(*k) != Some(*v)).map(|(k, v)| (k.clone(), v.clone())).collect(),
         }
     }
 }
@@ -1130,6 +1136,7 @@ pub enum NouvelleMarques {
     /// le client garde alors ses archives pour lui seul.
     /// `avec_privees` : de même pour un serveur d'avant `privees`.
     /// `avec_moods` : de même pour un serveur d'avant `moods`.
+    /// `avec_emojis` : de même pour un serveur d'avant `emojis`.
     Recues {
         marques: Marques,
         version: u64,
@@ -1138,6 +1145,7 @@ pub enum NouvelleMarques {
         avec_archives: bool,
         avec_privees: bool,
         avec_moods: bool,
+        avec_emojis: bool,
     },
     /// La connexion est tombée : rien n'est plus en vol.
     Coupure,
@@ -1152,6 +1160,17 @@ impl NouvelleMarques {
                 Some(_) => None,
             }
         };
+        // Un objet {id: texte} : entrées vides ou démesurées ignorées.
+        let objet = |nom: &str, max: usize| -> BTreeMap<String, String> {
+            match v.get(nom) {
+                Some(Value::Object(o)) => o
+                    .iter()
+                    .filter_map(|(k, n)| Some((k.clone(), n.as_str()?.to_string())))
+                    .filter(|(k, n)| !k.is_empty() && !n.is_empty() && n.len() <= max)
+                    .collect(),
+                _ => BTreeMap::new(),
+            }
+        };
         Some(Self::Recues {
             marques: Marques {
                 head: liste("head")?,
@@ -1159,14 +1178,8 @@ impl NouvelleMarques {
                 epingles: liste("epingles")?,
                 archives: liste("archives")?,
                 privees: liste("privees")?,
-                moods: match v.get("moods") {
-                    Some(Value::Object(o)) => o
-                        .iter()
-                        .filter_map(|(k, n)| Some((k.clone(), n.as_str()?.to_string())))
-                        .filter(|(k, n)| !k.is_empty() && !n.is_empty())
-                        .collect(),
-                    _ => BTreeMap::new(),
-                },
+                moods: objet("moods", 64),
+                emojis: objet("emojis", EMOJI_RAPIDE_MAX),
             },
             version: v.get("version")?.as_u64()?,
             id: v.get("id").and_then(Value::as_u64),
@@ -1174,9 +1187,13 @@ impl NouvelleMarques {
             avec_archives: v.get("archives").is_some_and(Value::is_array),
             avec_privees: v.get("privees").is_some_and(Value::is_array),
             avec_moods: v.get("moods").is_some_and(Value::is_object),
+            avec_emojis: v.get("emojis").is_some_and(Value::is_object),
         })
     }
 }
+
+/// Un emoji rapide fait au plus 32 octets (un graphème, PROTOCOLE.md §5.5).
+pub const EMOJI_RAPIDE_MAX: usize = 32;
 
 /// La copie locale des marques, gardée dans les réglages : les listes, la
 /// dernière version reçue du serveur (0 : jamais synchronisé avec lui) et
@@ -1232,6 +1249,7 @@ impl SuiviMarques {
             "archives": c.listes.archives,
             "privees": c.listes.privees,
             "moods": c.listes.moods,
+            "emojis": c.listes.emojis,
             "version": c.version,
             "id": id,
         }}))
@@ -1245,7 +1263,7 @@ impl SuiviMarques {
                 self.reinitialiser();
                 return None;
             }
-            NouvelleMarques::Recues { marques, version, id, refus, avec_archives, avec_privees, avec_moods } => {
+            NouvelleMarques::Recues { marques, version, id, refus, avec_archives, avec_privees, avec_moods, avec_emojis } => {
                 // Un serveur d'avant `archives` : nos archives restent les nôtres, jamais vidées.
                 let mut marques = marques;
                 if !avec_archives {
@@ -1258,6 +1276,10 @@ impl SuiviMarques {
                 // Et pour les moods (serveur d'avant `moods`).
                 if !avec_moods {
                     marques.moods = c.listes.moods.clone();
+                }
+                // Et pour les emojis rapides (serveur d'avant `emojis`).
+                if !avec_emojis {
+                    marques.emojis = c.listes.emojis.clone();
                 }
                 (marques, version, id, refus)
             }
@@ -1503,7 +1525,7 @@ mod essais {
     }
 
     fn recues(marques: Marques, version: u64, id: Option<u64>) -> NouvelleMarques {
-        NouvelleMarques::Recues { marques, version, id, refus: None, avec_archives: true, avec_privees: true, avec_moods: true }
+        NouvelleMarques::Recues { marques, version, id, refus: None, avec_archives: true, avec_privees: true, avec_moods: true, avec_emojis: true }
     }
 
     fn id_de(t: &Value) -> u64 {
@@ -1611,6 +1633,38 @@ mod essais {
     }
 
     #[test]
+    fn marques_emojis() {
+        // L'emoji rapide va et vient ; trop long (plus de 32 octets) : ignoré.
+        let long = "👍".repeat(9);
+        let n = NouvelleMarques::lire(&json!({"head": [], "favoris": [], "epingles": [], "archives": [], "privees": [],
+            "moods": {}, "emojis": {"m:1": "👍", "x:2": "", "w:3": long}, "version": 3}));
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques::default();
+        s.recu(n.unwrap(), &mut c);
+        assert_eq!(c.listes.emojis.len(), 1);
+        c.listes.emojis.insert("s:1".into(), "❤️".into());
+        c.listes.emojis.remove("m:1");
+        let t = s.changement(&mut c).expect("envoi");
+        assert_eq!(t["marques"]["emojis"], json!({"s:1": "❤️"}));
+        // Un serveur d'avant `emojis` : les nôtres restent.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 4, ..Default::default() };
+        c.listes.emojis.insert("s:1".into(), "🔥".into());
+        let vieux = NouvelleMarques::lire(&json!({"head": [], "favoris": ["b"], "epingles": [], "archives": [], "privees": [], "moods": {}, "version": 4})).unwrap();
+        assert!(s.recu(vieux, &mut c).is_none());
+        assert_eq!(c.listes.emojis.get("s:1").map(String::as_str), Some("🔥"));
+        // Union : le premier gagne pour un même id.
+        let mut a = Marques::default();
+        a.emojis.insert("k".into(), "👍".into());
+        let mut b = Marques::default();
+        b.emojis.insert("k".into(), "🎉".into());
+        b.emojis.insert("j".into(), "🌹".into());
+        let u = Marques::union(&a, &b);
+        assert_eq!(u.emojis.get("k").map(String::as_str), Some("👍"));
+        assert_eq!(u.emojis.len(), 2);
+    }
+
+    #[test]
     fn marques_moods() {
         // Les moods vont et viennent ; un objet, jamais null.
         let n = NouvelleMarques::lire(&json!({"head": [], "favoris": [], "epingles": [], "archives": [], "privees": [],
@@ -1666,6 +1720,7 @@ mod essais {
             avec_archives: true,
             avec_privees: true,
             avec_moods: true,
+            avec_emojis: true,
         };
         let t = s.recu(r, &mut c).expect("renvoi");
         assert_eq!(t["marques"]["favoris"], json!(["z", "a", "y", "x"]));

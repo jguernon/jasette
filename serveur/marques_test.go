@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -20,6 +21,7 @@ type trameEssai struct {
 	Marques struct {
 		Privees []string          `json:"privees"`
 		Moods   map[string]string `json:"moods"`
+		Emojis  map[string]string `json:"emojis"`
 		Version int64             `json:"version"`
 		Refus   string            `json:"refus"`
 	} `json:"marques"`
@@ -107,5 +109,61 @@ func TestMoodsAncienFichier(t *testing.T) {
 	b, _ := json.Marshal(trameMarques(m, nil, ""))
 	if len(b) == 0 {
 		t.Fatal("trame vide")
+	}
+}
+
+// L'emoji rapide : posé, gardé par un ancien client, borné à 32 octets,
+// retiré, protégé d'un client en retard, relu sur disque.
+func TestEmojis(t *testing.T) {
+	s, c := serveurEssai(t)
+
+	long := `"w:2":"` + strings.Repeat("😀", 9) + `"` // 36 octets : refusé
+	s.recevoirMarques(c, json.RawMessage(`{"emojis":{"m:9":"👍","":"x","s:1":"",`+long+`},"version":0}`))
+	tr := lireTrame(t, c)
+	if tr.Marques.Version != 1 || len(tr.Marques.Emojis) != 1 || tr.Marques.Emojis["m:9"] != "👍" {
+		t.Fatalf("après pose : %+v", tr.Marques)
+	}
+	if tr.Marques.Moods == nil {
+		t.Fatalf("moods nul : %+v", tr.Marques)
+	}
+
+	// Un ancien client (sans `emojis`) ne les efface pas.
+	s.recevoirMarques(c, json.RawMessage(`{"head":["a"],"moods":{"m:9":"amour"},"version":1}`))
+	tr = lireTrame(t, c)
+	if tr.Marques.Version != 2 || tr.Marques.Emojis["m:9"] != "👍" || tr.Marques.Moods["m:9"] != "amour" {
+		t.Fatalf("ancien client : %+v", tr.Marques)
+	}
+
+	// Un emoji composé (famille, 25 octets) passe ; l'autre est retiré.
+	s.recevoirMarques(c, json.RawMessage(`{"head":["a"],"emojis":{"i:5":"👨‍👩‍👧"},"version":2}`))
+	tr = lireTrame(t, c)
+	if tr.Marques.Version != 3 || len(tr.Marques.Emojis) != 1 || tr.Marques.Emojis["i:5"] != "👨‍👩‍👧" {
+		t.Fatalf("retrait : %+v", tr.Marques)
+	}
+
+	// Client en retard : union, ses emojis gagnent pour ses ids.
+	s.recevoirMarques(c, json.RawMessage(`{"head":["a"],"emojis":{"i:5":"🔥","x:1":"🎉"},"version":1}`))
+	tr = lireTrame(t, c)
+	if tr.Marques.Version != 4 || tr.Marques.Emojis["i:5"] != "🔥" || tr.Marques.Emojis["x:1"] != "🎉" {
+		t.Fatalf("union : %+v", tr.Marques)
+	}
+
+	// Client en retard qui les viderait : refusé.
+	s.recevoirMarques(c, json.RawMessage(`{"head":["a"],"emojis":{},"version":2}`))
+	tr = lireTrame(t, c)
+	if tr.Marques.Refus == "" || len(tr.Marques.Emojis) != 2 {
+		t.Fatalf("garde-fou : %+v", tr.Marques)
+	}
+
+	// Gardés sur disque ; un fichier d'avant les emojis se lit aussi.
+	if m := chargerMarques(); m.Version != 4 || m.Emojis["x:1"] != "🎉" {
+		t.Fatalf("relu : %+v", m)
+	}
+	t.Setenv("JASETTE_DATA", t.TempDir())
+	if err := ecrireAtomique(marquesPath(), []byte(`{"head":["a"],"moods":{},"version":3}`)); err != nil {
+		t.Fatal(err)
+	}
+	if m := chargerMarques(); m.Emojis == nil || len(m.Emojis) != 0 {
+		t.Fatalf("ancien fichier : %+v", m)
 	}
 }

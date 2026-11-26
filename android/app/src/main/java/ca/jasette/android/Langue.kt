@@ -483,4 +483,10 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Tu viens au chalet vendredi ?" to "Coming to the cabin on Friday?",
     "Oui ! J'apporte les guimauves 🔥" to "Yes! I'll bring the marshmallows 🔥",
     "Parfait, on t'attend !" to "Perfect, see you there!",
+    // L'emoji rapide d'une conversation (ui/Mood.kt, ui/Fil.kt).
+    "Emoji rapide" to "Quick emoji",
+    "Aucun" to "None",
+    "Autre…" to "Other…",
+    "Un bouton à droite de la zone d'écriture l'envoie d'un appui quand le champ est vide." to
+        "A button right of the message box sends it in one tap when the box is empty.",
 )
