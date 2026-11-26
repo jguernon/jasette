@@ -202,6 +202,7 @@ func (p *Pont) onWAEvent(raw any) bool {
 			}
 		}
 	case *events.ChatPresence:
+		p.ecritRecu(true)
 		emit("typing", map[string]any{"conv": evt.Chat.User, "on": evt.State == waTypes.ChatPresenceComposing})
 	case *events.Connected:
 		log.Info().Msg("canal chiffré connecté")
@@ -209,6 +210,7 @@ func (p *Pont) onWAEvent(raw any) bool {
 		p.e2eeRetried = false
 		p.mu.Unlock()
 		p.e2eeReady.Set()
+		go p.ecritConnecte()
 		emitE2EE("ready", "")
 		go p.checkHistoryBackup()
 	case *events.Disconnected:

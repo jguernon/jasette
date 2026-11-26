@@ -116,6 +116,9 @@ type Cmd struct {
 	Emoji string `json:"emoji"`
 	// presence : le réglage « Afficher qui est en ligne » (presence.go).
 	On bool `json:"on"`
+	// messages : demande du serveur lui-même (préchargement, MCP), pas d'un
+	// utilisateur qui ouvre le fil (ecrit.go).
+	Auto bool `json:"auto"`
 	// note_set : l'audience (ignorée : FRIENDS), la source (« main » ou
 	// « musique ») et l'id de la demande (notes.go).
 	Audience int    `json:"audience"`
@@ -292,14 +295,20 @@ func main() {
 			}
 			go p.listConversations(int(n), cmd.Folder == "archive")
 		case "messages":
+			if cmd.Before == "" && cmd.BeforeT == 0 {
+				go p.vueChiffree(cmd.Conv, cmd.Auto)
+			}
 			go p.messages(cmd)
 		case "react":
 			go p.sendReaction(cmd)
 		case "send":
+			go p.vueChiffree(cmd.Conv, cmd.Auto)
 			go p.send(cmd)
 		case "send_media":
+			go p.vueChiffree(cmd.Conv, cmd.Auto)
 			go p.sendMedia(cmd)
 		case "read":
+			go p.vueChiffree(cmd.Conv, cmd.Auto)
 			go p.markRead(cmd)
 		case "delete":
 			go p.deleteConv(cmd)

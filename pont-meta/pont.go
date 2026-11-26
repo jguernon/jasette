@@ -21,6 +21,7 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
+	waTypes "go.mau.fi/whatsmeow/types"
 
 	"go.mau.fi/mautrix-meta/pkg/messagix"
 	"go.mau.fi/mautrix-meta/pkg/messagix/cookies"
@@ -77,6 +78,13 @@ type Pont struct {
 	presenceOn   bool
 	presenceSeen bool
 	presence     map[int64]presenceRow
+
+	// « En train d'écrire » des fils chiffrés (ecrit.go).
+	e2eeDispo      bool      // l'appareil chiffré s'est déclaré disponible
+	e2eeVue        time.Time // dernière action de l'utilisateur dans un fil chiffré
+	ecritVuFB      bool      // diagnostic : un « en train d'écrire » non chiffré reçu
+	ecritVuE2EE    bool      // diagnostic : un « en train d'écrire » chiffré reçu
+	waPresenceTest func(waTypes.Presence) error
 
 	// « Quoi de neuf ? » (notes.go).
 	notes *notesPont
@@ -651,6 +659,7 @@ func (p *Pont) listLoop() {
 				p.emitList()
 			}
 			p.presenceExpire()
+			p.ecritExpire()
 		}
 	}
 }

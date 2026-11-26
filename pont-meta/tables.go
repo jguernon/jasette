@@ -226,6 +226,10 @@ func (p *Pont) handleTable(tbl *table.LSTable, initial bool) {
 			typings = append(typings, typing{idStr(p.canon(t.ThreadKey)), t.IsTyping})
 		}
 	}
+	if len(typings) > 0 && !p.ecritVuFB {
+		p.ecritVuFB = true
+		log.Info().Str("fil", "non chiffré").Msg("premier « en train d'écrire » Messenger reçu")
+	}
 	presences := p.handlePresenceTable(tbl, me)
 	for id := range touched {
 		if c := p.convs[id]; c != nil {
