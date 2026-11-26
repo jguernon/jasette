@@ -465,6 +465,13 @@ func (p *Pont) msgOut(r *msgRow) Message {
 	if r.SenderID != "" && !m.FromMe && m.Sender == "" {
 		m.Sender = p.peerName(r.SenderID)
 	}
+	// Dans un groupe : l'auteur et sa photo (paresseux, auteurs.go).
+	if !m.FromMe && m.Kind != "admin" && strings.HasPrefix(r.SenderID, "u") && r.SenderID != keyOf('u', p.me) {
+		if g := p.peers[r.Conv]; g != nil && (g.Kind == 'g' || (g.Kind == 'c' && !g.Broadcast)) {
+			m.SenderID = r.SenderID
+			p.auteurs.noter(r.SenderID)
+		}
+	}
 	if m.FromMe && r.Num > 0 {
 		if c := p.convs[r.Conv]; c != nil && r.Num <= c.ReadOutbox {
 			m.Status = "OUTGOING_READ"

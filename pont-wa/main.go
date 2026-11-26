@@ -78,10 +78,12 @@ type Message struct {
 	Media  string `json:"media,omitempty"`
 	FromMe bool   `json:"from_me"`
 	Sender string `json:"sender"`
-	Time   int64  `json:"time"` // millisecondes
-	Status string `json:"status"`
-	Kind   string `json:"kind"` // "whatsapp" ou "admin"
-	TmpID  string `json:"tmp_id,omitempty"`
+	// Dans un groupe, le JID de l'auteur ; sa photo arrive par « sender_avatar ».
+	SenderID string `json:"sender_id,omitempty"`
+	Time     int64  `json:"time"` // millisecondes
+	Status   string `json:"status"`
+	Kind     string `json:"kind"` // "whatsapp" ou "admin"
+	TmpID    string `json:"tmp_id,omitempty"`
 
 	Attachments []Attachment `json:"attachments,omitempty"`
 	Reactions   []Reaction   `json:"reactions,omitempty"`

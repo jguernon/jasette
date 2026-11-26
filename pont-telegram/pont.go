@@ -74,6 +74,9 @@ type Pont struct {
 
 	// « Quoi de neuf ? » (notes.go).
 	notes *notesPont
+
+	// La photo des auteurs dans les groupes (auteurs.go, photos_auteurs.go).
+	auteurs *photosAuteurs
 }
 
 func newPont(ctx context.Context) *Pont {
@@ -89,6 +92,8 @@ func newPont(ctx context.Context) *Pont {
 		presence:   map[string]presenceState{},
 	}
 	p.notes = nouvellesNotesTG(p)
+	p.auteurs = p.nouveauxAuteurs()
+	go p.auteurs.boucle(ctx)
 	go p.listLoop()
 	return p
 }

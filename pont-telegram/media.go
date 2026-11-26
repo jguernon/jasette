@@ -201,6 +201,11 @@ func saveAvatarPath(id string, data []byte) (string, error) {
 	return path, nil
 }
 
+var (
+	errPasDImage = errors.New("pas d'image")
+	errHorsLigne = errors.New("hors ligne")
+)
+
 // La photo d'un fil (personne, groupe, canal) : la petite version.
 func (p *Pont) peerAvatar(ctx context.Context, k string) (string, error) {
 	p.mu.Lock()
@@ -208,14 +213,14 @@ func (p *Pont) peerAvatar(ctx context.Context, k string) (string, error) {
 	client := p.client
 	p.mu.Unlock()
 	if c == nil || c.Photo == 0 {
-		return "", errors.New("pas d'image")
+		return "", errPasDImage
 	}
 	id := fmt.Sprintf("avatar:%s:%d", k, c.Photo)
 	if path, ok := avatarFresh(id); ok {
 		return path, nil
 	}
 	if client == nil {
-		return "", errors.New("hors ligne")
+		return "", errHorsLigne
 	}
 	ip, err := p.inputPeer(k)
 	if err != nil {

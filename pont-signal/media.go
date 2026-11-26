@@ -120,6 +120,9 @@ func saveAvatarPath(id string, data []byte) (string, error) {
 	return path, nil
 }
 
+// Pas d'image de profil.
+var errPasDImage = errors.New("pas d'image")
+
 // L'image d'une personne : la photo du carnet d'adresses du téléphone si on
 // l'a reçue, sinon la photo de son profil Signal (chiffrée avec sa clé de profil).
 func (p *Pont) contactAvatar(ctx context.Context, cli *signalmeow.Client, aci string) (string, error) {
@@ -138,7 +141,7 @@ func (p *Pont) contactAvatar(ctx context.Context, cli *signalmeow.Client, aci st
 		return "", fmt.Errorf("contact : %w", err)
 	}
 	if r.Profile.AvatarPath == "" || r.Profile.AvatarPath == "clear" {
-		return "", errors.New("pas d'image")
+		return "", errPasDImage
 	}
 	data, err := cli.DownloadUserAvatar(ctx, r.Profile.AvatarPath, r.Profile.Key)
 	if err != nil {

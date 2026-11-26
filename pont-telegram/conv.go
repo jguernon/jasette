@@ -166,7 +166,11 @@ func (p *Pont) sendList(n int, archive, avatars bool) {
 		for _, it := range items {
 			keys = append(keys, it.ID)
 		}
-		go p.avatars(keys)
+		go func() {
+			p.avatars(keys)
+			// Après les images des groupes : la mosaïque de ceux qui n'en ont pas.
+			p.mosaiques(keys)
+		}()
 	}
 }
 
@@ -211,6 +215,7 @@ func (p *Pont) avatarsOfList(n int) {
 		keys = append(keys, l[i].k)
 	}
 	p.avatars(keys)
+	p.mosaiques(keys)
 }
 
 func (p *Pont) refreshFolder(folder int) {

@@ -264,6 +264,9 @@ func removeAvatar(id string) {
 	}
 }
 
+// Pas de photo, ou cachée (noté pour 6 h).
+var errPasDePhoto = errors.New("pas de photo")
+
 // La photo d'une personne ou d'un groupe (JID texte) : gardée 24 h.
 func (p *Pont) fetchPic(cli *whatsmeow.Client, id string) (string, error) {
 	if path, ok := avatarFresh(id); ok {
@@ -274,7 +277,7 @@ func (p *Pont) fetchPic(cli *whatsmeow.Client, id string) (string, error) {
 	existing := p.picIDs[id]
 	p.mu.Unlock()
 	if sans && time.Since(since) < 6*time.Hour {
-		return "", errors.New("pas de photo")
+		return "", errPasDePhoto
 	}
 	if cli == nil {
 		return "", errors.New("WhatsApp n'est pas connecté")

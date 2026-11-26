@@ -62,6 +62,9 @@ type Pont struct {
 	pairGen       int
 	connCancel    context.CancelFunc
 	lastGroupSync time.Time
+
+	// La photo des auteurs dans les groupes (auteurs.go, photos_auteurs.go).
+	auteurs *photosAuteurs
 }
 
 func newPont(ctx context.Context) *Pont {
@@ -75,6 +78,8 @@ func newPont(ctx context.Context) *Pont {
 	}
 	// Les journaux de libsignal (Rust) passent par le nôtre.
 	signalmeow.SetLogger(log.With().Str("c", "libsignal").Logger())
+	p.auteurs = p.nouveauxAuteurs()
+	go p.auteurs.boucle(ctx)
 	go p.listLoop()
 	return p
 }
@@ -793,7 +798,11 @@ func (p *Pont) sendList(n int, archive, avatars bool) {
 	}
 	emit("conversations", ev)
 	if avatars {
-		go p.avatars(keys)
+		go func() {
+			p.avatars(keys)
+			// Après les images des groupes : la mosaïque de ceux qui n'en ont pas.
+			p.mosaiques(keys)
+		}()
 	}
 }
 
@@ -836,6 +845,11 @@ func (p *Pont) msgOut(r *msgRow) Message {
 	if r.SenderID != "" && !m.FromMe {
 		if n := p.contactName(r.SenderID); n != "" {
 			m.Sender = n
+		}
+		// Dans un groupe : l'auteur (ACI) et sa photo (paresseux, auteurs.go).
+		if c := p.convs[m.Conv]; c != nil && c.Group && m.Kind != "admin" && r.SenderID != p.me.String() {
+			m.SenderID = r.SenderID
+			p.auteurs.noter(r.SenderID)
 		}
 	}
 	m.Reactions = slices.Clone(m.Reactions)

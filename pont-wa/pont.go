@@ -63,6 +63,9 @@ type Pont struct {
 
 	// « Quoi de neuf ? » (notes.go).
 	notes *notesPont
+
+	// La photo des auteurs dans les groupes (auteurs.go, photos_auteurs.go).
+	auteurs *photosAuteurs
 }
 
 func newPont(ctx context.Context) *Pont {
@@ -87,6 +90,8 @@ func newPont(ctx context.Context) *Pont {
 		listCount:  50,
 	}
 	p.notes = nouvellesNotesWA(p)
+	p.auteurs = p.nouveauxAuteurs()
+	go p.auteurs.boucle(ctx)
 	go p.listLoop()
 	return p
 }
@@ -920,7 +925,11 @@ func (p *Pont) sendList(n int, archive, avatars bool) {
 	}
 	emit("conversations", ev)
 	if avatars {
-		go p.avatars(keys)
+		go func() {
+			p.avatars(keys)
+			// Après les images des groupes : la mosaïque de ceux qui n'en ont pas.
+			p.mosaiques(keys)
+		}()
 	}
 }
 
@@ -1027,6 +1036,11 @@ func (p *Pont) msgOut(r *msgRow) Message {
 	if r.SenderJID != "" && !m.FromMe {
 		if n := p.nameOf(r.SenderJID); n != "" {
 			m.Sender = n
+		}
+		// Dans un groupe : l'auteur et sa photo (paresseux, auteurs.go).
+		if c := p.convs[m.Conv]; c != nil && c.Group && !p.isMe(p.cli, r.SenderJID) {
+			m.SenderID = r.SenderJID
+			p.auteurs.noter(r.SenderJID)
 		}
 	}
 	m.Reactions = slices.Clone(m.Reactions)

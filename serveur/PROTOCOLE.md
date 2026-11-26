@@ -1306,8 +1306,9 @@ tout reste comme avant) :
   `@moi` ; WhatsApp : mention de mon numéro ou de mon LID) ;
 - `reply_to_me` (booléen) : il répond à un de mes messages.
 - `sender_id` (chaîne) : l'id de l'auteur chez le service, sans préfixe
-  (Discord : salons et groupes privés). Sa photo arrive à part, par
-  `sender_avatar`.
+  (Discord : salons et groupes privés ; Messenger, Instagram : FBID ;
+  WhatsApp : JID ; Signal : ACI ; Telegram : `u<id>`), sur les messages
+  des autres dans un groupe. Sa photo arrive à part, par `sender_avatar`.
 
 **Images** (événements facultatifs ; `path` est réécrit en mode serveur
 comme toute clé `path`, §6) :
@@ -1330,14 +1331,41 @@ comme toute clé `path`, §6) :
   `messenger` ou `instagram` ; une fois par personne et par session, au
   plus 20 téléchargements par minute, photos prises dans le cache des fils
   à deux.
+  Les ponts WhatsApp, Signal et Telegram aussi, avec plus de prudence
+  (`photos_auteurs.go`, même fichier dans les trois) :
+  - WhatsApp : `GetProfilePictureInfo` de l'auteur (mêmes fichiers que
+    les photos des fils à deux) ; Signal : la photo du carnet d'adresses
+    du téléphone si on l'a, sinon le profil de l'auteur et sa photo
+    chiffrée (clé de profil) ; Telegram : la petite photo de profil de
+    l'utilisateur ;
+  - paresseux : seulement pour les auteurs des messages réellement
+    chargés ou reçus dans un groupe ;
+  - une fois par personne et par jour, avec un état sur le disque
+    (`<données>/<service>/auteurs.json`) : une photo déjà connue est
+    redonnée sans réseau (une fois par session, le serveur la rejoue) ;
+  - au plus 10 requêtes par minute et par service, étalées (une toutes
+    les 6 s), et 200 par jour ; une seule petite file (32), jamais de
+    rafale à l'ouverture d'un gros groupe : un auteur qui n'y entre pas
+    attend d'être revu ;
+  - un refus du service (limite de débit, confidentialité, pas de photo,
+    erreur du serveur) garde les initiales, sans nouvel essai avant le
+    lendemain ; une panne passagère (réseau, pont pas connecté) n'est pas
+    notée.
 - `{"ev":"avatars_groupe","conv":…,"members":[{"name":…,"color":…,"path":…},…]}` :
   pour un **groupe sans image propre**, les photos de ses premiers membres
-  (2 à 4). Le bureau en compose une mosaïque ; Android prend la première
-  photo. N'importe quel pont peut l'envoyer (Google, Messenger) : `color`
-  peut être vide (couleur tirée du nom), `path` vide (initiales). Le pont
+  (2 à 4). Le bureau et Android en composent la même mosaïque (deux en
+  diagonale, trois en triangle, quatre en grille ; Android aussi dans les
+  notifications). N'importe quel pont peut l'envoyer (Google, Messenger,
+  Instagram, WhatsApp, Signal, Telegram) : `color` peut être vide
+  (couleur par défaut), `path` vide (initiales). Le pont
   Messenger l'envoie avec chaque liste, pour les groupes montrés, avec les
   photos de membres du même cache que les fils à deux (une fois par
-  personne et par jour).
+  personne et par jour). WhatsApp et Signal l'envoient après les images
+  des fils de chaque liste, pour leurs groupes sans image, avec les
+  membres connus et **seulement les photos déjà sur le disque** (fils à
+  deux, auteurs) : aucune requête de plus. Telegram, qui ne donne pas la
+  liste des membres sans requête, prend les derniers auteurs gardés du
+  groupe. Pas de mosaïque sans au moins deux membres et une photo.
 
 **Comment un pont fait apparaître des espaces dans Groupes** : les clients
 ne connaissent aucun service en particulier dans l'onglet Groupes ; tout
