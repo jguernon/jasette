@@ -1364,6 +1364,10 @@ pub struct Marques {
     /// Les services où « Quoi de neuf ? » publie (marque `notes_services`) ;
     /// vide : « tout » (`["tout"]` sur le fil). Toujours passé par `services_notes`.
     pub notes_services: Vec<String>,
+    /// L'ordre des services choisi dans « Dans la boîte de réception » (marque
+    /// `ordre_services`, leurs clés) ; vide : l'ordre par défaut. Toujours
+    /// passé par `ordre_services`.
+    pub ordre_services: Vec<String>,
     /// La fiche de la personne : les liens faits à la main (marque `personnes`).
     pub personnes: Vec<Personne>,
     /// Les paires « Pas la même personne » (marque `personnes_refus`), rangées.
@@ -1390,6 +1394,20 @@ pub fn services_notes(v: Option<&Value>) -> Vec<String> {
         if n == "tout" {
             return Vec::new();
         }
+        if !n.is_empty() && n.len() <= 32 && !r.iter().any(|x| x == n) && r.len() < 32 {
+            r.push(n.to_string());
+        }
+    }
+    r
+}
+
+/// La marque `ordre_services` rangée comme dans `Marques::ordre_services` :
+/// les clés, sans doublon ni clé vide (32 au plus, de 32 octets au plus),
+/// comme le serveur ; absente ou mal formée : vide.
+pub fn ordre_services(v: Option<&Value>) -> Vec<String> {
+    let Some(Value::Array(a)) = v else { return Vec::new() };
+    let mut r: Vec<String> = Vec::new();
+    for n in a.iter().filter_map(Value::as_str) {
         if !n.is_empty() && n.len() <= 32 && !r.iter().any(|x| x == n) && r.len() < 32 {
             r.push(n.to_string());
         }
@@ -1428,6 +1446,7 @@ impl Marques {
             && self.notes_musique.is_empty()
             && self.notes_musique_format.is_empty()
             && self.notes_services.is_empty()
+            && self.ordre_services.is_empty()
             && self.personnes.is_empty()
             && self.personnes_refus.is_empty()
             && self.contacts_perso.is_empty()
@@ -1463,6 +1482,8 @@ impl Marques {
             notes_musique: dabord.notes_musique.clone(),
             notes_musique_format: dabord.notes_musique_format.clone(),
             notes_services: dabord.notes_services.clone(),
+            // L'ordre de `dabord` ; vide (jamais choisi), celui de `ensuite`.
+            ordre_services: if dabord.ordre_services.is_empty() { ensuite.ordre_services.clone() } else { dabord.ordre_services.clone() },
             personnes: unir_personnes(&dabord.personnes, &ensuite.personnes),
             personnes_refus: nettoyer_refus(dabord.personnes_refus.iter().chain(ensuite.personnes_refus.iter()).cloned().collect()),
             // Comme les moods : les entrées de `dabord` gagnent.
@@ -1489,6 +1510,7 @@ impl Marques {
             notes_musique: self.notes_musique.clone(),
             notes_musique_format: self.notes_musique_format.clone(),
             notes_services: self.notes_services.clone(),
+            ordre_services: self.ordre_services.clone(),
             // Les personnes changées ici (absentes ou différentes chez `autre`).
             personnes: self.personnes.iter().filter(|p| !autre.personnes.contains(p)).cloned().collect(),
             personnes_refus: self.personnes_refus.iter().filter(|p| !autre.personnes_refus.contains(p)).cloned().collect(),
@@ -1518,6 +1540,7 @@ pub enum NouvelleMarques {
     /// `avec_notes` : de même pour un serveur d'avant les marques `notes_*`.
     /// `avec_personnes` : de même pour un serveur d'avant `personnes`.
     /// `avec_contacts_perso` : de même pour un serveur d'avant `contacts_perso`.
+    /// `avec_ordre` : de même pour un serveur d'avant `ordre_services`.
     Recues {
         marques: Marques,
         version: u64,
@@ -1534,6 +1557,7 @@ pub enum NouvelleMarques {
         avec_notes: bool,
         avec_personnes: bool,
         avec_contacts_perso: bool,
+        avec_ordre: bool,
     },
     /// La connexion est tombée : rien n'est plus en vol.
     Coupure,
@@ -1588,6 +1612,7 @@ impl NouvelleMarques {
                     .unwrap_or_default(),
                 notes_musique_format: format_musique(v.get("notes_musique_format")),
                 notes_services: services_notes(v.get("notes_services")),
+                ordre_services: ordre_services(v.get("ordre_services")),
                 personnes: lire_personnes(v.get("personnes")),
                 personnes_refus: lire_refus(v.get("personnes_refus")),
                 contacts_perso: lire_contacts_perso(v.get("contacts_perso")),
@@ -1606,6 +1631,7 @@ impl NouvelleMarques {
             avec_notes: v.get("notes_services").is_some_and(Value::is_array),
             avec_personnes: v.get("personnes").is_some_and(Value::is_array),
             avec_contacts_perso: v.get("contacts_perso").is_some_and(Value::is_object),
+            avec_ordre: v.get("ordre_services").is_some_and(Value::is_array),
         })
     }
 }
@@ -1715,6 +1741,7 @@ impl SuiviMarques {
             "notes_musique": c.listes.notes_musique,
             "notes_musique_format": if c.listes.notes_musique_format.is_empty() { "artiste" } else { c.listes.notes_musique_format.as_str() },
             "notes_services": services_notes_json(&c.listes.notes_services),
+            "ordre_services": c.listes.ordre_services,
             "personnes": personnes_json(&c.listes.personnes),
             "personnes_refus": refus_json(&c.listes.personnes_refus),
             "contacts_perso": c.listes.contacts_perso,
@@ -1747,6 +1774,7 @@ impl SuiviMarques {
                 avec_notes,
                 avec_personnes,
                 avec_contacts_perso,
+                avec_ordre,
             } => {
                 // Un serveur d'avant `archives` : nos archives restent les nôtres, jamais vidées.
                 let mut marques = marques;
@@ -1797,6 +1825,10 @@ impl SuiviMarques {
                 if !avec_contacts_perso {
                     marques.contacts_perso = c.listes.contacts_perso.clone();
                 }
+                // Et pour `ordre_services` (serveur d'avant l'ordre partagé) : le nôtre reste.
+                if !avec_ordre {
+                    marques.ordre_services = c.listes.ordre_services.clone();
+                }
                 (marques, version, id, refus)
             }
         };
@@ -1829,7 +1861,11 @@ impl SuiviMarques {
             c.a_envoyer = !c.listes.vide();
             return self.pousser(c);
         }
-        if !c.a_envoyer && c.version > 0 && c.version <= v {
+        // L'ordre des services choisi ici avant qu'il soit partagé, et le
+        // serveur n'en a pas encore : le nôtre part (une seule fois ; ensuite
+        // la marque fait foi). Voir l'union, qui prend alors le nôtre.
+        let migrer_ordre = s.ordre_services.is_empty() && !c.listes.ordre_services.is_empty();
+        if !c.a_envoyer && c.version > 0 && c.version <= v && !migrer_ordre {
             // Rien de changé ici : le serveur est la source.
             c.listes = s;
             c.version = v;
@@ -2091,6 +2127,7 @@ mod essais {
             avec_notes: true,
             avec_personnes: true,
             avec_contacts_perso: true,
+            avec_ordre: true,
         }
     }
 
@@ -2523,6 +2560,7 @@ mod essais {
             avec_notes: true,
             avec_personnes: true,
             avec_contacts_perso: true,
+            avec_ordre: true,
         };
         let t = s.recu(r, &mut c).expect("renvoi");
         assert_eq!(t["marques"]["favoris"], json!(["z", "a", "y", "x"]));
@@ -2530,6 +2568,70 @@ mod essais {
         // Une coupure : plus rien en vol, on attend le rejeu.
         s.recu(NouvelleMarques::Coupure, &mut c);
         assert!(s.changement(&mut c).is_none());
+    }
+
+    fn ordre(l: &[&str]) -> Vec<String> {
+        l.iter().map(|x| x.to_string()).collect()
+    }
+
+    /// L'ordre des services choisi avant le partage : envoyé une fois au
+    /// serveur qui n'en a pas ; ensuite, la marque du serveur fait foi.
+    #[test]
+    fn marques_ordre_services_migration() {
+        let mut s = SuiviMarques::default();
+        let local = Marques { ordre_services: ordre(&["signal", "google"]), ..m(&[], &["a"], &[]) };
+        let mut c = CopieMarques { listes: local.clone(), version: 5, a_envoyer: false };
+        // Le serveur (déjà synchronisé, version 6) n'a pas d'ordre : le nôtre part.
+        let t = s.recu(recues(m(&[], &["a", "b"], &[]), 6, None), &mut c).expect("migration");
+        assert_eq!(t["marques"]["ordre_services"], json!(["signal", "google"]));
+        assert_eq!(t["marques"]["favoris"], json!(["a", "b"]));
+        assert_eq!(t["marques"]["version"], 6);
+        let accepte = Marques { ordre_services: ordre(&["signal", "google"]), ..m(&[], &["a", "b"], &[]) };
+        assert!(s.recu(recues(accepte.clone(), 7, Some(id_de(&t))), &mut c).is_none());
+        assert_eq!(c, CopieMarques { listes: accepte, version: 7, a_envoyer: false });
+        // Un autre appareil change l'ordre : la marque fait foi, rien ne repart.
+        let autre = Marques { ordre_services: ordre(&["x", "signal"]), ..m(&[], &["a", "b"], &[]) };
+        assert!(s.recu(recues(autre.clone(), 8, None), &mut c).is_none());
+        assert_eq!(c.listes.ordre_services, ordre(&["x", "signal"]));
+        // Changé ici : l'ordre complet part.
+        c.listes.ordre_services = ordre(&["signal", "x"]);
+        let t = s.changement(&mut c).expect("changement");
+        assert_eq!(t["marques"]["ordre_services"], json!(["signal", "x"]));
+    }
+
+    /// Le serveur a déjà un ordre : il remplace l'ordre local, sans union.
+    #[test]
+    fn marques_ordre_services_du_serveur() {
+        let mut s = SuiviMarques::default();
+        let local = Marques { ordre_services: ordre(&["signal"]), ..Default::default() };
+        let mut c = CopieMarques { listes: local, version: 3, a_envoyer: false };
+        let serveur = Marques { ordre_services: ordre(&["x", "google"]), ..Default::default() };
+        assert!(s.recu(recues(serveur, 4, None), &mut c).is_none());
+        assert_eq!(c.listes.ordre_services, ordre(&["x", "google"]));
+        // Première connexion (union) : l'ordre du serveur gagne aussi.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { listes: Marques { ordre_services: ordre(&["signal"]), ..m(&[], &["z"], &[]) }, version: 0, a_envoyer: true };
+        let serveur = Marques { ordre_services: ordre(&["x"]), ..m(&[], &["a"], &[]) };
+        let t = s.recu(recues(serveur, 4, None), &mut c).expect("union");
+        assert_eq!(t["marques"]["ordre_services"], json!(["x"]));
+        assert_eq!(t["marques"]["favoris"], json!(["a", "z"]));
+    }
+
+    /// Un serveur d'avant `ordre_services` : l'ordre local reste, pour cet appareil seul.
+    #[test]
+    fn marques_ordre_services_ancien_serveur() {
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { listes: Marques { ordre_services: ordre(&["signal"]), ..Default::default() }, version: 3, a_envoyer: false };
+        let v = json!({"head": [], "favoris": ["a"], "epingles": [], "version": 4});
+        let n = NouvelleMarques::lire(&v).expect("lue");
+        assert!(matches!(n, NouvelleMarques::Recues { avec_ordre: false, .. }));
+        assert!(s.recu(n, &mut c).is_none());
+        assert_eq!(c.listes.ordre_services, ordre(&["signal"]));
+        assert_eq!(c.listes.favoris, ordre(&["a"]));
+        // Lue d'un serveur à jour : nettoyée comme par le serveur.
+        let v = json!({"head": [], "favoris": [], "epingles": [], "version": 4, "ordre_services": ["x", "", "x", 3, "google"]});
+        let Some(NouvelleMarques::Recues { marques, avec_ordre: true, .. }) = NouvelleMarques::lire(&v) else { panic!("non lue") };
+        assert_eq!(marques.ordre_services, ordre(&["x", "google"]));
     }
 
     /// Un appareil branché au serveur de test, avec sa copie des marques.

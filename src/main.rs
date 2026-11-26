@@ -1778,8 +1778,10 @@ struct Reglages {
     services_caches: Vec<String>,
     /// L'ordre des services choisi dans « Dans la boîte de réception » (leurs
     /// clés), appliqué partout où les services sont en liste (voir
-    /// `ordonner_services`). Vide : l'ordre par défaut. Propre à cet appareil,
-    /// comme `services_caches`.
+    /// `ordonner_services`). Vide : l'ordre par défaut. Partagé par le serveur
+    /// Jasette s'il y en a un (marque `ordre_services`, comme l'ordre des
+    /// favoris) ; gardé ici sinon. Un ordre choisi avant le partage est envoyé
+    /// au serveur s'il n'en a pas encore (`SuiviMarques::recu`).
     #[serde(default)]
     ordre_services: Vec<String>,
     /// « Utiliser les photos de mes contacts » (les contacts du téléphone, par Google Messages).
@@ -2028,6 +2030,7 @@ impl Reglages {
                     notes_musique: self.notes_musique.clone(),
                     notes_musique_format: self.notes_musique_format.clone(),
                     notes_services: self.notes_services.clone(),
+                    ordre_services: self.ordre_services.clone(),
                     personnes: self.personnes.clone(),
                     personnes_refus: self.personnes_refus.clone(),
                     contacts_perso: self.contacts_perso.clone(),
@@ -2055,6 +2058,7 @@ impl Reglages {
         self.notes_musique = b.copie.listes.notes_musique;
         self.notes_musique_format = b.copie.listes.notes_musique_format;
         self.notes_services = b.copie.listes.notes_services;
+        self.ordre_services = b.copie.listes.ordre_services;
         self.personnes = b.copie.listes.personnes;
         self.personnes_refus = b.copie.listes.personnes_refus;
         self.contacts_perso = b.copie.listes.contacts_perso;
@@ -10828,7 +10832,7 @@ impl Jasette {
                                 cx.stop_propagation();
                                 if let Some(v) = avant {
                                     this.reglages.echanger_services(svc, v);
-                                    this.reglages.garder();
+                                    this.marques_changees();
                                 }
                                 cx.notify();
                             },
@@ -10840,7 +10844,7 @@ impl Jasette {
                                 cx.stop_propagation();
                                 if let Some(v) = apres {
                                     this.reglages.echanger_services(svc, v);
-                                    this.reglages.garder();
+                                    this.marques_changees();
                                 }
                                 cx.notify();
                             },
@@ -14148,6 +14152,12 @@ mod essais_reglages {
         let mut r = Reglages::default();
         r.echanger_services(Service::GoogleMessages, Service::Messenger);
         assert_eq!(cles(&r.services_ordonnes()[..3]), ["messenger", "google", "instagram"]);
+        // L'ordre est une marque : il passe par le bloc des marques (et le serveur).
+        assert_eq!(r.bloc().copie.listes.ordre_services, r.ordre_services);
+        let mut b = r.bloc();
+        b.copie.listes.ordre_services = vec!["x".into()];
+        r.poser_bloc(b);
+        assert_eq!(r.ordre_services, vec!["x".to_string()]);
     }
 
     /// Le filtre « Cacher les conversations plus anciennes » : l'âge du dernier
