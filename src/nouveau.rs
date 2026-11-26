@@ -510,6 +510,7 @@ impl Jasette {
                 Service::X => t("Nouvelle conversation X").to_string(),
                 Service::Telegram => t("Nouvelle conversation Telegram").to_string(),
                 Service::Bluesky => t("Nouvelle conversation Bluesky").to_string(),
+                Service::Discord => t("Nouvelle conversation Discord").to_string(),
                 Service::Messenger => t("Nouvelle conversation Messenger").to_string(),
             };
             let detail = if groupe { svc.court().to_string() } else { detail };

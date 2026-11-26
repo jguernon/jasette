@@ -884,6 +884,7 @@ enum Service {
     X,
     Telegram,
     Bluesky,
+    Discord,
 }
 
 impl Service {
@@ -897,6 +898,7 @@ impl Service {
             Service::X => "X",
             Service::Telegram => "Telegram",
             Service::Bluesky => "Bluesky",
+            Service::Discord => "Discord",
         }
     }
 
@@ -911,6 +913,7 @@ impl Service {
             Service::X => "X",
             Service::Telegram => "Telegram",
             Service::Bluesky => "Bluesky",
+            Service::Discord => "Discord",
         }
     }
 
@@ -925,6 +928,7 @@ impl Service {
             Service::X => "x:",
             Service::Telegram => "t:",
             Service::Bluesky => "b:",
+            Service::Discord => "d:",
         }
     }
 
@@ -951,13 +955,14 @@ impl Service {
             Service::X => "x",
             Service::Telegram => "telegram",
             Service::Bluesky => "bluesky",
+            Service::Discord => "discord",
         }
     }
 
     /// Un service facultatif : son pont n'existe que si son binaire est là
     /// (ou si le serveur Jasette l'offre) ; sinon il est absent de l'interface.
     fn facultatif(self) -> bool {
-        matches!(self, Service::WhatsApp | Service::Signal | Service::X | Service::Telegram | Service::Bluesky)
+        matches!(self, Service::WhatsApp | Service::Signal | Service::X | Service::Telegram | Service::Bluesky | Service::Discord)
     }
 
     /// Les ids d'éléments propres à ce service (barre latérale, pastilles).
@@ -971,6 +976,7 @@ impl Service {
             Service::X => "r-x",
             Service::Telegram => "r-telegram",
             Service::Bluesky => "r-bluesky",
+            Service::Discord => "r-discord",
         }
     }
 
@@ -984,6 +990,7 @@ impl Service {
             Service::X => "chargement-x",
             Service::Telegram => "chargement-telegram",
             Service::Bluesky => "chargement-bluesky",
+            Service::Discord => "chargement-discord",
         }
     }
 }
@@ -1023,8 +1030,8 @@ fn lancer_pont(r: &Reglages, svc: Service) -> Result<Pont, String> {
 
 /// Les services autres que Google, tous gérés comme un compte Meta : le pont
 /// Meta (une copie par service) pour Messenger et Instagram, un pont chacun
-/// (même protocole) pour WhatsApp, Signal et X.
-const SERVICES_META: [Service; 7] = [
+/// (même protocole) pour WhatsApp, Signal, X, Telegram, Bluesky et Discord.
+const SERVICES_META: [Service; 8] = [
     Service::Messenger,
     Service::Instagram,
     Service::WhatsApp,
@@ -1032,6 +1039,7 @@ const SERVICES_META: [Service; 7] = [
     Service::X,
     Service::Telegram,
     Service::Bluesky,
+    Service::Discord,
 ];
 
 /// Un compte Meta : son pont, son état, sa fenêtre de connexion.
@@ -1123,6 +1131,9 @@ fn image_service(s: Service, taille: f32) -> Arc<gpui::Image> {
         Service::Signal => (4u8, variantes!("signal")),
         Service::Telegram => (6u8, variantes!("telegram")),
         Service::Bluesky => (7u8, variantes!("bluesky")),
+        // EGA, Live et Sirène : la manette en pixels, aux couleurs EGA.
+        Service::Discord if th().ega || retro::retro() => (9u8, variantes!("discord-ega")),
+        Service::Discord => (8u8, variantes!("discord")),
         Service::X => return image_service_svg(s, taille),
     };
     let voulu = taille * 2.;
@@ -1958,6 +1969,7 @@ struct Jasette {
     x: CompteMeta,
     telegram: CompteMeta,
     bluesky: CompteMeta,
+    discord: CompteMeta,
     /// L'écran d'association ouvert (WhatsApp, Signal ou X), dans Comptes.
     ajout_service: Option<Service>,
     /// WhatsApp : le numéro pour « Associer avec un numéro de téléphone ».
@@ -1980,6 +1992,10 @@ struct Jasette {
     /// Bluesky : l'identifiant (nom ou courriel) et le mot de passe d'app.
     ident_bs: Entity<InputState>,
     mdp_bs: Entity<InputState>,
+    /// Discord : le jeton collé à la main, et le nom du compte qui vient de
+    /// scanner le code QR (à confirmer sur le téléphone).
+    jeton_dc: Entity<InputState>,
+    qr_lu_dc: Option<String>,
     besoin_nip: bool,
     nip: Entity<InputState>,
     convs: Vec<Conv>,
@@ -2508,6 +2524,7 @@ fn adresse_appel(conv: &Conv) -> Option<String> {
         Service::Messenger if conv.e2ee => Some(format!("https://www.messenger.com/e2ee/t/{id}")),
         Service::Messenger => Some(format!("https://www.messenger.com/t/{id}")),
         Service::Instagram => Some(format!("https://www.instagram.com/direct/t/{id}/")),
+        Service::Discord => Some(format!("https://discord.com/channels/@me/{id}")),
         // Pas d'appel par le web pour ceux-là : l'app du téléphone.
         Service::WhatsApp | Service::Signal | Service::X | Service::Telegram | Service::Bluesky => None,
     }
@@ -2688,6 +2705,15 @@ impl Jasette {
         cx.subscribe_in(&mdp_bs, window, |this, _state, ev: &InputEvent, window, cx| {
             if let InputEvent::PressEnter { .. } = ev {
                 this.bs_connecter(window, cx);
+                cx.notify();
+            }
+        })
+        .detach();
+        // Discord : le jeton (deuxième choix, après le code QR).
+        let jeton_dc = cx.new(|cx| InputState::new(window, cx).placeholder(t("Jeton Discord")).masked(true));
+        cx.subscribe_in(&jeton_dc, window, |this, _state, ev: &InputEvent, window, cx| {
+            if let InputEvent::PressEnter { .. } = ev {
+                this.dc_connecter_jeton(window, cx);
                 cx.notify();
             }
         })
@@ -2890,6 +2916,7 @@ impl Jasette {
             x: CompteMeta::lancer(Service::X, &reglages),
             telegram: CompteMeta::lancer(Service::Telegram, &reglages),
             bluesky: CompteMeta::lancer(Service::Bluesky, &reglages),
+            discord: CompteMeta::lancer(Service::Discord, &reglages),
             ajout_service: None,
             telephone_wa,
             cookies_x: None,
@@ -2904,6 +2931,8 @@ impl Jasette {
             api_hash_tg,
             ident_bs,
             mdp_bs,
+            jeton_dc,
+            qr_lu_dc: None,
             besoin_nip: false,
             nip,
             plus_anciens: cache.fils.iter().map(|(k, f)| (k.clone(), f.more)).collect(),
@@ -3059,6 +3088,7 @@ impl Jasette {
             Service::X => &self.x,
             Service::Telegram => &self.telegram,
             Service::Bluesky => &self.bluesky,
+            Service::Discord => &self.discord,
             Service::Messenger | Service::GoogleMessages => &self.messenger,
         }
     }
@@ -3071,6 +3101,7 @@ impl Jasette {
             Service::X => &mut self.x,
             Service::Telegram => &mut self.telegram,
             Service::Bluesky => &mut self.bluesky,
+            Service::Discord => &mut self.discord,
             Service::Messenger | Service::GoogleMessages => &mut self.messenger,
         }
     }
@@ -3129,6 +3160,9 @@ impl Jasette {
                         self.etape_tg = None;
                         self.indice_tg = None;
                     }
+                    if svc == Service::Discord {
+                        self.qr_lu_dc = None;
+                    }
                 }
                 if etat == Etat::NonAssocie {
                     self.convs.retain(|c| service_de(&c.id) != svc);
@@ -3145,7 +3179,14 @@ impl Jasette {
             }
             // L'association de WhatsApp et de Signal : un QR renouvelé, ou
             // (WhatsApp) le code à taper sur le téléphone, qui remplace les QR.
+            // Discord : le code QR a été lu ; reste à confirmer sur le téléphone.
+            "qr_scanned" => {
+                self.qr_lu_dc = Some(v.get("name").and_then(Value::as_str).unwrap_or_default().to_string());
+            }
             "qr" => {
+                if svc == Service::Discord {
+                    self.qr_lu_dc = None;
+                }
                 if let Some(data) = v.get("data").or(v.get("code")).and_then(Value::as_str) {
                     let m = self.meta_mut(svc);
                     m.qr = qrcode::QrCode::new(data.as_bytes()).ok();
@@ -3275,10 +3316,11 @@ impl Jasette {
     /// dont les cookies reviennent par `connexion`. WhatsApp et Signal :
     /// l'écran d'association, avec les QR du pont (ou du rejeu du serveur).
     fn connecter_meta(&mut self, svc: Service) {
-        // Telegram et Bluesky : leur écran (numéro et code, code QR, ou
-        // identifiant et mot de passe d'app) ; rien n'est envoyé encore.
-        if matches!(svc, Service::Telegram | Service::Bluesky) {
+        // Telegram, Bluesky et Discord : leur écran (numéro et code, code QR,
+        // identifiant et mot de passe d'app, ou jeton) ; rien n'est envoyé encore.
+        if matches!(svc, Service::Telegram | Service::Bluesky | Service::Discord) {
             self.erreur = None;
+            self.qr_lu_dc = None;
             self.ajout_service = Some(svc);
             self.section = Some(Section::Comptes);
             self.etape_tg = None;
@@ -3367,6 +3409,31 @@ impl Jasette {
         self.mdp_bs.update(cx, |s, cx| s.set_value("", window, cx));
         self.bluesky.etat = Etat::Association;
         self.commande_svc(Service::Bluesky, json!({"cmd": "login", "number": ident, "password": mdp}));
+    }
+
+    /// Discord : la connexion par code QR, à scanner dans l'app Discord du
+    /// téléphone (Paramètres → Scanner le code QR).
+    fn dc_qr(&mut self) {
+        self.erreur = None;
+        self.qr_lu_dc = None;
+        self.discord.qr = None;
+        self.discord.etat = Etat::Association;
+        self.commande_svc(Service::Discord, json!({"cmd": "pair"}));
+    }
+
+    /// Discord : le jeton du compte, collé à la main. Le pont le garde seul
+    /// (session.json, 0600).
+    fn dc_connecter_jeton(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let jeton: String = self.jeton_dc.read(cx).value().trim().trim_matches('"').to_string();
+        if jeton.len() < 50 || jeton.contains(char::is_whitespace) {
+            self.erreur = Some(t("Collez le jeton de votre compte Discord (une longue suite de lettres et de chiffres, avec deux points).").into());
+            return;
+        }
+        self.erreur = None;
+        self.jeton_dc.update(cx, |s, cx| s.set_value("", window, cx));
+        self.discord.qr = None;
+        self.discord.etat = Etat::Association;
+        self.commande_svc(Service::Discord, json!({"cmd": "login", "token": jeton}));
     }
 
     /// Telegram : le numéro → Telegram envoie un code dans l'app (ou par SMS).
@@ -5045,12 +5112,13 @@ impl Jasette {
                 )
             })
             // WhatsApp, Signal et X : seulement s'ils ont donné une photo.
-            .children([Service::WhatsApp, Service::Signal, Service::X, Service::Telegram, Service::Bluesky].into_iter().filter(|s| self.meta(*s).avatar.is_some()).map(|svc| {
+            .children([Service::WhatsApp, Service::Signal, Service::X, Service::Telegram, Service::Bluesky, Service::Discord].into_iter().filter(|s| self.meta(*s).avatar.is_some()).map(|svc| {
                 let (id, titre, initiale, couleur) = match svc {
                     Service::WhatsApp => ("av-wa", t("Avatar de WhatsApp"), "W", "#25d366"),
                     Service::Signal => ("av-signal", t("Avatar de Signal"), "S", "#3a76f0"),
                     Service::Telegram => ("av-telegram", t("Avatar de Telegram"), "T", "#2aabee"),
                     Service::Bluesky => ("av-bluesky", t("Avatar de Bluesky"), "B", "#1185fe"),
+                    Service::Discord => ("av-discord", t("Avatar de Discord"), "D", "#5865f2"),
                     _ => ("av-x", t("Avatar de X"), "X", "#000000"),
                 };
                 let compte = self.meta(svc);
@@ -9199,6 +9267,9 @@ impl Jasette {
                             let (nom, bibli) = match svc {
                                 Service::WhatsApp => ("WhatsApp", "whatsmeow (mautrix-whatsapp)"),
                                 Service::Signal => ("Signal", "signalmeow (mautrix-signal)"),
+                                Service::Telegram => ("Telegram", "gotd/td"),
+                                Service::Bluesky => ("Bluesky", "XRPC (AT Protocol)"),
+                                Service::Discord => ("Discord", "mautrix-discord"),
                                 _ => ("X", "twittermeow (mautrix-twitter)"),
                             };
                             [ligne_info(nom, bibli.into()).into_any_element(), separateur().into_any_element()]
@@ -10212,6 +10283,7 @@ impl Jasette {
                 Service::Signal => "choix-signal",
                 Service::Telegram => "choix-telegram",
                 Service::Bluesky => "choix-bluesky",
+                Service::Discord => "choix-discord",
                 _ => "choix-x",
             };
             carte = carte.child(
@@ -10388,6 +10460,60 @@ impl Jasette {
                         })));
                 }
             }
+            Service::Discord => {
+                let champ = |e: &Entity<InputState>| verre(0.8, 999.).flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
+                if let Some(nom) = &self.qr_lu_dc {
+                    // Lu par le téléphone : Discord y demande de confirmer.
+                    let qui = if nom.is_empty() { String::new() } else { format!(" ({nom})") };
+                    carte = carte.child(texte(format!("{}{qui}", t("Code lu. Confirmez la connexion sur votre téléphone, dans Discord."))));
+                } else if let Some(q) = &compte.qr {
+                    carte = carte
+                        .child(texte(t("Sur votre téléphone : Discord → Paramètres → Scanner le code QR, puis scannez ce code.").into()))
+                        .child(qr(q));
+                } else if matches!(compte.etat, Etat::Association | Etat::Connexion) {
+                    carte = carte.child(attente("Un instant…"));
+                } else {
+                    carte = carte
+                        .child(texte(t("Jasette lit et envoie vos messages privés Discord (pas les salons des serveurs). Le plus simple : un code QR à scanner avec l'app Discord du téléphone.").into()))
+                        .child(Self::bouton_principal("dc-qr", t("Se connecter avec un code QR")).on_click(cx.listener(|this, _, _, cx| {
+                            this.dc_qr();
+                            cx.notify();
+                        })))
+                        .child(div().mt(px(8.)).w_full().h(px(1.)).bg(th().survol))
+                        .child(texte(t("Ou collez le jeton de votre compte (Discord dans un navigateur → outils de développement → Réseau → en-tête « Authorization » d'une requête). Ne le donnez à personne : il ouvre votre compte.").into()))
+                        .child(
+                            div().w_full().flex().flex_row().items_center().gap(px(8.)).child(champ(&self.jeton_dc)).child(
+                                bouton_texte("dc-jeton", t("Se connecter"), ACCENT).on_click(cx.listener(|this, _, window, cx| {
+                                    this.dc_connecter_jeton(window, cx);
+                                    cx.notify();
+                                })),
+                            ),
+                        );
+                }
+                carte = carte.child(
+                    div()
+                        .text_center()
+                        .text_size(px(12.))
+                        .text_color(th().texte_pale)
+                        .child(t("Discord n'autorise pas officiellement les clients tiers : utilisez Jasette à vos risques. Jasette n'agit que sur vos actions.")),
+                );
+                if compte.qr.is_some() || self.qr_lu_dc.is_some() {
+                    carte = carte.child(
+                        div()
+                            .id("dc-recommencer")
+                            .text_size(px(13.))
+                            .text_color(th().accent)
+                            .cursor_pointer()
+                            .hover(|s| s.opacity(0.7))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                // Un nouveau « pair » remplace le précédent.
+                                this.dc_qr();
+                                cx.notify();
+                            }))
+                            .child(t("Recommencer")),
+                    );
+                }
+            }
             Service::Telegram => {
                 let champ = |e: &Entity<InputState>| verre(0.8, 999.).flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
                 let rangee = || div().w_full().flex().flex_row().items_center().gap(px(8.));
@@ -10541,7 +10667,7 @@ impl Jasette {
                 div()
                     .text_center()
                     .text_color(th().texte)
-                    .child(t("Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram et Bluesky au même endroit.")),
+                    .child(t("Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram, Bluesky et Discord au même endroit.")),
             );
 
         if let Some(emoji) = &self.emoji {
@@ -10695,6 +10821,7 @@ impl Jasette {
                         Service::Signal => "accueil-signal",
                         Service::Telegram => "accueil-telegram",
                         Service::Bluesky => "accueil-bluesky",
+                        Service::Discord => "accueil-discord",
                         _ => "accueil-x",
                     };
                     service(id, svc).on_click(cx.listener(move |this, _, _, cx| {
@@ -11987,8 +12114,8 @@ fn t(fr: &'static str) -> &'static str {
         "Jasette s'ouvre toute seule à l'ouverture de session : les messages arrivent dès le départ." => "Jasette opens by itself when you log in, so messages arrive right away.",
         "Icône de l'app" => "App icon",
         "Blanche" => "White",
-        "Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram et Bluesky au même endroit." => {
-            "Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram and Bluesky in one place."
+        "Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram, Bluesky et Discord au même endroit." => {
+            "Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram, Bluesky and Discord in one place."
         }
         "Connectez un premier service :" => "Connect a first service:",
         "← Autres services" => "← Other services",
@@ -12141,6 +12268,25 @@ fn t(fr: &'static str) -> &'static str {
         "Avatar de Signal" => "Signal avatar",
         "Avatar de Telegram" => "Telegram avatar",
         "Avatar de Bluesky" => "Bluesky avatar",
+        "Avatar de Discord" => "Discord avatar",
+        "Nouvelle conversation Discord" => "New Discord chat",
+        "Jeton Discord" => "Discord token",
+        "Code lu. Confirmez la connexion sur votre téléphone, dans Discord." => "Code scanned. Confirm the login on your phone, in Discord.",
+        "Sur votre téléphone : Discord → Paramètres → Scanner le code QR, puis scannez ce code." => {
+            "On your phone: Discord → Settings → Scan QR Code, then scan this code."
+        }
+        "Jasette lit et envoie vos messages privés Discord (pas les salons des serveurs). Le plus simple : un code QR à scanner avec l'app Discord du téléphone." => {
+            "Jasette reads and sends your Discord direct messages (not server channels). The easiest way: a QR code to scan with the Discord app on your phone."
+        }
+        "Ou collez le jeton de votre compte (Discord dans un navigateur → outils de développement → Réseau → en-tête « Authorization » d'une requête). Ne le donnez à personne : il ouvre votre compte." => {
+            "Or paste your account token (Discord in a browser → developer tools → Network → “Authorization” header of a request). Never share it: it opens your account."
+        }
+        "Collez le jeton de votre compte Discord (une longue suite de lettres et de chiffres, avec deux points)." => {
+            "Paste your Discord account token (a long string of letters and digits, with two dots)."
+        }
+        "Discord n'autorise pas officiellement les clients tiers : utilisez Jasette à vos risques. Jasette n'agit que sur vos actions." => {
+            "Discord doesn't officially allow third-party clients: use Jasette at your own risk. Jasette only acts on your actions."
+        }
         "Nouvelle conversation Bluesky" => "New Bluesky chat",
         "nom.bsky.social ou courriel" => "name.bsky.social or email",
         "Mot de passe d'app (xxxx-xxxx-xxxx-xxxx)" => "App password (xxxx-xxxx-xxxx-xxxx)",

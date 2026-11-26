@@ -115,7 +115,7 @@ impl Jasette {
             self.presences.clear();
             self.ecrits.clear();
         }
-        for svc in [Service::Messenger, Service::Instagram, Service::WhatsApp, Service::Telegram] {
+        for svc in [Service::Messenger, Service::Instagram, Service::WhatsApp, Service::Telegram, Service::Discord] {
             if let Some(p) = self.meta(svc).pont.as_ref()
                 && p.local()
             {
