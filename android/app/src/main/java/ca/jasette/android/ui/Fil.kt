@@ -961,7 +961,15 @@ private fun Saisie(conv: String, actif: Boolean) {
             Box {
                 // Comme au bureau : le + dans un rond plein.
                 IconButton(
-                    onClick = { choix = true }, enabled = actif,
+                    onClick = {
+                        // SMS du téléphone : l'envoi de MMS n'est pas fait.
+                        if (ca.jasette.android.Depot.estSms(conv)) {
+                            erreurEnvoi = t("Envoi de photos : pas encore en mode SMS")
+                        } else {
+                            choix = true
+                        }
+                    },
+                    enabled = actif,
                     modifier = Modifier.size(HAUT_SAISIE).boutonTheme(HAUT_SAISIE / 2),
                 ) {
                     Icon(Icons.Filled.Add, t("Joindre"), tint = if (actif) P.texteFort else P.textePale)

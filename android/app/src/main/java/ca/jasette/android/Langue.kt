@@ -525,4 +525,24 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Android refuse cette mise à jour : elle n'est pas signée par le même certificat que la Jasette installée." to
         "Android refuses this update: it isn't signed with the same certificate as the installed Jasette.",
     "L'installation a échoué." to "The installation failed.",
+    // SMS du téléphone (PontSms, Réglages → Google Messages, mode autonome).
+    "Utiliser les SMS du téléphone" to "Use phone SMS",
+    "SMS du téléphone" to "Phone SMS",
+    "SMS et MMS de cet appareil, sans compte Google. Les messages RCS (chat) restent dans l'app Messages." to
+        "SMS and MMS from this device, without a Google account. RCS (chat) messages stay in the Messages app.",
+    "Jasette va lire les SMS et MMS de ce téléphone pour les afficher, et envoyer tes réponses par SMS. Android va demander l'accès aux SMS et aux contacts (pour les noms). Rien ne quitte le téléphone." to
+        "Jasette will read this phone's SMS and MMS to show them, and send your replies by SMS. Android will ask for access to SMS and contacts (for names). Nothing leaves the phone.",
+    "Sans l'accès aux SMS, Jasette ne peut pas lire ni envoyer tes messages texte. Tu peux l'accorder dans les paramètres d'Android (Jasette › Autorisations)." to
+        "Without SMS access, Jasette can't read or send your text messages. You can grant it in Android settings (Jasette › Permissions).",
+    "Envoi de photos : pas encore en mode SMS" to "Sending photos: not yet in SMS mode",
+    "SMS : l'accès aux messages texte n'est pas accordé. Touche « Utiliser les SMS du téléphone » pour le redonner." to
+        "SMS: access to text messages isn't granted. Tap “Use phone SMS” to grant it again.",
+    "Réactions : pas en mode SMS" to "Reactions: not in SMS mode",
+    "Supprimer : seulement dans l'app SMS par défaut" to "Delete: only in the default SMS app",
+    "SMS : conversation inconnue" to "SMS: unknown conversation",
+    "SMS : l'envoi n'est pas permis. Touche « Utiliser les SMS du téléphone » dans les réglages." to
+        "SMS: sending isn't allowed. Tap “Use phone SMS” in settings.",
+    "Envoi aux groupes : pas encore en mode SMS" to "Sending to groups: not yet in SMS mode",
+    "SMS non envoyé" to "SMS not sent",
+    "Impossible d'ouvrir cette conversation SMS" to "Couldn't open this SMS conversation",
 )

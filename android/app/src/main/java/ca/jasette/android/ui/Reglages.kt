@@ -75,6 +75,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 @Composable
 fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: () -> Unit) {
     val ctx = LocalContext.current
+    val demanderSms = rememberDemandeSms()
     Scaffold(
         containerColor = P.ecran,
         topBar = {
@@ -101,13 +102,26 @@ fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: 
                 // Sur cet appareil : les ponts embarqués dans l'APK (WhatsApp, Signal
                 // et X seulement si leur pont a été compilé, voir Depot.services).
                 for (s in Depot.services) {
-                    Carte(s) {
+                    // Google Messages, mode autonome : ou bien les SMS du téléphone (PontSms).
+                    val noteSms = if (s == Service.GOOGLE && (Depot.smsActif || !Depot.etat(s).associe)) {
+                        t("SMS et MMS de cet appareil, sans compte Google. Les messages RCS (chat) restent dans l'app Messages.")
+                    } else {
+                        null
+                    }
+                    Carte(s, noteSms) {
                         val etat = Depot.etat(s)
                         if (etat.associe || etat == Etat.ASSOCIATION) {
                             OutlinedButton(shape = formeBouton, onClick = { Depot.deconnecter(s) }) { Text(t("Déconnecter"), color = P.danger) }
                         } else {
                             when (s) {
-                                Service.GOOGLE -> BoutonAccent(t("Se connecter")) { connecter(s, "google") }
+                                Service.GOOGLE -> {
+                                    BoutonAccent(t("Se connecter")) {
+                                        // Les SMS étaient choisis (accès retiré depuis) : retour au pont Google.
+                                        if (Depot.modeSms) Depot.utiliserSms(ctx, false)
+                                        connecter(s, "google")
+                                    }
+                                    OutlinedButton(shape = formeBouton, onClick = demanderSms) { Text(t("Utiliser les SMS du téléphone")) }
+                                }
                                 Service.MESSENGER -> {
                                     BoutonAccent(t("Avec Messenger")) { connecter(s, "messenger") }
                                     OutlinedButton(shape = formeBouton, onClick = { connecter(s, "facebook") }) { Text(t("Avec Facebook")) }
@@ -607,8 +621,10 @@ internal fun BoutonAccent(texte: String, onClick: () -> Unit) {
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun Carte(s: Service, boutons: @Composable () -> Unit) {
+private fun Carte(s: Service, note: String? = null, boutons: @Composable () -> Unit) {
     val etat = Depot.etat(s)
+    // Les SMS du téléphone se montrent comme Google Messages (même logo), avec leur propre état.
+    val texteEtat = if (s == Service.GOOGLE && Depot.smsActif && etat.associe) t("SMS du téléphone") else etat.texte
     Column(
         Modifier.fillMaxWidth().carte(16.dp).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -622,10 +638,11 @@ private fun Carte(s: Service, boutons: @Composable () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     PastilleEtat(etat)
                     Spacer(Modifier.width(6.dp))
-                    Text(etat.texte, color = P.textePale, fontSize = 13.sp)
+                    Text(texteEtat, color = P.textePale, fontSize = 13.sp)
                 }
             }
         }
+        note?.let { Text(it, color = P.texte, fontSize = 13.sp) }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { boutons() }
     }
 }

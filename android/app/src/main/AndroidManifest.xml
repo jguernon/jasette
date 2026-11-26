@@ -11,6 +11,15 @@
     <!-- Les contacts du téléphone (photos, « Nouveau message ») : demandée seulement
          quand l'utilisateur en a besoin, jamais au démarrage. Ils ne quittent pas le téléphone. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- « Utiliser les SMS du téléphone » (PontSms.kt, mode autonome) : lire et envoyer
+         les SMS et MMS de l'appareil. Demandées seulement au clic, après une explication.
+         Google Play les réserve aux apps SMS par défaut : voir play/SMS.md. -->
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_MMS" />
+    <!-- SEND_SMS sous-entend la téléphonie : elle reste facultative (tablettes). -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <!-- La mise à jour dans l'app (MiseAJour.kt) : installer l'APK release publié
          sur jonathanguernon.net/jasette, après vérification de son SHA-256 et de sa signature. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />

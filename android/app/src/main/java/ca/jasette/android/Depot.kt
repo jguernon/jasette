@@ -82,6 +82,20 @@ object Depot {
     var services by mutableStateOf(Service.LOCAUX)
         private set
 
+    /**
+     * « Utiliser les SMS du téléphone » : en mode autonome, Google Messages est
+     * servi par [PontSms] (les SMS et MMS de l'appareil) au lieu du pont Go.
+     * Gardé dans les préférences « reglages » ; sans effet en mode client.
+     */
+    var modeSms by mutableStateOf(false)
+        private set
+
+    /** Les SMS du téléphone sont-ils en service (mode autonome) ? */
+    val smsActif: Boolean get() = modeSms && serveur == null
+
+    /** Une conversation SMS du téléphone ? (pas d'envoi de photos, pas de réactions) */
+    fun estSms(id: String) = smsActif && SmsJson.threadDe(id) != null
+
     /** Le nom du compte : courriel Google, nom Messenger ou Instagram. */
     val noms = mutableStateMapOf<Service, String>()
     /** Ma photo dans chaque service (`avatar_moi`). */
@@ -141,6 +155,7 @@ object Depot {
         generation++
         val cfg = ConfigServeur.lire(appli)
         serveur = cfg
+        modeSms = appli.getSharedPreferences(PREFS_REGLAGES, Context.MODE_PRIVATE).getBoolean(CLE_SMS, false)
         if (cfg != null) {
             // Les marques : le serveur est la source (Marques.recu, sur le fil principal).
             val g = generation
@@ -353,20 +368,24 @@ object Depot {
     private fun lancer(service: Service) {
         if (service.serveurSeulement && connexion == null && !embarque(service)) return
         val g = generation
+        // Le pont lancé ici : les nouvelles d'un pont remplacé (Google ↔ SMS) sont ignorées.
+        var lui: Pont? = null
         // Depuis le fil de lecture : préfixe du service, puis le fil principal.
         val recu: (JSONObject) -> Unit = { v ->
             if (service.meta) prefixerMeta(v, service)
             principal.post {
                 // Un service que le serveur n'offre plus : ses dernières nouvelles sont ignorées.
-                if (g == generation && (!service.serveurSeulement || service in services)) {
+                if (g == generation && ponts[service] === lui && (!service.serveurSeulement || service in services)) {
                     if (service.meta) nouvelleMeta(v, service) else nouvelle(v, Service.GOOGLE)
                 }
             }
         }
         try {
             val cx = connexion
-            ponts[service] = when {
+            val p = when {
                 cx != null -> PontDistant(service.cle, cx, recu)
+                // Les SMS du téléphone à la place de Google Messages (PontSms).
+                service == Service.GOOGLE && modeSms -> PontSms(appli, recu)
                 service == Service.GOOGLE -> PontLocal("google", executable("libjasette-pont.so"), environnement(), recu)
                 service.serveurSeulement -> PontLocal(service.cle, executableDe(service)!!, environnement(), recu)
                 else -> {
@@ -378,6 +397,8 @@ object Depot {
                     PontLocal(service.cle, bin, env, recu)
                 }
             }
+            lui = p
+            ponts[service] = p
         } catch (e: Exception) {
             Log.e("jasette", "pont ${service.court}", e)
             erreur = "${t("Le pont ne démarre pas")} (${service.court}) : ${e.message}"
@@ -514,6 +535,11 @@ object Depot {
     }
 
     fun deconnecter(service: Service) {
+        // SMS du téléphone : « Déconnecter » revient au choix (Google ou SMS), rien n'est effacé du téléphone.
+        if (service == Service.GOOGLE && smsActif) {
+            utiliserSms(appli, false)
+            return
+        }
         qr.remove(service)
         codeAssociation.remove(service)
         // Le service est déconnecté : son cache (listes et messages) est effacé.
@@ -528,6 +554,33 @@ object Depot {
         // Les ponts WhatsApp, Signal et X ne connaissent que « unpair ».
         val cmd = if (service == Service.GOOGLE || service.serveurSeulement) "unpair" else "logout"
         commande(service, JSONObject().put("cmd", cmd))
+    }
+
+    /**
+     * Passe Google Messages aux SMS du téléphone ([oui]) ou revient au pont
+     * Google (pas encore connecté : le bouton « Se connecter »). Le choix est
+     * gardé ; les conversations et le cache de l'autre source sont oubliés.
+     */
+    fun utiliserSms(ctx: Context, oui: Boolean) {
+        ctx.applicationContext.getSharedPreferences(PREFS_REGLAGES, Context.MODE_PRIVATE).edit().putBoolean(CLE_SMS, oui).apply()
+        // Même choix qu'avant : le pont repart quand même (ex. accès aux SMS redonné).
+        modeSms = oui
+        if (!enMarche || serveur != null) return
+        ponts.remove(Service.GOOGLE)?.arreter()
+        emoji = null
+        erreur = null
+        noms.remove(Service.GOOGLE)
+        avatarsMoi.remove(Service.GOOGLE)
+        oublier(Service.GOOGLE)
+        for (k in messages.keys.filter { Service.de(it) == Service.GOOGLE }) {
+            messages.remove(k)
+            plusAnciens.remove(k)
+        }
+        fraiches.removeAll { Service.de(it) == Service.GOOGLE }
+        demandesFil.removeAll { Service.de(it) == Service.GOOGLE }
+        CacheConvs.effacer(Service.GOOGLE)
+        etats[Service.GOOGLE] = Etat.DEMARRAGE
+        lancer(Service.GOOGLE)
     }
 
     /** WhatsApp ou Signal : association par code QR (`pair`, puis des `ev qr`). */
@@ -1252,4 +1305,7 @@ object Depot {
     }
 
     val versionAndroid get() = Build.VERSION.SDK_INT
+
+    private const val PREFS_REGLAGES = "reglages"
+    private const val CLE_SMS = "google_sms"
 }

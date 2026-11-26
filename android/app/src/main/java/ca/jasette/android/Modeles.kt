@@ -30,9 +30,10 @@ enum class Service(val titre: String, val court: String, val prefixe: String, va
     /**
      * Le service archive lui-même (commande `archive` de son pont) : Google
      * Messages, WhatsApp et Telegram. Les autres passent par les archives de Jasette
-     * (`Marques.archives`, partagées par le serveur).
+     * (`Marques.archives`, partagées par le serveur), comme les SMS du
+     * téléphone (le fournisseur SMS n'a pas d'archives).
      */
-    val archiveNatif get() = this == GOOGLE || this == WHATSAPP || this == TELEGRAM
+    val archiveNatif get() = (this == GOOGLE && !Depot.smsActif) || this == WHATSAPP || this == TELEGRAM
 
     /**
      * WhatsApp, Signal, X, Telegram ou Bluesky : servi par le serveur Jasette, ou sur cet appareil
@@ -52,8 +53,11 @@ enum class Service(val titre: String, val court: String, val prefixe: String, va
      */
     val limiteEnvoi: Long get() = if (this == GOOGLE || this == WHATSAPP || this == SIGNAL || this == TELEGRAM) 100L shl 20 else 25L shl 20
 
-    /** Le service prend-il des fichiers ? Bluesky refuse les pièces jointes en message privé. */
-    val fichiers get() = this != BLUESKY
+    /**
+     * Le service prend-il des fichiers ? Bluesky refuse les pièces jointes en
+     * message privé ; les SMS du téléphone n'envoient pas encore de MMS.
+     */
+    val fichiers get() = this != BLUESKY && !(this == GOOGLE && Depot.smsActif)
 
     /** Le texte peut-il partir avec un fichier (champ `text` de `send_media`) ? */
     val texteAvecFichier get() = meta
