@@ -164,10 +164,46 @@ func (p *Pont) fetchAvatar(id, url string) (string, error) {
 	return path, nil
 }
 
-// Les avatars des fils : la personne (1-à-1) ou l'image du groupe.
+// Le nombre de membres d'une mosaïque (comme les groupes Google).
+const mosaiqueMax = 4
+
+// Les membres montrés dans la mosaïque d'un groupe sans image : les
+// premiers autres que moi, ceux qui ont une photo d'abord. À appeler avec p.mu.
+func (p *Pont) membresMosaique(c *convState) []int64 {
+	var avec, sans []int64
+	for _, m := range c.Members {
+		if m == p.me || m == 0 || containsID(avec, m) || containsID(sans, m) {
+			continue
+		}
+		if ct := p.contacts[m]; ct != nil && ct.Avatar != "" {
+			avec = append(avec, m)
+		} else {
+			sans = append(sans, m)
+		}
+	}
+	l := append(avec, sans...)
+	if len(l) > mosaiqueMax {
+		l = l[:mosaiqueMax]
+	}
+	return l
+}
+
+// Les avatars des fils : la personne (1-à-1), l'image du groupe, sinon
+// (groupe sans image) la mosaïque de ses premiers membres, événement
+// « avatars_groupe » comme le pont Google. Les photos des membres passent
+// par le même cache que celles des fils à deux (une fois par personne).
 func (p *Pont) avatars(convs []string) {
 	type demande struct{ conv, id, url string }
+	type membre struct {
+		id       int64
+		nom, url string
+	}
+	type mosaique struct {
+		conv    string
+		membres []membre
+	}
 	var todo []demande
+	var mosaiques []mosaique
 	p.mu.Lock()
 	for _, id := range convs {
 		c := p.convs[id]
@@ -177,6 +213,17 @@ func (p *Pont) avatars(convs []string) {
 		if isGroupType(c.Type) {
 			if c.Picture != "" {
 				todo = append(todo, demande{id, "fil:" + id, c.Picture})
+			} else if ms := p.membresMosaique(c); len(ms) >= 2 {
+				mo := mosaique{conv: id}
+				for _, m := range ms {
+					var mb membre
+					mb.id = m
+					if ct := p.contacts[m]; ct != nil {
+						mb.nom, mb.url = ct.Name, ct.Avatar
+					}
+					mo.membres = append(mo.membres, mb)
+				}
+				mosaiques = append(mosaiques, mo)
 			}
 			continue
 		}
@@ -195,6 +242,28 @@ func (p *Pont) avatars(convs []string) {
 			continue
 		}
 		emit("avatar", map[string]any{"conv": d.conv, "path": path})
+	}
+	for _, mo := range mosaiques {
+		liste := make([]map[string]any, 0, len(mo.membres))
+		photos := 0
+		for _, m := range mo.membres {
+			if p.ctx.Err() != nil {
+				return
+			}
+			path := ""
+			if m.url != "" {
+				if pa, err := p.fetchAvatar("contact:"+idStr(m.id), m.url); err == nil {
+					path = pa
+					photos++
+				} else {
+					log.Debug().Err(err).Str("fil", mo.conv).Msg("avatar d'un membre")
+				}
+			}
+			liste = append(liste, map[string]any{"name": m.nom, "color": "", "path": path})
+		}
+		if photos > 0 {
+			emit("avatars_groupe", map[string]any{"conv": mo.conv, "members": liste})
+		}
 	}
 }
 

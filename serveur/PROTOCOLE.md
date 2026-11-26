@@ -1325,6 +1325,14 @@ comme toute clé `path`, §6) :
   redonnée sans réseau avec chaque page d'historique. L'avatar propre au
   serveur (`member.avatar`) d'abord, sinon celui du compte ; sans avatar,
   rien : les clients mettent l'initiale.
+- `{"ev":"avatars_groupe","conv":…,"members":[{"name":…,"color":…,"path":…},…]}` :
+  pour un **groupe sans image propre**, les photos de ses premiers membres
+  (2 à 4). Le bureau en compose une mosaïque ; Android prend la première
+  photo. N'importe quel pont peut l'envoyer (Google, Messenger) : `color`
+  peut être vide (couleur tirée du nom), `path` vide (initiales). Le pont
+  Messenger l'envoie avec chaque liste, pour les groupes montrés, avec les
+  photos de membres du même cache que les fils à deux (une fois par
+  personne et par jour).
 
 **Comment un pont fait apparaître des espaces dans Groupes** : les clients
 ne connaissent aucun service en particulier dans l'onglet Groupes ; tout
