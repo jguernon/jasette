@@ -92,13 +92,13 @@ fun BulleEcrit(e: Ecrit, groupe: Boolean) {
 @Composable
 fun ApercuEcrit(taille: TextUnit, couleur: Color, modifier: Modifier = Modifier) {
     val carre = P.ega || P.retro
-    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier, verticalAlignment = Alignment.Bottom) {
         Text(t("écrit"), color = couleur, fontSize = taille, fontWeight = FontWeight.SemiBold, maxLines = 1)
         Spacer(Modifier.width(4.dp))
         for (i in 0 until 3) {
             val s = sautPoint(i)
             Box(
-                Modifier.padding(top = 4.dp).size(3.dp).alpha(0.35f + 0.65f * s)
+                Modifier.padding(bottom = (taille.value * 0.3f).dp).size(3.dp).alpha(0.35f + 0.65f * s)
                     .clip(if (carre) androidx.compose.ui.graphics.RectangleShape else formeRonde).background(couleur),
             )
             Spacer(Modifier.width(2.dp))

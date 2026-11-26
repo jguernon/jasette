@@ -123,7 +123,8 @@ impl Jasette {
 /// « écrit… » dans la liste : en couleur d'accent, avec trois petits points animés.
 pub(crate) fn apercu_ecrit(taille: f32) -> Div {
     let carre = th().ega || retro::retro();
-    let mut points = div().flex().flex_row().items_end().gap(px(2.)).pb(px(2.));
+    // Les points sur la ligne de base du texte, comme un « … ».
+    let mut points = div().flex().flex_row().items_end().gap(px(2.)).pb(px((taille * 0.3).round()));
     for i in 0..3usize {
         points = points.child(
             div().size(px(3.)).when(!carre, |d| d.rounded(px(3.))).bg(th().accent).with_animation(
@@ -140,8 +141,8 @@ pub(crate) fn apercu_ecrit(taille: f32) -> Div {
     div()
         .flex()
         .flex_row()
-        .items_center()
-        .gap(px(4.))
+        .items_end()
+        .gap(px(3.))
         .text_size(px(taille))
         .text_color(th().accent)
         .font_weight(FontWeight::SEMIBOLD)
