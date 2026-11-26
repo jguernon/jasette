@@ -547,7 +547,7 @@ impl Jasette {
     fn ligne_espace(&self, conv: &Conv, retrait: f32, cx: &mut Context<Self>) -> impl IntoElement {
         let choisie = self.choisie.as_deref() == Some(conv.id.as_str());
         let id = conv.id.clone();
-        let nom = if conv.name.is_empty() { t("Sans nom").to_string() } else { conv.name.clone() };
+        let nom = self.nom_affiche(&conv);
         let mentions = self.mentions_espace(conv);
         let apercu = if conv.preview.trim().is_empty() { String::new() } else { une_ligne(&conv.preview) };
         div()

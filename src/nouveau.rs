@@ -511,7 +511,7 @@ impl Jasette {
                     !c.group
                         && choix.montre(service_de(&c.id))
                         && !self.privee(&c.id)
-                        && (plier(&c.name).contains(&q) || c.members.iter().any(|m| plier(m).contains(&q)))
+                        && (plier(&c.name).contains(&q) || plier(&self.nom_affiche(c)).contains(&q) || c.members.iter().any(|m| plier(m).contains(&q)))
                 })
                 .take(4)
                 .collect();
@@ -519,7 +519,7 @@ impl Jasette {
                 let id = c.id.clone();
                 let s = service_de(&c.id);
                 boite = boite.child(
-                    ligne(SharedString::from(format!("sugg-{}", c.id)), c.name.clone(), s.nom().into(), s, self.photo_conv(c), None)
+                    ligne(SharedString::from(format!("sugg-{}", c.id)), self.nom_affiche(c), s.nom().into(), s, self.photo_conv(c), None)
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.fermer_nouveau(window, cx);
                             this.vue = Vue::Tout;

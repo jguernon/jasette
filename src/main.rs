@@ -3924,7 +3924,7 @@ impl Jasette {
                 avatar_source: ancien.avatar_source.clone(),
             };
             // L'avatar : copié dans le dossier de données, seulement s'il a changé.
-            if let Some(source) = self.photo_conv(c).cloned()
+            if let Some(source) = self.photo_propre(c).cloned()
                 && !source.starts_with(&dossier)
                 && e.avatar_source.as_ref() != Some(&source)
             {
@@ -4222,7 +4222,7 @@ impl Jasette {
         if conv.is_some_and(|c| self.hors_boite(c)) && !(m.mentions_me || m.reply_to_me) {
             return;
         }
-        let nom = conv.map(|c| c.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| "Jasette".into());
+        let nom = conv.map(|c| self.nom_affiche(c)).unwrap_or_else(|| "Jasette".into());
         let titre = match conv {
             Some(c) if c.group && !m.sender.is_empty() => format!("{} · {nom}", m.sender),
             _ => nom,
@@ -5059,7 +5059,7 @@ impl Jasette {
             })
             .collect();
         let nom_conv = |id: &str| -> String {
-            self.conv(id).map(|c| c.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| t("Sans nom").into())
+            self.conv(id).map(|c| self.nom_affiche(c)).unwrap_or_else(|| t("Sans nom").into())
         };
         let titre = match &filtre {
             Some(id) => format!("{} · {}", t("Médias"), nom_conv(id)),
@@ -5280,10 +5280,16 @@ impl Jasette {
         self.avatars.get(&format!("{}{}", service_de(&conv.id).prefixe(), conv.parent))
     }
 
-    /// La photo d'une conversation. Réglage actif : celle du contact du téléphone
+    /// La photo montrée pour une conversation : celle de la conversation
+    /// principale de sa personne (fiche), sinon la sienne.
+    fn photo_conv(&self, conv: &Conv) -> Option<&PathBuf> {
+        self.principale_de(conv).and_then(|p| self.photo_propre(p)).or_else(|| self.photo_propre(conv))
+    }
+
+    /// La photo propre d'une conversation. Réglage actif : celle du contact du téléphone
     /// (Google à deux : même numéro ; Messenger et Instagram, si choisi : même nom
     /// exact, plié), sinon celle du service. Les groupes gardent la leur.
-    fn photo_conv(&self, conv: &Conv) -> Option<&PathBuf> {
+    fn photo_propre(&self, conv: &Conv) -> Option<&PathBuf> {
         let service = self.avatars.get(&conv.id);
         if conv.group || !self.reglages.photos_contacts {
             return service;
@@ -6033,6 +6039,7 @@ impl Jasette {
             return true;
         }
         plier(&conv.name).contains(&self.filtre)
+            || plier(&self.nom_affiche(conv)).contains(&self.filtre)
             || plier(&conv.preview).contains(&self.filtre)
             || conv.members.iter().any(|m| plier(m).contains(&self.filtre))
             || self.messages.get(&conv.id).is_some_and(|l| l.iter().any(|m| plier(&m.text).contains(&self.filtre)))
@@ -6376,7 +6383,7 @@ impl Jasette {
         for conv in &montres {
             let id = conv.id.clone();
             let choisie = self.choisie.as_deref() == Some(conv.id.as_str());
-            let nom = if conv.name.is_empty() { t("Sans nom").to_string() } else { conv.name.clone() };
+            let nom = self.nom_affiche(&conv);
             let prenom = if conv.group { nom.clone() } else { nom.split_whitespace().next().unwrap_or(&nom).to_string() };
             let pastille = (mesures.avatar * 0.22).round().max(9.);
             grille = grille.child(
@@ -6401,7 +6408,7 @@ impl Jasette {
                     .child(
                         div()
                             .relative()
-                            .child(self.avatar_conv(conv, &nom, mesures.avatar))
+                            .child(self.avatar_affiche(conv, mesures.avatar))
                             .when(self.en_ligne(conv), |d| {
                                 d.child(presence::point_presence(mesures.avatar, if choisie { th().choisi } else { th().liste }))
                             })
@@ -6524,7 +6531,7 @@ impl Jasette {
             let epinglee = i < nb_epingles;
             let choisie = self.choisie.as_deref() == Some(conv.id.as_str());
             let id = conv.id.clone();
-            let nom = if conv.name.is_empty() { t("Sans nom").to_string() } else { conv.name.clone() };
+            let nom = self.nom_affiche(&conv);
             let lu_par_eux = conv.from_me
                 && self
                     .messages
@@ -6553,7 +6560,7 @@ impl Jasette {
                             .relative()
                             .flex_none()
                             .py(px(10.))
-                            .child(div().relative().child(self.avatar_conv(conv, &nom, 50.)).when(self.en_ligne(conv), |d| {
+                            .child(div().relative().child(self.avatar_affiche(conv, 50.)).when(self.en_ligne(conv), |d| {
                                 d.child(presence::point_presence(50., if choisie { th().choisi } else { th().liste }))
                             }))
                             .when(badge, |d| {
@@ -6727,9 +6734,9 @@ impl Jasette {
         );
         for (i, r) in resultats.into_iter().enumerate() {
             let conv = self.conv(&r.conv);
-            let nom = conv.map(|c| c.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| t("Sans nom").to_string());
+            let nom = conv.map(|c| self.nom_affiche(c)).unwrap_or_else(|| t("Sans nom").to_string());
             let photo = match conv {
-                Some(c) => self.avatar_conv(c, &nom, 40.),
+                Some(c) => self.avatar_affiche(c, 40.),
                 None => avatar(&nom, "", false, None, 40.),
             };
             // Qui l'a écrit, devant l'extrait (dans un groupe, ou moi).
@@ -7023,7 +7030,7 @@ impl Jasette {
         // Live et Sirène : sans bulles, un en-tête par suite, le texte en retrait.
         let ligne_retro = retro::retro();
         let retrait = if th().live { 14. } else { 10. };
-        let nom_conv = self.conv(&id).map(|c| c.name.clone()).unwrap_or_default();
+        let nom_conv = self.conv(&id).map(|c| self.nom_affiche(c)).unwrap_or_default();
         // Le mood de la conversation : mes bulles, les reçues (aucun en EGA).
         let mood = self.mood_fil();
         let tache_moi = mood.map(|m| m.tache_envoyee()).unwrap_or_else(tache_envoyee);
@@ -8470,7 +8477,7 @@ impl Jasette {
                 div().h(px(HAUT_ENTETE)).occlude().flex().flex_row().items_center().gap(px(12.)).px(px(20.)).when_some(
                     choisie.clone(),
                     |d, conv| {
-                        let nom = if conv.name.is_empty() { t("Sans nom").to_string() } else { conv.name.clone() };
+                        let nom = self.nom_affiche(&conv);
                         let detail = if conv.large {
                             // Un grand espace : où il vit (serveur, communauté) plutôt
                             // qu'un nombre de participants inconnu.
@@ -8510,7 +8517,7 @@ impl Jasette {
                                 .child(badge_service(
                                     div()
                                         .relative()
-                                        .child(self.avatar_conv(&conv, &nom, 38.))
+                                        .child(self.avatar_affiche(&conv, 38.))
                                         .when(en_ligne, |d| d.child(presence::point_presence(38., givre_haut))),
                                 ))
                                 .child(
@@ -11567,7 +11574,7 @@ impl Render for Jasette {
 impl Jasette {
     fn rendu(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         // L'indication du champ nomme la conversation ouverte.
-        let nom = self.choisie.as_ref().and_then(|id| self.conv(id)).map(|c| c.name.clone()).filter(|n| !n.is_empty());
+        let nom = self.choisie.as_ref().and_then(|id| self.conv(id)).map(|c| self.nom_affiche(c));
         let service = self.choisie.as_deref().map(service_de).unwrap_or(Service::GoogleMessages);
         let indication = if anglais() {
             format!("Message {} on {}", nom.unwrap_or_else(|| "this contact".into()), service.nom())

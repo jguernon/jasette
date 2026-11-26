@@ -312,7 +312,15 @@ pub(crate) fn refuser(refus: &mut Vec<(String, String)>, groupe: &[String], x: &
     *refus = pont::nettoyer_refus(std::mem::take(refus));
 }
 
-/// « Utiliser ce nom » : `x` devient le nom principal de la personne (créée
+/// La conversation principale de la personne de `id`, si un principal est
+/// choisi (et toujours lié) : son nom et sa photo valent pour toutes.
+pub(crate) fn principal_de<'a>(personnes: &'a [Personne], id: &str) -> Option<&'a str> {
+    let p = personnes.iter().find(|p| p.convs.iter().any(|c| c == id))?;
+    let x = p.principal.as_str();
+    (!x.is_empty() && x != id && p.convs.iter().any(|c| c == x)).then_some(x)
+}
+
+/// « Utiliser ce nom et cette photo » : `x` devient le nom principal de la personne (créée
 /// au besoin avec les conversations de la fiche qui ne sont à personne d'autre).
 pub(crate) fn choisir_principal(personnes: &mut Vec<Personne>, groupe: &[String], x: &str, id_neuf: String) {
     let Some(ancre) = groupe.first() else { return };
@@ -348,6 +356,28 @@ pub(crate) struct Fiche {
 const GRAND: f32 = 140.;
 
 impl Jasette {
+    /// La conversation principale de la personne de `conv` (jamais pour un groupe).
+    pub(crate) fn principale_de(&self, conv: &Conv) -> Option<&Conv> {
+        if conv.group || conv.large {
+            return None;
+        }
+        let x = principal_de(&self.reglages.personnes, &conv.id)?;
+        self.conv(x).filter(|c| !c.group)
+    }
+
+    /// Le nom montré partout pour une conversation : celui de la principale de
+    /// sa personne, sinon le sien. La recherche trouve aussi le nom d'origine.
+    pub(crate) fn nom_affiche(&self, conv: &Conv) -> String {
+        let principal = self.principale_de(conv).map(|p| p.name.trim()).filter(|n| !n.is_empty());
+        let nom = principal.unwrap_or(conv.name.trim());
+        if nom.is_empty() { t("Sans nom").to_string() } else { nom.to_string() }
+    }
+
+    /// L'avatar montré partout pour une conversation (voir `photo_conv`).
+    pub(crate) fn avatar_affiche(&self, conv: &Conv, taille: f32) -> AnyElement {
+        self.avatar_conv(conv, &self.nom_affiche(conv), taille)
+    }
+
     /// Les conversations à deux connues (chargées, archivées ou en cache),
     /// sans doublon ; les privées seulement dans la vue Privées.
     pub(crate) fn candidats_personne(&self) -> Vec<Candidat> {
@@ -434,6 +464,11 @@ impl Jasette {
     /// La meilleure photo parmi les conversations de la personne : celle du
     /// plus gros fichier (la plus grande, d'habitude).
     fn meilleure_photo(&self, groupe: &Groupe) -> Option<PathBuf> {
+        // La photo de la principale, si elle en a une, l'emporte.
+        let ids = groupe.ids();
+        if let Some(p) = ids.iter().filter_map(|id| self.conv(id)).find_map(|c| self.principale_de(c)).and_then(|p| self.photo_propre(p)) {
+            return Some(p.clone());
+        }
         groupe
             .membres
             .iter()
@@ -669,7 +704,8 @@ impl Jasette {
                 div()
                     .relative()
                     .flex_none()
-                    .child(self.avatar_conv(conv, &nom, 40.))
+                    // Chaque ligne de la fiche garde le nom et la photo propres à son service.
+                    .child(avatar(&nom, &conv.color, false, self.photo_propre(conv), 40.))
                     .when(self.en_ligne(conv), |d| d.child(presence::point_presence(40., fond)))
                     .child(div().absolute().right(px(-3.)).bottom(px(-2.)).child(logo(svc, 16.))),
             )
@@ -753,7 +789,7 @@ impl Jasette {
             let mut des_boutons = false;
             if !seule && !conv.name.is_empty() && mots(&conv.name) != nom_plie {
                 des_boutons = true;
-                boutons = boutons.child(Self::bouton_fiche(SharedString::from(format!("fiche-nom-{i}")), tr("Utiliser ce nom", "Use this name"), false).on_click(
+                boutons = boutons.child(Self::bouton_fiche(SharedString::from(format!("fiche-nom-{i}")), tr("Utiliser ce nom et cette photo", "Use this name & picture"), false).on_click(
                     cx.listener(move |this, _, _, cx| {
                         cx.stop_propagation();
                         this.fiche_principal(&b);
@@ -1102,6 +1138,28 @@ mod essais {
         delier(&mut p, &mut r, &g, "m:99");
         assert_eq!(p[0].convs, vec!["123".to_string(), "w:14185551234@s.whatsapp.net".into()]);
         assert!(!regrouper("123", &cands, &p, &r, &[]).ids().contains(&"m:99".to_string()));
+    }
+
+    #[test]
+    fn principal_affiche() {
+        let w = "w:14185551234@s.whatsapp.net";
+        let mut p = vec![Personne { id: "p1".into(), convs: vec!["105".into(), w.into(), "m:2005".into()], principal: String::new() }];
+        // Sans principal : chacune garde le sien.
+        assert_eq!(principal_de(&p, w), None);
+        p[0].principal = "105".into();
+        assert_eq!(principal_de(&p, w), Some("105"));
+        assert_eq!(principal_de(&p, "m:2005"), Some("105"));
+        assert_eq!(principal_de(&p, "105"), None);
+        assert_eq!(principal_de(&p, "i:3005"), None);
+        // Délier rend à la conversation son nom et sa photo.
+        let mut refus = Vec::new();
+        let g: Vec<String> = p[0].convs.clone();
+        delier(&mut p, &mut refus, &g, "m:2005");
+        assert_eq!(principal_de(&p, "m:2005"), None);
+        assert_eq!(principal_de(&p, w), Some("105"));
+        // La principale déliée : plus de principal pour les autres.
+        delier(&mut p, &mut refus, &g, "105");
+        assert_eq!(principal_de(&p, w), None);
     }
 
     #[test]

@@ -619,7 +619,7 @@ impl Jasette {
         let (id, essai) = (f.id.clone(), f.essai);
         let ega = th().ega;
         let m = essai.and_then(mood);
-        let nom_conv = self.conv(&id).map(|c| c.name.clone()).filter(|n| !n.is_empty()).unwrap_or_default();
+        let nom_conv = self.conv(&id).map(|c| self.nom_affiche(c)).unwrap_or_default();
         let titre = div()
             .flex()
             .flex_row()

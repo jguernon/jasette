@@ -525,7 +525,7 @@ impl Jasette {
         let svc = service_de(&conv.id);
         let choisie = self.choisie.as_deref() == Some(conv.id.as_str());
         let id = conv.id.clone();
-        let nom = if conv.name.is_empty() { t("Sans nom").to_string() } else { conv.name.clone() };
+        let nom = self.nom_affiche(&conv);
         let apercu = if conv.preview.trim().is_empty() { t("📎 Pièce jointe").to_string() } else { une_ligne(&conv.preview) };
         let plus = self.plus_liste();
         let n = niveau(if self.est_fantome(&conv.id) { Etat::NonAssocie } else { self.etat_service(svc) });
@@ -714,7 +714,7 @@ impl Jasette {
                 .bg(linear_gradient(180., linear_color_stop(c(0xeef8ec), 0.), linear_color_stop(c(GRIS_2000), 1.)))
         };
         if let Some(conv) = choisie.clone() {
-            let nom = if conv.name.is_empty() { t("Sans nom").to_string() } else { conv.name.clone() };
+            let nom = self.nom_affiche(&conv);
             let etat = self.etat_service(service);
             let detail = if conv.group {
                 format!("{} · {} participants", service.nom(), conv.members.len() + 1)
@@ -749,7 +749,7 @@ impl Jasette {
                                     cx.notify();
                                 }))
                             })
-                            .child(self.avatar_conv(&conv, &nom, 40.))
+                            .child(self.avatar_affiche(&conv, 40.))
                             .when(self.en_ligne(&conv), |d| d.child(presence::point_presence(40., c(0xe4e8df)))),
                     )
                 })
@@ -834,7 +834,6 @@ impl Jasette {
 
         // Les grandes photos : l'autre en haut, moi en bas.
         let photos = choisie.as_ref().map(|conv| {
-            let nom = if conv.name.is_empty() { t("Sans nom").to_string() } else { conv.name.clone() };
             div()
                 .flex_none()
                 .w(px(if live { 150. } else { 124. }))
@@ -864,7 +863,7 @@ impl Jasette {
                                 cx.notify();
                             }))
                         })
-                        .child(self.avatar_conv(conv, &nom, 112.))
+                        .child(self.avatar_affiche(conv, 112.))
                         .when(self.en_ligne(conv), |d| {
                             d.child(presence::point_presence(112., if live { c(0xeef5fe) } else { c(GRIS_2000) }))
                         })
