@@ -449,6 +449,11 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Serveur" to "Server",
     "Communauté" to "Community",
     "Tout marquer comme lu" to "Mark all as read",
+    "Marquer comme lu" to "Mark as read",
+    // Android Auto (Voiture.kt).
+    "Dernier message" to "Latest message",
+    "Récentes" to "Recent",
+    "Nouveau" to "New",
     "Tout marquer comme lu ?" to "Mark all as read?",
     "Le salon non lu de %s sera marqué comme lu." to "The unread channel in %s will be marked as read.",
     "Les %d salons non lus de %s seront marqués comme lus." to "The %d unread channels in %s will be marked as read.",

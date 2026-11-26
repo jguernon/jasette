@@ -110,10 +110,11 @@ class PontService : ServiceAndroid() {
             .apply { if (image != null && conv?.group != true) setIcon(androidx.core.graphics.drawable.IconCompat.createWithBitmap(image)) }
             .build()
         val moi = androidx.core.app.Person.Builder().setName(t("Moi")).build()
-        val style = NotificationCompat.MessagingStyle(moi)
+        // La notification encore affichée garde ses messages non lus (Android Auto les lit tous).
+        val style = NotifAuto.style(this, m.conv) { NotificationCompat.MessagingStyle(moi) }
             .addMessage(traduirePont(m.apercu(), m.kind == "admin"), m.time, personne)
             .also { if (conv?.group == true) { it.setConversationTitle(titre); it.setGroupConversation(true) } }
-        val n = NotificationCompat.Builder(this, CANAL_MESSAGES)
+        val b = NotificationCompat.Builder(this, CANAL_MESSAGES)
             .setSmallIcon(R.drawable.ic_notif)
             .setColor(0xFF2F6BFF.toInt())
             .setContentTitle(titre)
@@ -133,7 +134,10 @@ class PontService : ServiceAndroid() {
                     setLocusId(androidx.core.content.LocusIdCompat(raccourci))
                 }
             }
-            .build()
+        // Android Auto : Répondre (dictée) et Marquer comme lu (NotifAuto.kt).
+        NotifAuto.equiper(this, b, conv, m.conv)
+        NotifAuto.noter(m.conv, b, style)
+        val n = b.build()
         try {
             NotificationManagerCompat.from(this).notify(idNotification(m.conv), n)
         } catch (_: SecurityException) {

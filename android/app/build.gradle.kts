@@ -82,6 +82,18 @@ android {
         compose = true
     }
 
+    // Les tests Robolectric (NotifAutoTest) : les ressources de l'app, et le
+    // dépôt Maven de Robolectric (android-all) dans ../.cache, jamais ~/.m2.
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            it.systemProperty("maven.repo.local", rootProject.file("../.cache/robolectric-m2").path)
+            // Le moteur natif de Robolectric ne se charge pas sous un chemin avec espaces : l'ancien moteur suffit.
+            it.systemProperty("robolectric.graphicsMode", "LEGACY")
+            it.systemProperty("robolectric.sqliteMode", "LEGACY")
+        }
+    }
+
     // Les ponts Go compilés (build-ponts.sh) : ../.cache/android-jni/arm64-v8a.
     sourceSets["main"].jniLibs.directories.add(rootProject.file("../.cache/android-jni").path)
 
@@ -113,6 +125,9 @@ dependencies {
     implementation("androidx.core:core-ktx:1.19.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.webkit:webkit:1.14.0")
+    // Android Auto : l'écran Jasette (Voiture.kt), catégorie messagerie.
+    implementation("androidx.car.app:app:1.7.0")
+    implementation("androidx.car.app:app-projected:1.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     // Les codes QR de l'association WhatsApp et Signal (zxing core : l'encodeur seul, sans caméra).
     implementation("com.google.zxing:core:3.5.3")
@@ -120,6 +135,8 @@ dependencies {
     // org.json réel : celui d'android.jar n'est qu'un bouchon hors de l'appareil.
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")
+    // Les notifications d'Android Auto (NotifAutoTest) : un vrai Android sur la JVM.
+    testImplementation("org.robolectric:robolectric:4.18.1")
     // Le flou derrière les barres (Haze) et le bouton + en verre liquide (haze-glass), Compose 1.12.
     implementation("dev.chrisbanes.haze:haze:2.1.0")
     implementation("dev.chrisbanes.haze:haze-blur:2.1.0")

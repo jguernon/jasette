@@ -151,6 +151,29 @@
                 android:resource="@xml/fichiers" />
         </provider>
 
+        <!-- Android Auto : les notifications de message (lues à voix haute,
+             réponse dictée, NotifAuto.kt) et l'écran Jasette (Voiture.kt). -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+        <!-- L'écran Jasette dans Android Auto (Voiture.kt) : Car App Library,
+             catégorie messagerie, Car API 7 (ConversationItem). -->
+        <meta-data
+            android:name="androidx.car.app.minCarApiLevel"
+            android:value="7" />
+        <service
+            android:name=".JasetteVoitureService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.MESSAGING" />
+            </intent-filter>
+        </service>
+        <!-- Répondre et Marquer comme lu, depuis une notification (NotifAuto.kt). -->
+        <receiver
+            android:name=".AutoRecepteur"
+            android:exported="false" />
+
         <!-- Le statut de la session d'installation d'une mise à jour (MiseAJour.kt). -->
         <receiver
             android:name=".MiseAJourRecepteur"

@@ -29,6 +29,8 @@ object Depot {
     /** Un pont par service : Google, puis le pont Meta lancé une fois par service Meta. */
     private val ponts = HashMap<Service, Pont>()
     private var enMarche = false
+    /** Le dépôt tourne-t-il ? (réponse depuis une notification, NotifAuto.kt) */
+    val demarre get() = enMarche
     /** Change à chaque arrêt : les nouvelles d'un pont d'avant sont ignorées. */
     private var generation = 0
     /** En mode client : la connexion au serveur Jasette, partagée par les trois services. */
@@ -1259,6 +1261,11 @@ object Depot {
         }
         // Messages gardés, service pas encore prêt : « lu » partira quand il le sera (filsAuPret).
         if (!vide && pret(Service.de(id))) marquerLu(id)
+    }
+
+    /** Charge les derniers messages sans ouvrir ni marquer lu (écran de la voiture, Voiture.kt). */
+    fun prechargerFil(id: String) {
+        if (id !in fraiches) demanderFil(id)
     }
 
     private fun demanderFil(id: String) {

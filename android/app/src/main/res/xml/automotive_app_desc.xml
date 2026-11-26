@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android Auto : les notifications de message (NotifAuto.kt) et l'écran
+     Jasette de la Car App Library (Voiture.kt). Pas « sms » : Jasette n'est
+     jamais l'app SMS par défaut (il lit les SMS du téléphone, PontSms.kt). -->
+<automotiveApp>
+    <uses name="notification" />
+    <uses name="template" />
+</automotiveApp>
