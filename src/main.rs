@@ -4942,6 +4942,45 @@ impl Jasette {
     }
 
     /// Le « + » : choisir des fichiers à envoyer.
+    /// Ce que « Coller » a trouvé dans le presse-papiers : les images et les
+    /// fichiers copiés partent comme pièces jointes. Faux : rien de tel (du
+    /// texte), la saisie le colle elle-même.
+    fn coller_pieces(&mut self, item: &gpui::ClipboardItem, cx: &mut Context<Self>) -> bool {
+        if self.choisie.is_none() {
+            return false;
+        }
+        let mut envoye = false;
+        for entree in item.entries() {
+            match entree {
+                gpui::ClipboardEntry::Image(image) => {
+                    let dir = dossier_medias().join("colles");
+                    let _ = std::fs::create_dir_all(&dir);
+                    let nom = format!(
+                        "image-{}.{}",
+                        chrono::Local::now().format("%Y%m%d-%H%M%S%3f"),
+                        image.format.extension()
+                    );
+                    let chemin = dir.join(nom);
+                    if std::fs::write(&chemin, image.bytes()).is_ok() {
+                        self.envoyer_fichier(chemin, Some(image.format.mime_type()));
+                        envoye = true;
+                    }
+                }
+                gpui::ClipboardEntry::ExternalPaths(chemins) => {
+                    for ch in chemins.paths().iter().filter(|p| p.is_file()) {
+                        self.envoyer_fichier(ch.clone(), None);
+                        envoye = true;
+                    }
+                }
+                gpui::ClipboardEntry::String(_) => {}
+            }
+        }
+        if envoye {
+            cx.notify();
+        }
+        envoye
+    }
+
     fn joindre(&mut self, cx: &mut Context<Self>) {
         let choix = cx.prompt_for_paths(PathPromptOptions {
             files: true,
@@ -7199,7 +7238,14 @@ impl Jasette {
                     .into_any_element()
             }
             None => {
-                div().flex_1().min_w(px(0.)).child(Input::new(&self.saisie).appearance(false)).into_any_element()
+                // Coller une image (capture, image copiée d'un navigateur) ou des
+                // fichiers copiés : ils partent comme pièces jointes ; du texte
+                // se colle dans la saisie comme avant.
+                let vue = cx.entity().downgrade();
+                let saisie = Input::new(&self.saisie).appearance(false).on_paste(move |item, _, cx| {
+                    vue.update(cx, |this, cx| this.coller_pieces(item, cx)).unwrap_or(false)
+                });
+                div().flex_1().min_w(px(0.)).child(saisie).into_any_element()
             }
         };
         div()
