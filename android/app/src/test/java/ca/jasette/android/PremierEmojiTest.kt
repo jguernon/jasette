@@ -1,7 +1,9 @@
 package ca.jasette.android
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PremierEmojiTest {
@@ -18,5 +20,21 @@ class PremierEmojiTest {
         assertEquals("1️⃣", premierEmoji("Top 1️⃣"))
         assertEquals("🏴󠁧󠁢󠁳󠁣󠁴󠁿", premierEmoji("🏴󠁧󠁢󠁳󠁣󠁴󠁿 Écosse"))
         assertNull(premierEmoji("Prix 12 $"))
+    }
+
+    @Test
+    fun emojiSeulDetecte() {
+        assertTrue(emojiSeul("👍"))
+        assertTrue(emojiSeul("  ❤️ "))
+        assertTrue(emojiSeul("👨‍👩‍👧‍👦"))
+        assertTrue(emojiSeul("👍🏽"))
+        assertTrue(emojiSeul("🇨🇦"))
+        assertTrue(emojiSeul("1️⃣"))
+        assertFalse(emojiSeul("👍👍"))
+        assertFalse(emojiSeul("👍 ok"))
+        assertFalse(emojiSeul("ok"))
+        assertFalse(emojiSeul(""))
+        assertFalse(emojiSeul("©"))
+        assertFalse(emojiSeul("1"))
     }
 }

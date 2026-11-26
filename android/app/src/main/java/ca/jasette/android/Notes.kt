@@ -256,3 +256,18 @@ fun premierEmoji(texte: String): String? {
     }
     return null
 }
+
+/**
+ * Le message n'est-il qu'un seul émoji (un graphème : ZWJ, peau, drapeau,
+ * touche compris), espaces retirés ? Il s'affiche alors en grand, sans bulle.
+ * Deux émojis ou plus restent du texte ordinaire.
+ */
+fun emojiSeul(texte: String): Boolean {
+    val t = texte.trim()
+    if (t.isEmpty()) return false
+    val e = premierEmoji(t) ?: return false
+    if (e != t) return false
+    // Un symbole de texte seul (©, ®, ™, ↔…) n'est pas un émoji sans sa variante.
+    val c = e.codePointAt(0)
+    return e.codePointCount(0, e.length) > 1 || c >= 0x1F000 || c in 0x2600..0x27BF || c in 0x2B05..0x2B55 || c in 0x2300..0x23FF
+}

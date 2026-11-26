@@ -332,6 +332,9 @@ fun Fil(
     ) { marges ->
         // Le plus récent en bas : la liste est inversée.
         val inverse = liste.asReversed()
+        // Les émojis seuls arrivés en direct font un pop (EmojiSeul.kt) ; pas ceux déjà là.
+        val pops = remember(id) { PopsEmoji() }
+        pops.observer(liste)
         LaunchedEffect(liste.lastOrNull()?.id) { if (liste.isNotEmpty()) etat.animateScrollToItem(0) }
         // La bulle « … » s'insère sous le dernier message : la liste garde sa place sur lui
         // et la bulle resterait cachée sous la saisie. Si l'on était en bas (à 80 dp près),
@@ -393,6 +396,7 @@ fun Fil(
                         m, groupe = conv?.group == true || conv?.large == true, nomConv = entete?.name ?: "", premier = premier, dernier = dernier,
                         surligne = if (recherche) q else "", courant = m.id == courant,
                         reagir = { coords -> reaction = m to coords },
+                        pop = pops.debut(m),
                     ) { plein = it }
                 }
             }
@@ -555,6 +559,7 @@ private fun Message(
     surligne: String,
     courant: Boolean,
     reagir: (androidx.compose.ui.layout.LayoutCoordinates) -> Unit,
+    pop: Long? = null,
     agrandir: (String) -> Unit,
 ) {
     // « Afficher l'heure de chaque message » : l'heure (et la date) sur chaque bulle.
@@ -631,7 +636,19 @@ private fun Message(
                     ?.takeIf { (a, img) -> a.title.isNotEmpty() && img != null && java.io.File(img).isFile }
                     ?.let { (a, _) -> ca.jasette.android.Liens.sansLien(m.text, a.url) }
                     ?: m.text
-                if (texteSansLien.isNotEmpty() && ligne) {
+                // Un seul émoji : deux fois plus gros, sans bulle (et un pop s'il vient d'arriver).
+                val seul = apercuLien == null && ca.jasette.android.emojiSeul(texteSansLien)
+                if (seul) {
+                    val taille = 15f * ca.jasette.android.Marques.tailleMessages * ECHELLE_EMOJI_SEUL
+                    Box(
+                        Modifier.let { if (courant) it.border(2.dp, P.trouve) else it }
+                            .combinedClickable(onClick = { if (echec) reessayer() }, onLongClick = appuiLong)
+                            .padding(horizontal = 2.dp)
+                            .popElastique(pop),
+                    ) {
+                        Text(texteSansLien.trim(), fontSize = taille.sp, lineHeight = (taille * 1.2f).sp)
+                    }
+                } else if (texteSansLien.isNotEmpty() && ligne) {
                     // Sans bulle : le texte seul, la coche au bout de ma dernière ligne.
                     val contexte = LocalContext.current
                     Row(
@@ -716,7 +733,7 @@ private fun Message(
         // (toujours sous les pièces seules de mes messages).
         if (ligne) {
             // Sans bulle, l'heure est dans l'en-tête : la coche seule sous une pièce envoyée sans texte.
-            if (m.fromMe && m.text.isEmpty() && (dernier || details || echec)) {
+            if (m.fromMe && (m.text.isEmpty() || ca.jasette.android.emojiSeul(m.text)) && (dernier || details || echec)) {
                 Row(Modifier.padding(start = retraitLigne, top = if (aReactions) 16.dp else 0.dp)) { IconeCoche(c, surBulle = false) }
             }
         } else if (dernier || details || echec || (m.text.isEmpty() && m.fromMe)) {
