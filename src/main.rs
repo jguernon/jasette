@@ -1353,8 +1353,9 @@ struct Conv {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct Piece {
     media_id: String,
-    /// La clé de déchiffrement, en base64, renvoyée telle quelle au pont.
-    #[serde(default)]
+    /// La clé de déchiffrement, en base64, renvoyée telle quelle au pont
+    /// (`null` chez Reddit : vide).
+    #[serde(default, deserialize_with = "chaine_ou_nul")]
     key: String,
     #[serde(default)]
     mime: String,
@@ -4604,7 +4605,7 @@ impl Jasette {
             }
             "messages" => {
                 let conv = v.get("conv").and_then(Value::as_str).unwrap_or_default().to_string();
-                let items = serde_json::from_value::<Vec<Msg>>(v["items"].clone()).unwrap_or_default();
+                let items = lire_messages(&v["items"]);
                 let older = v.get("older").and_then(Value::as_bool).unwrap_or(false);
                 let more = v.get("more").and_then(Value::as_bool).unwrap_or(false);
                 // La copie du serveur Jasette (PROTOCOLE.md, §5.8), avant la réponse du pont.
@@ -13576,6 +13577,31 @@ fn main() {
     });
 }
 
+/// Une chaîne JSON, ou `null` (vide).
+fn chaine_ou_nul<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Ok(Option::<String>::deserialize(d)?.unwrap_or_default())
+}
+
+/// Les messages d'une page `messages`, un par un : un message illisible est
+/// sauté, il n'efface pas toute la page (une page vide « fait foi » et
+/// viderait le fil).
+fn lire_messages(items: &Value) -> Vec<Msg> {
+    items
+        .as_array()
+        .map(|l| {
+            l.iter()
+                .filter_map(|x| match serde_json::from_value::<Msg>(x.clone()) {
+                    Ok(m) => Some(m),
+                    Err(e) => {
+                        eprintln!("jasette : message illisible ignoré : {e}");
+                        None
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 // ---- Les téléchargements de pièces jointes ----
 
 /// La galerie de tous les comptes : au plus tant de conversations chargées,
@@ -13655,6 +13681,22 @@ mod essais_medias {
         let mut p = places.clone();
         p.push(None);
         assert!(messages_visibles(&p, 100., 600.).contains(&35));
+    }
+
+    // Reddit envoie `"key": null` : la page se lit quand même (avant : tout
+    // le fil vide), et un message illisible ne fait sauter que lui.
+    #[test]
+    fn page_reddit_avec_cle_nulle() {
+        let items = json!([
+            {"id": "$a", "conv": "!r1:reddit.com", "text": "salut", "time": 1},
+            {"id": "$b", "conv": "!r1:reddit.com", "time": 2,
+             "attachments": [{"media_id": "mxc://reddit.com/x", "key": null, "mime": "image/png", "name": "x.png", "size": 3, "w": 10, "h": 10}]},
+            {"id": 42, "conv": "!r1:reddit.com"}
+        ]);
+        let l = lire_messages(&items);
+        assert_eq!(l.len(), 2);
+        assert_eq!(l[1].attachments[0].key, "");
+        assert!(lire_messages(&Value::Null).is_empty());
     }
 
     #[test]
