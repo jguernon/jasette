@@ -220,13 +220,21 @@ fun App(activite: Activity, prive: Boolean = false) {
                 Ecran.Liste -> {
                     val id = ouverte
                     when {
-                        volets -> Row(Modifier.fillMaxSize()) {
-                            // La liste au milieu (320 à 380 dp), le fil prend le reste.
-                            val l = (largeur * 0.4f).coerceIn(320f, 380f).dp
+                        volets -> Box(Modifier.fillMaxSize()) {
+                          // La liste au milieu (320 à 380 dp), le fil prend le reste.
+                          val l = (largeur * 0.4f).coerceIn(320f, 380f).dp
+                          // Le fond d'ambiance du Mood de la conversation ouverte (Mood.kt) : sous
+                          // les deux volets, dessiné AVANT eux. Ses taches débordent sous la liste
+                          // (transparente), qui reste nette par-dessus ; le fil ne le redessine pas.
+                          val mood = id?.let { moodDeConv(it) }
+                          if (mood != null) {
+                              Box(Modifier.matchParentSize().fondMood(mood, P.clair, gauche = l + 1.dp).sourceFlou(flou, FLOU_MOOD, z = 0.5f))
+                          }
+                          Row(Modifier.fillMaxSize()) {
                             Box(Modifier.width(l).fillMaxHeight()) { liste() }
                             VerticalDivider(color = P.traitFin)
-                            // Découpé : rien du fil (fond du Mood, ombres) ne déborde sur la liste.
-                            Box(Modifier.weight(1f).fillMaxHeight().clipToBounds().background(P.fil)) {
+                            // Avec un Mood, le volet laisse voir le fond d'ambiance posé dessous.
+                            Box(Modifier.weight(1f).fillMaxHeight().clipToBounds().background(if (mood != null) androidx.compose.ui.graphics.Color.Transparent else P.fil)) {
                                 if (id != null) {
                                     key(id) {
                                         Fil(
@@ -238,6 +246,7 @@ fun App(activite: Activity, prive: Boolean = false) {
                                     VoletVide()
                                 }
                             }
+                          }
                         }
                         id != null -> key(id) {
                             Fil(activite, id, retour = { ouverte = null }, retiree = { ouverte = null }, reglages = { ouvrirReglages(SectionReglages.COMPTES) })

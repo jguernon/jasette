@@ -39,6 +39,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -132,13 +134,19 @@ fun mix(a: Long, b: Long, t: Float): Color {
 /**
  * Le fond d'un mood : un dégradé vertical doux, puis trois taches floues
  * (dégradés radiaux superposés, couleur → transparent). [clair] : la variante
- * Verre (pastel), sinon Sombre (profond). Découpé à sa boîte : les taches (rayon des
- * trois quarts de la largeur) dépassent sinon le fil, et en deux volets (Fold déplié)
- * elles pâlissaient la liste de gauche.
+ * Verre (pastel), sinon Sombre (profond).
+ *
+ * [gauche] : en deux volets (Fold déplié), la boîte couvre la liste et le fil, et
+ * le fil commence à [gauche]. Le dégradé reste dans le fil ; les taches, placées
+ * d'après le fil, débordent sous la liste. Il faut le dessiner AVANT la liste
+ * (dessous) : dessiné par le fil, après elle, il la voilait. Découpé à sa boîte.
  */
-fun Modifier.fondMood(m: Mood, clair: Boolean): Modifier = if (P.retro) fondMoodDiscret(m) else clipToBounds().drawBehind {
-    drawRect(Brush.verticalGradient(listOf(m.haut(clair), m.bas(clair))))
-    val r = size.width * 0.75f
+fun Modifier.fondMood(m: Mood, clair: Boolean, gauche: Dp = 0.dp): Modifier =
+    if (P.retro) fondMoodDiscret(m, gauche) else clipToBounds().drawBehind {
+    val gx = gauche.toPx().coerceIn(0f, size.width)
+    val w = size.width - gx
+    drawRect(Brush.verticalGradient(listOf(m.haut(clair), m.bas(clair))), topLeft = Offset(gx, 0f), size = Size(w, size.height))
+    val r = w * 0.75f
     for ((c, a, x, y) in listOf(
         // Les opacités du bureau (src/mood.rs, PLACES) : Sombre, puis Verre.
         Tache(m.t1, if (clair) 0.62f else 0.55f, 0.15f, 0.20f),
@@ -146,7 +154,7 @@ fun Modifier.fondMood(m: Mood, clair: Boolean): Modifier = if (P.retro) fondMood
         Tache(m.t3, if (clair) 0.50f else 0.42f, 0.35f, 0.92f),
     )) {
         val alpha = a
-        val centre = Offset(size.width * x, size.height * y)
+        val centre = Offset(gx + w * x, size.height * y)
         drawCircle(
             Brush.radialGradient(
                 0f to couleur(c).copy(alpha = alpha),
@@ -162,10 +170,15 @@ fun Modifier.fondMood(m: Mood, clair: Boolean): Modifier = if (P.retro) fondMood
 /**
  * Live et Sirène : le fond blanc du fil à peine teinté du mood (texte foncé toujours
  * lisible), plus marqué en haut qu'en bas, comme le fil de Live (#f4f9ff → blanc).
+ * Seulement dans le fil (à partir de [gauche]) : la liste garde son fond.
  */
-private fun Modifier.fondMoodDiscret(m: Mood): Modifier = drawBehind {
+private fun Modifier.fondMoodDiscret(m: Mood, gauche: Dp): Modifier = drawBehind {
     val force = if (P.live) 0.76f else 0.82f
-    drawRect(Brush.verticalGradient(listOf(mix(m.t1, 0xffffffL, force), mix(m.t2, 0xffffffL, force + 0.07f))))
+    val gx = gauche.toPx().coerceIn(0f, size.width)
+    drawRect(
+        Brush.verticalGradient(listOf(mix(m.t1, 0xffffffL, force), mix(m.t2, 0xffffffL, force + 0.07f))),
+        topLeft = Offset(gx, 0f), size = Size(size.width - gx, size.height),
+    )
 }
 
 private data class Tache(val c: Long, val a: Float, val x: Float, val y: Float)

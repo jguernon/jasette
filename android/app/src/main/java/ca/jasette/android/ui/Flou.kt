@@ -87,8 +87,8 @@ const val FLOU_FIL = "fil"
 /** Le fond du Mood d'une conversation (Mood.kt), sous ses messages. */
 const val FLOU_MOOD = "mood"
 
-/** Ce que voient les effets de la liste : le fond et les rangées (gardés comme objets : comparés par identité). */
-val SELECTION_LISTE: HazeSourceSelection = HazeSourceSelection.Behind.where { it.key == FLOU_FOND || it.key == FLOU_LISTE }
+/** Ce que voient les effets de la liste : le fond (avec, en deux volets, le Mood du fil ouvert) et les rangées (gardés comme objets : comparés par identité). */
+val SELECTION_LISTE: HazeSourceSelection = HazeSourceSelection.Behind.where { it.key == FLOU_FOND || it.key == FLOU_MOOD || it.key == FLOU_LISTE }
 /** Ce que voient les effets du fil : le fond et les messages. */
 val SELECTION_FIL: HazeSourceSelection = HazeSourceSelection.Behind.where { it.key == FLOU_FOND || it.key == FLOU_MOOD || it.key == FLOU_FIL }
 

@@ -242,7 +242,8 @@ fun Fil(
     val mood = moodDeConv(id)
     val flou = LocalFlou.current
     Box(Modifier.fillMaxSize()) {
-    if (mood != null) Box(Modifier.matchParentSize().fondMood(mood, P.clair).sourceFlou(flou, FLOU_MOOD, z = 0.5f))
+    // En deux volets, App le pose sous la liste et le fil à la fois (pas ici).
+    if (mood != null && !volet) Box(Modifier.matchParentSize().fondMood(mood, P.clair).sourceFlou(flou, FLOU_MOOD, z = 0.5f))
     CompositionLocalProvider(LocalMood provides mood) {
     Scaffold(
         // En deux volets, le fond du volet est déjà posé (pas de double voile au verre).
