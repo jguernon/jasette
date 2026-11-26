@@ -64,9 +64,9 @@ type Pont struct {
 	connCancel    context.CancelFunc
 
 	// La présence des contacts (presence.go).
-	presenceOn  bool
-	presence    map[string]presenceState
-	presenceNow chan struct{}
+	presenceOn bool
+	presence   map[string]presenceState
+	flux       *fluxPresence
 
 	// « Quoi de neuf ? » (notes.go) : ma note, et les notes des contacts.
 	notes         *notesPont
@@ -79,25 +79,24 @@ type Pont struct {
 
 func newPont(ctx context.Context) *Pont {
 	p := &Pont{
-		ctx:         ctx,
-		convs:       map[string]*convState{},
-		contacts:    map[int64]*contact{},
-		byIGID:      map[string]string{},
-		byThreadID:  map[string]string{},
-		byUserIGID:  map[string]int64{},
-		presenceOn:  presenceEnv(),
-		presence:    map[string]presenceState{},
-		presenceNow: make(chan struct{}, 1),
-		notesOn:     notesEnv(),
-		notesNow:    make(chan struct{}, 1),
-		pending:     map[string]string{},
-		loaded:      map[string]int64{},
-		fetching:    map[string]bool{},
-		listCount:   50,
+		ctx:        ctx,
+		convs:      map[string]*convState{},
+		contacts:   map[int64]*contact{},
+		byIGID:     map[string]string{},
+		byThreadID: map[string]string{},
+		byUserIGID: map[string]int64{},
+		presenceOn: presenceEnv(),
+		presence:   map[string]presenceState{},
+		notesOn:    notesEnv(),
+		notesNow:   make(chan struct{}, 1),
+		pending:    map[string]string{},
+		loaded:     map[string]int64{},
+		fetching:   map[string]bool{},
+		listCount:  50,
 	}
 	mediadl.SetHTTP(exhttp.SensibleClientSettings)
 	go p.listLoop()
-	go p.presenceLoop()
+	p.flux = p.newFluxPresence()
 	p.notes = nouvellesNotes(opsNote{
 		nom: "Instagram", limite: 60, parHeure: 6, duree: 24 * time.Hour,
 		publier: p.publierNoteIG, effacer: p.effacerNoteIG,
@@ -424,6 +423,7 @@ func (p *Pont) disconnect() {
 		p.connCancel = nil
 	}
 	p.mu.Unlock()
+	p.flux.arreter()
 	if cli != nil {
 		cli.SetEventHandler(nil)
 		cli.Disconnect()

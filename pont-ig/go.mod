@@ -22,7 +22,7 @@ require (
 	github.com/bytemare/cryptotools v0.0.0-20210309005813-f9985b05742f // indirect
 	github.com/bytemare/opaque v0.0.0-20210310201842-16a10d180656 // indirect
 	github.com/bytemare/voprf v0.0.0-20210221170502-f0af88d24d16 // indirect
-	github.com/coder/websocket v1.8.15 // indirect
+	github.com/coder/websocket v1.8.15
 	github.com/coreos/go-systemd/v22 v22.7.0 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.16 // indirect
