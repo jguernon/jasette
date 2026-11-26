@@ -18,6 +18,7 @@ mod pont;
 mod prive;
 mod mood;
 mod maj;
+mod retro;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -315,6 +316,12 @@ enum Theme {
     /// Claude Desktop (claude-ega-theme) : fond noir, palette EGA, police
     /// IBM VGA 8x16, coins carrés, traits pleins, ombres portées dures.
     Ega,
+    /// La messagerie bleue des années 2000 (src/retro.rs) : ciel bleu, barres
+    /// brillantes coupées net au milieu, photos dans un cadre vert, fil sans bulles.
+    Live,
+    /// La messagerie verte des années 2000, look Windows 2000 (src/retro.rs) :
+    /// gris, reliefs et creux, barre de titre verte, coins carrés, fil sans bulles.
+    Sirene,
 }
 
 impl Theme {
@@ -323,6 +330,8 @@ impl Theme {
             Theme::Sombre => "sombre",
             Theme::Verre => "verre",
             Theme::Ega => "ega",
+            Theme::Live => "live",
+            Theme::Sirene => "sirene",
         }
     }
     /// Le thème d'un id des réglages ; sombre par défaut.
@@ -330,6 +339,8 @@ impl Theme {
         match id {
             "verre" => Theme::Verre,
             "ega" => Theme::Ega,
+            "live" => Theme::Live,
+            "sirene" => Theme::Sirene,
             _ => Theme::Sombre,
         }
     }
@@ -342,6 +353,8 @@ fn theme() -> Theme {
     match THEME.load(Ordering::Relaxed) {
         x if x == Theme::Verre as u8 => Theme::Verre,
         x if x == Theme::Ega as u8 => Theme::Ega,
+        x if x == Theme::Live as u8 => Theme::Live,
+        x if x == Theme::Sirene as u8 => Theme::Sirene,
         _ => Theme::Sombre,
     }
 }
@@ -378,9 +391,9 @@ fn police() -> &'static str {
     if th().ega { POLICE_EGA.get().copied().unwrap_or(POLICE) } else { POLICE }
 }
 
-/// Le rayon d'un coin : celui demandé, ou un coin carré en EGA.
+/// Le rayon d'un coin : celui demandé, ou un coin carré en EGA et en Sirène.
 fn rayon(r: f32) -> gpui::Pixels {
-    if th().ega { px(0.) } else { px(r) }
+    if th().ega || th().sirene { px(0.) } else { px(r) }
 }
 /// La teinte du thème verre (indice dans `TEINTES`, réglage `teinte`).
 static TEINTE: AtomicUsize = AtomicUsize::new(0);
@@ -420,6 +433,10 @@ fn teinte() -> &'static Teinte {
 struct Palette {
     sombre: bool,
     ega: bool,
+    /// Les deux thèmes clairs « années 2000 » (src/retro.rs) : `sombre` faux
+    /// (ils suivent le verre pour les couleurs), sans halos ni flou.
+    live: bool,
+    sirene: bool,
     /// Le fond de la fenêtre.
     fond: Hsla,
     /// Le fond des trois panneaux : rail, liste (et menu des réglages), fil.
@@ -479,6 +496,8 @@ impl Palette {
         Palette {
             sombre: false,
             ega: false,
+            live: false,
+            sirene: false,
             // La lavande garde son fond d'origine (--ss-well).
             fond: if t.id == "lavande" { c(FOND) } else { hsla(t.angle / 360., 0.4, 0.935, 1.) },
             rail: blanc(0.5),
@@ -521,6 +540,8 @@ impl Palette {
         Palette {
             sombre: true,
             ega: false,
+            live: false,
+            sirene: false,
             fond: c(0x1c1c1e),
             rail: c(0x1c1c1e),
             liste: c(0x252527),
@@ -565,6 +586,8 @@ impl Palette {
         Palette {
             sombre: true,
             ega: true,
+            live: false,
+            sirene: false,
             fond: c(EGA_NOIR),
             rail: c(EGA_NOIR),
             liste: c(EGA_NOIR),
@@ -610,9 +633,13 @@ fn th() -> &'static Palette {
     static VERRES: LazyLock<Vec<Palette>> = LazyLock::new(|| TEINTES.iter().map(Palette::verre).collect());
     static SOMBRE: LazyLock<Palette> = LazyLock::new(Palette::sombre);
     static EGA: LazyLock<Palette> = LazyLock::new(Palette::ega);
+    static LIVE: LazyLock<Palette> = LazyLock::new(Palette::live);
+    static SIRENE: LazyLock<Palette> = LazyLock::new(Palette::sirene);
     match theme() {
         Theme::Sombre => &SOMBRE,
         Theme::Ega => &EGA,
+        Theme::Live => &LIVE,
+        Theme::Sirene => &SIRENE,
         Theme::Verre => &VERRES[TEINTE.load(Ordering::Relaxed).min(TEINTES.len() - 1)],
     }
 }
@@ -641,6 +668,10 @@ fn appliquer_theme(choix: Theme, teinte_id: &str, cx: &mut App) {
             g.caret = c(EGA_JAUNE);
             g.selection = c(EGA_BLEU);
             g.muted_foreground = c(EGA_GRIS);
+        } else if t.sirene {
+            // Windows 2000 : curseur noir, sélection bleu marine pâlie.
+            g.caret = c(0x000000);
+            g.selection = ca(0x0a246a, 0.3);
         } else {
             g.caret = t.accent;
             g.selection = alpha(t.accent, if t.sombre { 0.4 } else { 0.25 });
@@ -732,6 +763,14 @@ fn alpha(mut h: Hsla, a: f32) -> Hsla {
 /// Un grand panneau (rail, liste, fil) : verre flottant à ombre, aplat
 /// sombre, ou fenêtre EGA noire cadrée de gris clair.
 fn panneau(fond: Hsla, r: f32) -> Div {
+    if th().live {
+        // Live : des volets accolés, séparés par un filet bleu.
+        return div().bg(fond).border_r_1().border_color(c(0x94bbe8));
+    }
+    if th().sirene {
+        // Sirène : une zone blanche en creux sur le gris de la fenêtre.
+        return div().bg(fond).p(px(2.)).shadow(retro::relief(true));
+    }
     if th().ega {
         div().bg(fond).border_1().border_color(c(EGA_GRIS_CLAIR))
     } else if th().sombre {
@@ -747,6 +786,18 @@ fn panneau(fond: Hsla, r: f32) -> Div {
 fn ombre_verre() -> Vec<BoxShadow> {
     if th().ega {
         return ombre_dure(6.);
+    }
+    if th().sirene {
+        // Une fenêtre Windows 2000 : en relief, une ombre nette et courte.
+        let mut o = retro::relief(false);
+        o.push(BoxShadow {
+            color: ca(0x000000, 0.35),
+            offset: point(px(2.), px(2.)),
+            blur_radius: px(0.),
+            spread_radius: px(0.),
+            inset: false,
+        });
+        return o;
     }
     if th().sombre {
         return Vec::new();
@@ -765,7 +816,7 @@ fn ombre_flottante() -> Vec<BoxShadow> {
     if th().ega {
         return ombre_dure(3.);
     }
-    if th().sombre {
+    if th().sombre || th().sirene {
         return Vec::new();
     }
     vec![BoxShadow {
@@ -780,6 +831,17 @@ fn ombre_flottante() -> Vec<BoxShadow> {
 /// En sombre : un aplat gris (`surface`), sans liseré. En EGA : un aplat
 /// noir à trait plein gris, coins carrés.
 fn verre(opacite: f32, r: f32) -> Div {
+    // Live et Sirène : un menu ou une fenêtre (opacité ≥ 0,9), sinon un champ.
+    if th().live {
+        return div().bg(if opacite >= 0.9 { th().menu } else { c(0xffffff) }).border_1().border_color(c(0x8fb4e2)).rounded(rayon(r.min(10.)));
+    }
+    if th().sirene {
+        return if opacite >= 0.9 {
+            div().bg(th().menu).shadow(retro::relief(false))
+        } else {
+            div().bg(c(0xffffff)).shadow(retro::relief(true))
+        };
+    }
     if th().ega {
         return div().bg(th().surface).border_1().border_color(th().trait_fin);
     }
@@ -793,6 +855,12 @@ fn verre(opacite: f32, r: f32) -> Div {
 fn degrade_accent() -> gpui::Background {
     if th().ega {
         return c(EGA_BLEU).into();
+    }
+    if th().live {
+        return linear_gradient(180., linear_color_stop(c(0x4a96ec), 0.), linear_color_stop(c(0x2f7ee0), 1.));
+    }
+    if th().sirene {
+        return c(0x2e9a3f).into();
     }
     if th().sombre {
         return th().accent.into();
@@ -1500,7 +1568,7 @@ impl Default for Reglages {
             emojis: Default::default(),
             head_grille: String::new(),
             marques_cache: HashMap::new(),
-            heures_messages: false,
+            heures_messages: true,
             taille_messages: 1.,
             liste_grosse: false,
             apercus_liens: true,
@@ -1916,6 +1984,8 @@ struct Jasette {
     menu_rail: Option<Service>,
     /// La vue Favoris en mode « réorganiser » (flèches sur chaque rangée).
     reorganiser: bool,
+    /// Live et Sirène : les groupes « En ligne » et « Hors ligne » repliés.
+    retro_replie: [bool; 2],
     confirmer_suppression: bool,
     /// Le champ « nouveau message » et les personnes que Messenger propose (id préfixé, nom, photo).
     nouveau_texte: String,
@@ -2796,6 +2866,7 @@ impl Jasette {
             mood_feuille: None,
             menu_rail: None,
             reorganiser: false,
+            retro_replie: [false; 2],
             confirmer_suppression: false,
             nouveau_texte: String::new(),
             resultats_meta: Vec::new(),
@@ -4733,6 +4804,23 @@ impl Jasette {
         if let Some(photo) = self.photo_moi() {
             return avatar("", "", false, Some(&photo), taille);
         }
+        if retro::retro() {
+            return retro::cadre_avatar(taille, |t| {
+                div()
+                    .flex_none()
+                    .size(px(t))
+                    .rounded(rayon(t * 0.11))
+                    .bg(fond_avatar(c(0x34d399), c(0x059669)))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(t * 0.42))
+                    .text_color(blanc(1.))
+                    .font_weight(FontWeight::BOLD)
+                    .child(initiale.to_string())
+                    .into_any_element()
+            });
+        }
         div()
             .flex_none()
             .size(px(taille))
@@ -5076,8 +5164,18 @@ impl Jasette {
             .justify_center()
             .cursor_pointer()
             // th().choisi vaut le 0x3a3a3c du sombre ; en EGA, le bleu de sélection.
-            .when(actif, |d| d.bg(ton(blanc(0.85), th().choisi)).shadow(ombre_flottante()))
-            .when(!actif, |d| d.hover(|s| s.bg(ton(blanc(0.5), c(0x2c2c2e)))))
+            .when(actif && !retro::retro(), |d| d.bg(ton(blanc(0.85), th().choisi)).shadow(ombre_flottante()))
+            .when(!actif && !retro::retro(), |d| d.hover(|s| s.bg(ton(blanc(0.5), c(0x2c2c2e)))))
+            // Live : la touche choisie blanche à liseré bleu ; Sirène : enfoncée.
+            .when(actif && th().live, |d| {
+                d.rounded(px(10.))
+                    .border_1()
+                    .border_color(c(0x6fa0de))
+                    .bg(linear_gradient(180., linear_color_stop(c(0xffffff), 0.), linear_color_stop(c(0xd4e6fa), 1.)))
+            })
+            .when(!actif && th().live, |d| d.rounded(px(10.)).hover(|s| s.bg(blanc(0.6))))
+            .when(actif && th().sirene, |d| d.bg(c(0xe8e6e0)).shadow(retro::relief(true)))
+            .when(!actif && th().sirene, |d| d.hover(|s| s.shadow(retro::relief(false))))
     }
 
     fn rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -5100,6 +5198,10 @@ impl Jasette {
             .to_uppercase()
             .to_string();
         panneau(th().rail, th().rayon_rail)
+            .when(th().live, |d| {
+                d.bg(linear_gradient(180., linear_color_stop(c(0xd6e8fb), 0.), linear_color_stop(c(0xb9d6f6), 1.)))
+            })
+            .when(th().sirene, |d| d.p(px(0.)).shadow(retro::relief(false)))
             .w(px(68.))
             .flex_none()
             .h_full()
@@ -5332,7 +5434,7 @@ impl Jasette {
             .child(icone(nom, 18., if actif { th().accent } else { ton(th().texte_fort, th().icone) }))
     }
 
-    fn colonne_liste(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn colonne_liste(&self, cx: &mut Context<Self>) -> AnyElement {
         let titre = t(match self.vue {
             Vue::Tout => "Boîte de réception",
             Vue::Favoris => "Favoris",
@@ -5474,6 +5576,25 @@ impl Jasette {
             col = col.child(head);
             haut += h;
         }
+        // Live et Sirène : pas de voiles ; le bandeau « moi », l'en-tête, puis la liste.
+        if retro::retro() {
+            let (moi, _) = self.moi_retro();
+            let liste = div().relative().flex_1().min_h(px(0.)).child(self.liste(0., cx));
+            let colonne = if th().live {
+                panneau(th().liste, 0.).child(moi).child(col).child(liste)
+            } else {
+                div().child(moi).child(panneau(th().liste, 0.).flex_1().min_h(px(0.)).flex().flex_col().child(col).child(liste))
+            };
+            return colonne
+                .relative()
+                .flex()
+                .flex_col()
+                .w(px(370.))
+                .h_full()
+                .overflow_hidden()
+                .children(self.carte_maj(cx))
+                .into_any_element();
+        }
         // Comme le fil : la liste passe sous un en-tête givré qui s'efface
         // en dégradé, et ne dessine jamais dans les coins arrondis.
         let givre = |a: f32| alpha(th().givre_liste, a);
@@ -5537,6 +5658,7 @@ impl Jasette {
                     .when(th().ega, |d| d.bg(givre(1.))),
             )
             .children(self.carte_maj(cx))
+            .into_any_element()
     }
 
     /// Les marques ont changé ici (Head, favoris, épingles, ordre) : on les
@@ -5864,6 +5986,13 @@ impl Jasette {
         } else if visibles.is_empty() && self.resultats_msgs.is_empty() {
             col = col.child(div().p(px(16.)).text_color(th().texte_pale).child(t("Aucun résultat")));
         }
+        if retro::retro() && !reorganiser {
+            col = self.lignes_retro(col.pt(px(4.)).px(px(6.)), visibles, badge, cx);
+            if !self.filtre.is_empty() {
+                col = self.resultats_messages(col, cx);
+            }
+            return col;
+        }
         let n = visibles.len();
         for (i, conv) in visibles.into_iter().enumerate() {
             // Un peu d'air sous les épinglées.
@@ -6111,16 +6240,28 @@ impl Jasette {
         let id = SharedString::from(format!("p-{}-{}", m.id, p.media_id));
         if p.est_image() {
             let (w, h) = p.cadre();
+            // Live : la photo dans un cadre blanc à ombre bleutée ; Sirène : un trait sombre.
+            let r_image = if th().live { 6. } else { 18. };
             let cadre = div()
                 .id(id)
                 .w(px(w))
                 .h(px(h))
-                .rounded(rayon(18.))
+                .rounded(rayon(r_image))
                 .overflow_hidden()
                 .bg(ton(blanc(0.55), th().surface))
                 .border_1()
                 .border_color(ton(blanc(0.9), th().surface_bord))
                 .shadow(ombre_flottante())
+                .when(th().live, |d| {
+                    d.border_2().border_color(c(0xffffff)).bg(c(0xeaf3fd)).shadow(vec![BoxShadow {
+                        color: ca(0x143c78, 0.3),
+                        offset: point(px(0.), px(2.)),
+                        blur_radius: px(8.),
+                        spread_radius: px(0.),
+                        inset: false,
+                    }])
+                })
+                .when(th().sirene, |d| d.border_color(c(0x404040)))
                 .flex()
                 .items_center()
                 .justify_center();
@@ -6130,7 +6271,7 @@ impl Jasette {
                     cadre
                         .cursor_pointer()
                         .on_click(move |_, _, _| ouvrir_fichier(&ouvrir))
-                        .child(img(chemin).size_full().rounded(rayon(18.)).object_fit(ObjectFit::Cover))
+                        .child(img(chemin).size_full().rounded(rayon(if th().live { 4. } else { 18. })).object_fit(ObjectFit::Cover))
                         .into_any_element()
                 }
                 None => {
@@ -6309,6 +6450,10 @@ impl Jasette {
             }]
         };
         let groupe = self.conv(&id).is_some_and(|c| c.group);
+        // Live et Sirène : sans bulles, un en-tête par suite, le texte en retrait.
+        let ligne_retro = retro::retro();
+        let retrait = if th().live { 14. } else { 10. };
+        let nom_conv = self.conv(&id).map(|c| c.name.clone()).unwrap_or_default();
         // Le mood de la conversation : mes bulles, les reçues (aucun en EGA).
         let mood = self.mood_fil();
         let tache_moi = mood.map(|m| m.tache_envoyee()).unwrap_or_else(tache_envoyee);
@@ -6321,6 +6466,8 @@ impl Jasette {
             .px(px(22.))
             .pt(px(HAUT_ENTETE + 14. - MARGE_FIL))
             .pb(px(HAUT_COMPOSEUR + 10. - MARGE_FIL))
+            // Live et Sirène : l'historique est un cadre à lui, rien ne flotte dessus.
+            .when(ligne_retro, |d| d.px(px(14.)).pt(px(8.)).pb(px(12.)).gap(px(2.)))
             .when(flou, |d| d.text_color(invisible));
         if self.chargement.as_deref() == Some(id.as_str()) {
             col = col.child(
@@ -6392,8 +6539,10 @@ impl Jasette {
                 .flex()
                 .flex_col()
                 .gap(px(4.))
-                .when(m.from_me, |d| d.items_end())
-                .when(!m.from_me, |d| d.items_start());
+                .when(m.from_me && !ligne_retro, |d| d.items_end())
+                .when(!m.from_me || ligne_retro, |d| d.items_start())
+                // Sans bulles : tout en retrait sous l'en-tête (qui sort de ce retrait).
+                .when(ligne_retro, |d| d.pl(px(retrait)).gap(px(2.)));
             if !flou {
                 // Le survol d'un message montre le bouton 🙂 (réagir).
                 let survole = mid.clone();
@@ -6406,7 +6555,11 @@ impl Jasette {
                     cx.notify();
                 }));
             }
-            if groupe && !m.from_me && premier && !m.sender.is_empty() {
+            if ligne_retro {
+                if premier || self.details_heures {
+                    ligne = ligne.child(div().ml(px(-retrait)).child(self.entete_retro(m, &nom_conv, flou)));
+                }
+            } else if groupe && !m.from_me && premier && !m.sender.is_empty() {
                 ligne = ligne.child(
                     div()
                         .ml(px(12.))
@@ -6457,6 +6610,39 @@ impl Jasette {
             let coches = if m.from_me && !flou { coche(&m.status) } else { None };
             // En sombre, l'heure se loge dans la bulle, en bas à droite.
             let heure_dedans = th().sombre && !m.text.is_empty() && !self.details_heures;
+            // Sans bulles : l'heure est dans l'en-tête ; mes coches suivent la fin d'une suite.
+            if ligne_retro && !flou && !m.text.is_empty() {
+                let plage = (trouves.contains(m.id.as_str()) || courant == Some(m.id.as_str()))
+                    .then(|| {
+                        let q = if self.fil_requete.is_empty() { plier(&self.requete_globale) } else { self.fil_requete.clone() };
+                        trouver_plie(&m.text, &q).map(|r| (r, alpha(couleur_trouve(), 0.55)))
+                    })
+                    .flatten();
+                let est_courant = courant == Some(m.id.as_str());
+                let texte = div()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .items_end()
+                    .gap_x(px(6.))
+                    .max_w(px(620.))
+                    .border_1()
+                    .border_color(if est_courant { couleur_trouve() } else { hsla(0., 0., 0., 0.) })
+                    .child(div().min_w(px(0.)).text_size(gpui::rems(self.reglages.taille_messages)).child(self.texte_bulle(m, plage)))
+                    .when(echec && m.from_me, |d| {
+                        d.child(div().text_size(px(11.)).text_color(th().danger).child(t("Échec")))
+                    })
+                    .when_some(coches.filter(|_| dernier || self.details_heures || echec), |d, k| {
+                        d.child(div().pb(px(2.)).child(self.coches(m, k, th().texte_pale, cx)))
+                    });
+                ligne = ligne.child(self.bulle_reactive(m, texte.into_any_element(), flou, cx));
+                if let Some(carte) = self.carte_apercu(orig) {
+                    ligne = ligne.child(carte);
+                }
+                col = col.child(ligne);
+                ordre.push(Some(m.id.clone()));
+                continue;
+            }
             let trouve = trouves.contains(m.id.as_str());
             let est_courant = courant == Some(m.id.as_str());
             if !m.text.is_empty() {
@@ -6558,7 +6744,12 @@ impl Jasette {
                 ligne = ligne.child(self.bulle_reactive(m, div().h(px(2.)).w(px(60.)).into_any_element(), flou, cx));
                 }
             }
-            if self.details_heures || (!heure_dedans && (dernier || echec)) {
+            if ligne_retro && !flou {
+                // Une pièce seule : ses coches dessous, rien d'autre (l'heure est dans l'en-tête).
+                if m.from_me && (dernier || echec) {
+                    ligne = ligne.when_some(coches, |d, k| d.child(self.coches(m, k, th().texte_pale, cx)));
+                }
+            } else if self.details_heures || (!heure_dedans && (dernier || echec)) {
                 let mut pied =
                     if self.details_heures { format!("{} · {}", jour(m.time), heure(m.time, false)) } else { heure(m.time, false) };
                 // Les coches remplacent le statut écrit ; seul l'échec reste en toutes lettres.
@@ -6658,8 +6849,18 @@ impl Jasette {
     /// Le texte d'une bulle : emojis, passage trouvé surligné, et liens
     /// soulignés qu'un clic ouvre dans le navigateur.
     fn texte_bulle(&self, m: &Msg, plage: Option<(Range<usize>, Hsla)>) -> AnyElement {
-        let texte_moi = self.mood_fil().map(|m| m.texte_envoye()).unwrap_or(blanc(1.));
-        let couleur = if m.from_me { texte_moi } else { th().texte_fort };
+        let texte_moi = if retro::retro() {
+            retro::texte_ligne(true)
+        } else {
+            self.mood_fil().map(|m| m.texte_envoye()).unwrap_or(blanc(1.))
+        };
+        let couleur = if retro::retro() {
+            retro::texte_ligne(m.from_me)
+        } else if m.from_me {
+            texte_moi
+        } else {
+            th().texte_fort
+        };
         let liens = if m.text.contains("://") || m.text.to_ascii_lowercase().contains("www.") {
             apercu::liens(&m.text)
         } else {
@@ -6669,7 +6870,9 @@ impl Jasette {
             return texte_surligne(m.text.clone(), couleur, None, plage).into_any_element();
         }
         // Sur ma bulle (accent), le blanc souligné ; sur la reçue, l'accent lisible du thème.
-        let couleur_lien = if m.from_me {
+        let couleur_lien = if retro::retro() {
+            th().accent
+        } else if m.from_me {
             texte_moi
         } else if th().ega {
             c(EGA_CYAN_VIF)
@@ -6862,7 +7065,7 @@ impl Jasette {
         }
         let local = m.id == m.tmp_id;
         if !m.reactions.is_empty() {
-            boite = boite.mb(px(14.)).child(self.pastille_reactions(m));
+            boite = boite.mb(px(if retro::retro() { 22. } else { 14. })).child(self.pastille_reactions(m));
         }
         if local {
             return boite.into_any_element();
@@ -6941,8 +7144,8 @@ impl Jasette {
                 .border_1()
                 .border_color(th().trait_fin)
                 .hover(|s| s.bg(th().survol))
-                .when(m.from_me, |d| d.left(px(-36.)))
-                .when(!m.from_me, |d| d.right(px(-36.)))
+                .when(m.from_me && !retro::retro(), |d| d.left(px(-36.)))
+                .when(!m.from_me || retro::retro(), |d| d.right(px(-36.)))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     cx.stop_propagation();
                     this.barre_reactions = Some(id_b.clone());
@@ -7014,8 +7217,8 @@ impl Jasette {
                 div()
                     .absolute()
                     .top(px(-48.))
-                    .when(m.from_me, |d| d.right(px(0.)))
-                    .when(!m.from_me, |d| d.left(px(0.)))
+                    .when(m.from_me && !retro::retro(), |d| d.right(px(0.)))
+                    .when(!m.from_me || retro::retro(), |d| d.left(px(0.)))
                     .child(barre),
             ));
         }
@@ -7043,8 +7246,10 @@ impl Jasette {
             .id(SharedString::from(format!("reactions-{}", m.id)))
             .absolute()
             .bottom(px(-15.))
-            .when(m.from_me, |d| d.right(px(10.)))
-            .when(!m.from_me, |d| d.left(px(10.)))
+            .when(m.from_me && !retro::retro(), |d| d.right(px(10.)))
+            .when(!m.from_me && !retro::retro(), |d| d.left(px(10.)))
+            // Sans bulles : sous le début du texte, sans le chevaucher.
+            .when(retro::retro(), |d| d.left(px(0.)).bottom(px(-20.)))
             .px(px(6.))
             .py(px(1.))
             .rounded(rayon(999.))
@@ -7469,7 +7674,10 @@ impl Jasette {
             .child(div().id("grille-emojis").flex_1().min_h(px(0.)).overflow_y_scroll().child(grille))
     }
 
-    fn panneau_fil(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn panneau_fil(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        if retro::retro() {
+            return self.panneau_fil_retro(cx);
+        }
         let choisie = self.choisie.as_ref().and_then(|id| self.conv(id)).cloned();
         // (i) : l'heure exacte de chaque message, ou non.
         let details = self.details_heures;
@@ -7749,6 +7957,7 @@ impl Jasette {
             .when(self.menu_conv && choisie.is_some(), |d| {
                 d.child(div().absolute().right(px(16.)).top(px(HAUT_ENTETE - 4.)).child(self.menu_conversation(cx)))
             })
+            .into_any_element()
     }
 
     /// La barre de recherche du fil : champ, compteur, précédent/suivant, fermer.
@@ -8463,7 +8672,7 @@ impl Jasette {
                         .p(px(14.))
                         .cursor_pointer()
                         .when(choix == Theme::Sombre, |d| d.rounded_t(rayon(r)))
-                        .when(choix == Theme::Ega, |d| d.rounded_b(rayon(r)))
+                        .when(choix == Theme::Sirene, |d| d.rounded_b(rayon(r)))
                         .hover(|s| s.bg(if th().ega { th().survol } else { ton(blanc(0.5), c(0x2a2a2c)) }))
                         .child(apercu.flex_none().size(px(54.)).rounded(rayon(14.)).border_1())
                         .child(
@@ -8575,6 +8784,22 @@ impl Jasette {
                                 t("EGA"),
                                 t("Seize couleurs et police IBM, comme un PC de 1984."),
                                 apercu_ega,
+                            ))
+                            .child(separateur())
+                            .child(choix(
+                                "t-live",
+                                Theme::Live,
+                                "Live",
+                                t("Bleu ciel brillant, photos au cadre vert, comme une messagerie des années 2000."),
+                                retro::apercu_live(),
+                            ))
+                            .child(separateur())
+                            .child(choix(
+                                "t-sirene",
+                                Theme::Sirene,
+                                "Sirène",
+                                t("Gris de Windows 2000, barre de titre verte, coins carrés."),
+                                retro::apercu_sirene(),
                             )),
                     )
                     .child(
@@ -10372,6 +10597,13 @@ impl Render for Jasette {
                     gpui_component::TitleBar::new()
                         .bg(th().rail)
                         .border_color(ton(blanc(0.6), c(0x2c2c2e)))
+                        // Live : bleu brillant coupé net au milieu ; Sirène : vert. Titre en blanc.
+                        .when(retro::retro(), |d| {
+                            d.relative()
+                                .bg(retro::fond_titre())
+                                .border_color(if th().live { c(0x2a63b4) } else { c(0x0b4a15) })
+                                .children(retro::reflet_titre())
+                        })
                         .child(
                             div()
                                 .flex()
@@ -10382,6 +10614,7 @@ impl Render for Jasette {
                                 .text_size(px(13.))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(th().texte)
+                                .when(retro::retro(), |d| d.relative().text_color(c(0xffffff)).font_weight(FontWeight::BOLD))
                                 .child(img(icone_app()).size(px(18.)))
                                 .child("Jasette"),
                         ),
@@ -10465,7 +10698,7 @@ impl Jasette {
             .text_size(px(if th().ega { 16. } else { 15. }))
             .text_color(th().texte_fort)
             // Les halos du thème glass : bleu en haut à gauche, violet à droite, pêche en bas.
-            .when(!th().sombre, |d| {
+            .when(!th().sombre && !retro::retro(), |d| {
                 d.child(halo(teinte().accent, 0.42, -180., -220., 760.))
                     .child(halo(teinte().accent_2, 0.36, 760., -160., 720.))
                     .child(halo(teinte().halo, 0.40, 300., 520., 760.))
@@ -10515,7 +10748,8 @@ impl Jasette {
                 .into_any_element()
         };
 
-        page.child(
+        page.when(th().sirene, |d| d.child(self.barre_menu_sirene(cx)))
+        .child(
             div()
                 .flex()
                 .flex_row()
@@ -10526,6 +10760,7 @@ impl Jasette {
                 .child(self.rail(cx))
                 .child(centre),
         )
+        .when(th().sirene, |d| d.child(self.barre_etat_sirene()))
         // La feuille « Mood » de la conversation ouverte.
         .children(self.feuille_mood(cx))
         .when_some(self.apercu.clone(), |d, chemin| {
@@ -11119,6 +11354,8 @@ fn groupe() -> Div {
     verre(0.72, 18.)
         .when(th().sombre, |d| d.bg(th().carte).rounded(rayon(12.)))
         .shadow(ombre_flottante())
+        // Sirène : le cadre en creux (l'ombre ci-dessus l'aurait effacé).
+        .when(th().sirene, |d| d.shadow(retro::relief(true)))
         .flex()
         .flex_col()
         .overflow_hidden()
@@ -11276,16 +11513,35 @@ fn mosaique(membres: &[(String, String, Option<PathBuf>)], taille: f32) -> AnyEl
     boite.into_any_element()
 }
 
+/// Un avatar : rond, ou dans le cadre de Live et Sirène (src/retro.rs).
 fn avatar(nom: &str, couleur: &str, groupe: bool, photo: Option<&PathBuf>, taille: f32) -> AnyElement {
+    if retro::retro() {
+        return retro::cadre_avatar(taille, |t| avatar_nu(nom, couleur, groupe, photo, t));
+    }
+    avatar_nu(nom, couleur, groupe, photo, taille)
+}
+
+fn avatar_nu(nom: &str, couleur: &str, groupe: bool, photo: Option<&PathBuf>, taille: f32) -> AnyElement {
+    // Dans un cadre de Live, un carré aux coins à peine arrondis.
+    let r = if retro::retro() { taille * 0.11 } else { taille };
     if let Some(photo) = photo {
         return div()
             .flex_none()
             .size(px(taille))
-            .rounded(rayon(taille))
+            .rounded(rayon(r))
             .overflow_hidden()
             .border_1()
             .border_color(th().bord_avatar)
-            .child(img(photo.clone()).size_full().rounded(rayon(taille)).object_fit(ObjectFit::Cover))
+            .child(
+                // Live et Sirène : la photo pixelisée, comme à l'époque (src/retro.rs).
+                img(match retro::retro().then(|| retro::photo_pixel(photo)).flatten() {
+                    Some(pixel) => gpui::ImageSource::from(pixel),
+                    None => gpui::ImageSource::from(photo.clone()),
+                })
+                .size_full()
+                .rounded(rayon(r))
+                .object_fit(ObjectFit::Cover),
+            )
             .into_any_element();
     }
     let base = hex(couleur).unwrap_or(ACCENT);
@@ -11303,7 +11559,7 @@ fn avatar(nom: &str, couleur: &str, groupe: bool, photo: Option<&PathBuf>, taill
     div()
         .flex_none()
         .size(px(taille))
-        .rounded(rayon(taille))
+        .rounded(rayon(r))
         .bg(fond_avatar(ca(base, 0.75), c(base)))
         .border_1()
         .border_color(ton(blanc(0.7), th().bord_avatar))
@@ -11634,6 +11890,21 @@ fn t(fr: &'static str) -> &'static str {
         "Fichiers" => "Files",
         "Rien ici pour l'instant." => "Nothing here yet.",
         "Seize couleurs et police IBM, comme un PC de 1984." => "Sixteen colors and the IBM font, like a 1984 PC.",
+        "Bleu ciel brillant, photos au cadre vert, comme une messagerie des années 2000." => "Glossy sky blue, photos in a green frame, like a 2000s messenger.",
+        "Gris de Windows 2000, barre de titre verte, coins carrés." => "Windows 2000 gray, green title bar, square corners.",
+        "En ligne" => "Online",
+        "Hors ligne" => "Offline",
+        "services connectés" => "services connected",
+        "service connecté" => "service connected",
+        "Dernier message :" => "Last message:",
+        "Fichier" => "File",
+        "Contacts" => "Contacts",
+        "Affichage" => "View",
+        "Aide" => "Help",
+        "Fichier…" => "File…",
+        "Vocal" => "Voice",
+        "Options" => "Options",
+        "Heures" => "Times",
         "Interface" => "Interface",
         // WhatsApp, Signal et X
         "Numéro, ex. : +1 514 555 1234" => "Number, e.g. +1 514 555 1234",

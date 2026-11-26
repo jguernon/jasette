@@ -132,7 +132,7 @@ impl Mood {
                         .left(px(-l / 2.))
                         .top(px(-l / 2.))
                         .size(px(l))
-                        .rounded(px(l))
+                        .rounded(coin(l))
                         .shadow(vec![BoxShadow {
                             color: ca(self.taches[i], a),
                             offset: point(px(0.), px(0.)),
@@ -231,7 +231,7 @@ impl Jasette {
     }
 
     /// Ouvre la feuille pour une conversation, avec ses choix actuels.
-    fn ouvrir_feuille_mood(&mut self, id: &str) {
+    pub(crate) fn ouvrir_feuille_mood(&mut self, id: &str) {
         self.menu_conv = false;
         self.emojis_ouverts = false;
         self.reaction_cible = None;
@@ -299,7 +299,7 @@ impl Jasette {
                 .child(div().flex_1().child("Mood"))
                 .when_some(emoji, |d, e| d.child(div().font_family(POLICE_EMOJI).text_size(px(13.)).child(e)))
                 .when_some(actuel, |d, m| {
-                    d.child(div().size(px(14.)).rounded(px(999.)).bg(m.envoye()).border_1().border_color(blanc(0.6)))
+                    d.child(div().size(px(14.)).rounded(coin(999.)).bg(m.envoye()).border_1().border_color(blanc(0.6)))
                 })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.ouvrir_feuille_mood(&id);
@@ -329,6 +329,38 @@ impl Jasette {
 
     /// Des bulles d'exemple sur le fond d'un mood (ou du thème, sans mood).
     fn exemple_bulle(m: Option<&Mood>, texte: &'static str, moi: bool, taille: f32, dernier: bool) -> Div {
+        // Live et Sirène : pas de bulles, l'en-tête puis le texte en retrait (comme leur fil).
+        if retro::retro() {
+            let quand = if moi { "19:25" } else { "19:24" };
+            let entete = if th().live {
+                let qui = if moi { tr("Moi", "Me") } else { "Camille" };
+                div().text_size(px(taille * 0.85)).text_color(c(0x5d7088)).child(if anglais() {
+                    format!("{qui} says ({quand}):")
+                } else {
+                    format!("{qui} dit ({quand}) :")
+                })
+            } else {
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(5.))
+                    .text_size(px(taille * 0.9))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(if moi { c(0x1838c0) } else { c(0xc01818) })
+                            .child(if moi { tr("Moi", "Me") } else { "Camille Tremblay" }),
+                    )
+                    .child(div().text_color(c(0x6a6a6a)).child(format!("({quand})")))
+            };
+            return div()
+                .flex()
+                .flex_col()
+                .gap(px(1.))
+                .child(entete)
+                .child(div().pl(px(12.)).text_size(px(taille)).text_color(retro::texte_ligne(moi)).child(texte))
+                .when(!dernier, |d| d.mb(px(-2.)));
+        }
         let d = div()
             .max_w(px(300.))
             .px(px(taille * 0.9))
@@ -351,8 +383,10 @@ impl Jasette {
     /// de la couleur de la feuille, arrondi par l'intérieur, recouvre ce que
     /// les taches laissent déborder dans les coins (il faut 8 px ≥ 0,42 r).
     fn fond_apercu(m: Option<&Mood>, d: Div, l: f32, r: f32) -> Div {
-        let d = d.rounded(px(r)).overflow_hidden();
+        let d = d.rounded(coin(r)).overflow_hidden();
         match m {
+            // Live et Sirène : le fond seulement teinté, sans taches.
+            Some(m) if retro::retro() => d.bg(m.fond()),
             Some(m) => d.bg(m.fond()).child(m.taches(l)).child(
                 div()
                     .absolute()
@@ -360,17 +394,17 @@ impl Jasette {
                     .left(px(-8.))
                     .right(px(-8.))
                     .bottom(px(-8.))
-                    .rounded(px(r + 8.))
+                    .rounded(coin(r + 8.))
                     .border_8()
                     .border_color(Self::fond_feuille()),
             ),
-            None => d.bg(if th().sombre { c(0x000000) } else { blanc(0.55) }),
+            None => d.bg(if th().sombre { c(0x000000) } else if retro::retro() { th().fil } else { blanc(0.55) }),
         }
     }
 
     /// La couleur de la feuille « Mood ».
     fn fond_feuille() -> Hsla {
-        if th().sombre { th().menu } else { blanc(0.97) }
+        if th().sombre || retro::retro() { th().menu } else { blanc(0.97) }
     }
 
     /// Une carte de la grille : le mood en miniature (fond, une bulle reçue,
@@ -379,7 +413,17 @@ impl Jasette {
         let nom = m.map(|m| m.nom()).unwrap_or_else(|| tr("Par défaut", "Default"));
         let cle = m.map(|m| m.id).unwrap_or("defaut");
         let pastille = |moi: bool, w: f32| {
-            let d = div().h(px(9.)).w(px(w)).rounded(px(999.));
+            if retro::retro() {
+                // En miniature : un trait pour l'en-tête (rouge ou bleu en Sirène), un pour le texte.
+                let nom = if th().live { c(0x8a9bb0) } else if moi { c(0x1838c0) } else { c(0xc01818) };
+                return div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.))
+                    .child(div().h(px(3.)).w(px(w * 0.5)).bg(nom))
+                    .child(div().ml(px(5.)).h(px(4.)).w(px(w * 0.85)).bg(alpha(retro::texte_ligne(moi), 0.7)));
+            }
+            let d = div().h(px(9.)).w(px(w)).rounded(coin(999.));
             match (m, moi) {
                 (Some(m), true) => d.bg(m.envoye()),
                 (Some(m), false) => d.bg(m.recue()),
@@ -411,7 +455,7 @@ impl Jasette {
                 .gap(px(6.))
                 .px(px(10.))
                 .child(div().flex().flex_row().child(pastille(false, 38.)))
-                .child(div().flex().flex_row().justify_end().child(pastille(true, 30.))),
+                .child(div().flex().flex_row().when(!retro::retro(), |d| d.justify_end()).child(pastille(true, 30.))),
         )
         .when(m.is_none(), |d| {
             d.child(
@@ -436,7 +480,7 @@ impl Jasette {
                     .relative()
                     .w_full()
                     .p(px(3.))
-                    .rounded(px(18.))
+                    .rounded(coin(18.))
                     .border_2()
                     .border_color(anneau)
                     .hover(|s| s.bg(th().survol))
@@ -448,7 +492,7 @@ impl Jasette {
                                 .bottom(px(-6.))
                                 .right(px(-6.))
                                 .size(px(22.))
-                                .rounded(px(999.))
+                                .rounded(coin(999.))
                                 .bg(th().accent)
                                 .border_2()
                                 .border_color(th().menu)
@@ -582,7 +626,7 @@ impl Jasette {
             .child(
                 div()
                     .size(px(36.))
-                    .rounded(px(12.))
+                    .rounded(coin(12.))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -615,7 +659,7 @@ impl Jasette {
                 div()
                     .id("mood-fermer")
                     .size(px(30.))
-                    .rounded(px(999.))
+                    .rounded(coin(999.))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -690,14 +734,14 @@ impl Jasette {
                     14.,
                     true,
                 )))
-                .child(div().flex().flex_row().justify_end().child(Self::exemple_bulle(
+                .child(div().flex().flex_row().when(!retro::retro(), |d| d.justify_end()).child(Self::exemple_bulle(
                     m,
                     tr("Oui ! Il était magnifique 😍", "Yes! It was gorgeous 😍"),
                     true,
                     14.,
                     false,
                 )))
-                .child(div().flex().flex_row().justify_end().child(Self::exemple_bulle(
+                .child(div().flex().flex_row().when(!retro::retro(), |d| d.justify_end()).child(Self::exemple_bulle(
                     m,
                     tr("On y retourne demain ?", "Back there tomorrow?"),
                     true,
@@ -721,7 +765,7 @@ impl Jasette {
                 .id(cle)
                 .px(px(18.))
                 .py(px(8.))
-                .rounded(px(999.))
+                .rounded(coin(999.))
                 .text_size(px(14.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .cursor_pointer()
@@ -785,4 +829,9 @@ impl Jasette {
                 .into_any_element(),
         )
     }
+}
+
+/// Un coin de la feuille Mood : arrondi, sauf en Sirène (coins carrés).
+fn coin(r: f32) -> gpui::Pixels {
+    if th().sirene { px(0.) } else { px(r) }
 }
