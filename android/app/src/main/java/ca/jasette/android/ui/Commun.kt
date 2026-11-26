@@ -125,14 +125,25 @@ private val jourFmtFr = DateTimeFormatter.ofPattern("d MMM", Locale.CANADA_FRENC
 private val jourLongFmtFr = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.CANADA_FRENCH)
 private val jourFmtEn = DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH)
 private val jourLongFmtEn = DateTimeFormatter.ofPattern("EEEE, MMMM d", Locale.ENGLISH)
-private val jourFmt get() = if (ca.jasette.android.Langue.anglais) jourFmtEn else jourFmtFr
-private val jourLongFmt get() = if (ca.jasette.android.Langue.anglais) jourLongFmtEn else jourLongFmtFr
+// Une autre année que l'année en cours : la date porte aussi l'année.
+private val jourAnFmtFr = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.CANADA_FRENCH)
+private val jourLongAnFmtFr = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", Locale.CANADA_FRENCH)
+private val jourAnFmtEn = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.ENGLISH)
+private val jourLongAnFmtEn = DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy", Locale.ENGLISH)
+private fun jourFmt(d: LocalDate) = when {
+    d.year != LocalDate.now().year -> if (ca.jasette.android.Langue.anglais) jourAnFmtEn else jourAnFmtFr
+    else -> if (ca.jasette.android.Langue.anglais) jourFmtEn else jourFmtFr
+}
+private fun jourLongFmt(d: LocalDate) = when {
+    d.year != LocalDate.now().year -> if (ca.jasette.android.Langue.anglais) jourLongAnFmtEn else jourLongAnFmtFr
+    else -> if (ca.jasette.android.Langue.anglais) jourLongFmtEn else jourLongFmtFr
+}
 
 /** L'heure dans la liste : l'heure aujourd'hui, sinon la date. */
 fun heureListe(ms: Long): String {
     if (ms <= 0) return ""
     val t = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault())
-    return if (t.toLocalDate() == LocalDate.now()) t.format(heureFmt) else t.format(jourFmt)
+    return if (t.toLocalDate() == LocalDate.now()) t.format(heureFmt) else t.format(jourFmt(t.toLocalDate()))
 }
 
 fun heure(ms: Long): String = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).format(heureFmt)
@@ -143,7 +154,7 @@ fun jour(ms: Long): String {
     return when (d) {
         auj -> t("Aujourd'hui")
         auj.minusDays(1) -> t("Hier")
-        else -> d.format(jourLongFmt).replaceFirstChar { it.uppercase() }
+        else -> d.format(jourLongFmt(d)).replaceFirstChar { it.uppercase() }
     }
 }
 

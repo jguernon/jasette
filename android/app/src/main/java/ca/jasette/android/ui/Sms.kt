@@ -28,6 +28,10 @@ import ca.jasette.android.t
 fun rememberDemandeSms(): () -> Unit {
     val ctx = LocalContext.current
     var expliquer by remember { mutableStateOf(false) }
+    // Refus sans boîte du système : Android bloque les SMS (« paramètres
+    // restreints ») pour une app installée hors d'une boutique. On explique
+    // comment les permettre, avec un bouton vers la page de l'app.
+    var bloque by remember { mutableStateOf(false) }
     val lanceur = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
         val accorde = { p: String -> r[p] ?: (ctx.checkSelfPermission(p) == android.content.pm.PackageManager.PERMISSION_GRANTED) }
         if (r.containsKey(Manifest.permission.READ_CONTACTS)) {
@@ -37,7 +41,7 @@ fun rememberDemandeSms(): () -> Unit {
         if (accorde(Manifest.permission.READ_SMS) && accorde(Manifest.permission.SEND_SMS)) {
             Depot.utiliserSms(ctx, true)
         } else {
-            Depot.erreur = t("Sans l'accès aux SMS, Jasette ne peut pas lire ni envoyer tes messages texte. Tu peux l'accorder dans les paramètres d'Android (Jasette › Autorisations).")
+            bloque = true
         }
     }
     if (expliquer) {
@@ -60,6 +64,33 @@ fun rememberDemandeSms(): () -> Unit {
             },
             dismissButton = {
                 TextButton(shape = formeBouton, onClick = { expliquer = false }) { Text(t("Plus tard"), color = P.texteFort) }
+            },
+        )
+    }
+    if (bloque) {
+        AlertDialog(
+            onDismissRequest = { bloque = false },
+            containerColor = P.menu,
+            shape = forme(20.dp),
+            title = { Text(t("Autoriser les SMS"), color = P.texteFort) },
+            text = {
+                Text(
+                    t("Android bloque l'accès aux SMS pour les apps installées hors du Play Store. Dans la page de Jasette qui va s'ouvrir : touche ⋮ (en haut à droite) › « Autoriser les paramètres restreints », puis Autorisations › SMS › Autoriser. Reviens ensuite ici et touche de nouveau « Utiliser les SMS du téléphone »."),
+                    color = P.texte,
+                )
+            },
+            confirmButton = {
+                TextButton(shape = formeBouton, onClick = {
+                    bloque = false
+                    ctx.startActivity(
+                        android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                            .setData(android.net.Uri.fromParts("package", ctx.packageName, null))
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }) { Text(t("Ouvrir les paramètres"), color = P.accent) }
+            },
+            dismissButton = {
+                TextButton(shape = formeBouton, onClick = { bloque = false }) { Text(t("Plus tard"), color = P.texteFort) }
             },
         )
     }

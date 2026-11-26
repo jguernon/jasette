@@ -11777,6 +11777,10 @@ fn heure(ms: i64, court: bool) -> String {
         if (aujourdhui - t.date_naive()).num_days() < 7 {
             return JOURS[t.weekday().num_days_from_monday() as usize][..3].to_string();
         }
+        // Une autre année que l'année en cours : la date porte aussi l'année.
+        if t.year() != aujourdhui.year() {
+            return format!("{} {} {}", t.day(), MOIS[t.month0() as usize], t.year());
+        }
         return format!("{} {}", t.day(), MOIS[t.month0() as usize]);
     }
     t.format("%H:%M").to_string()

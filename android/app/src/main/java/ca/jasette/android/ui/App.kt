@@ -408,7 +408,9 @@ private fun Liste(
         val margesHaut = remember(marges) { MargesPartielles(marges, haut = true, bas = false) }
         val margesBas = remember(marges) { MargesPartielles(marges, haut = false, bas = true, cotes = false) }
         // Le fondu du haut, seulement une fois la liste défilée (lu au dessin, sans recomposer).
-        val etatListe = androidx.compose.foundation.lazy.rememberLazyListState()
+        // Gardée hors de l'écran (une par vue) : au retour d'une conversation, la
+        // liste reprend où on était au lieu de remonter en haut.
+        val etatListe = remember(vue) { PositionsListes.de(vue) }
         val defilee = rememberApparition { etatListe.firstVisibleItemIndex > 0 || etatListe.firstVisibleItemScrollOffset > 0 }
         val tirage = tirerPourChercher(
             ouverte = rechercheOuverte,
@@ -963,4 +965,10 @@ private fun Accueil(serveur: () -> Unit, connecter: (Service, String) -> Unit) {
             TextButton(shape = formeBouton, onClick = { Depot.accueilAutonome = false }) { Text(t("Changer de mode"), color = P.textePale) }
         }
     }
+}
+
+/** La position de défilement de chaque vue de la liste, gardée pendant qu'une conversation est ouverte. */
+private object PositionsListes {
+    private val parVue = mutableMapOf<Any, androidx.compose.foundation.lazy.LazyListState>()
+    fun de(vue: Any) = parVue.getOrPut(vue) { androidx.compose.foundation.lazy.LazyListState() }
 }
