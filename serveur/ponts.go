@@ -55,6 +55,10 @@ type Pont struct {
 	// qui arrivent après : les ponts ne les annoncent qu'une fois par session.
 	avatars map[string][]byte
 
+	// Sous srv.mu : les demandes `download` en cours, par média : les
+	// appareils (hachage du jeton) qui attendent la réponse `media` (envoi.go).
+	telechargements map[string]map[string]time.Time
+
 	// Sous srv.mu : la dernière liste `notes` (notes des contacts, Instagram,
 	// PROTOCOLE.md §5.12), rejouée après la présence.
 	notes []byte
@@ -253,6 +257,8 @@ func (p *Pont) recu(ligne []byte) {
 		Conv   string `json:"conv"`
 		Older  bool   `json:"older"`
 		Where  string `json:"where"`
+		Media  string `json:"media_id"`
+		Path   string `json:"path"`
 	}
 	if err := json.Unmarshal(ligne, &tete); err != nil {
 		logf("[%s] ligne illisible du pont : %v", p.svc, err)
@@ -381,6 +387,13 @@ func (p *Pont) recu(ligne []byte) {
 				// La réponse au préchargement ne va qu'au cache.
 				return
 			}
+		}
+	case "media":
+		// Un fichier téléchargé : seulement aux appareils qui l'ont demandé
+		// (les autres l'auraient téléchargé aussi, pour rien).
+		srv.noterOrigine(tete.Path, p.svc)
+		if p.routerMedia(tete.Media, trame) {
+			return
 		}
 	case "search_messages":
 		var q struct {

@@ -194,7 +194,18 @@ Révocation : `jasette-serveur --appareils` liste les appareils,
 
 `ev` : exactement la ligne du pont. Chaque événement de chaque pont va à
 **tous** les clients branchés, y compris les réponses aux commandes d'un
-autre client.
+autre client. Une exception : la réponse `media` à un `download` ne va
+qu'aux appareils (tous les branchements d'un même jeton) qui l'ont demandée
+depuis moins de 15 min ; personne ne l'attendant, elle va à tous.
+
+**Priorité.** Pour chaque client, les événements et les réponses (pong,
+erreurs, `depose`, `mcp`, `apercu`) passent **toujours avant** les morceaux
+de fichiers (`fichier`, §6.1) ; ceux-ci ont un débit plafonné (4 Mo/s par
+client) et le tampon d'envoi TCP est petit (256 Kio) : un message n'attend
+jamais plus d'un morceau. Au-delà de 1 Mo/s en moyenne sur 10 s vers un
+appareil, le journal du serveur le dit, une ligne par minute au plus :
+`appareil "…" : 4.8 Mo/s envoyés sur 10 s (fichiers/discord 97 %, discord/messages 2 %, …)`
+(service et sorte d'événement seulement, jamais de contenu).
 
 **Rejeu.** Juste après `{"auth":"ok"}`, le serveur envoie d'abord les
 marques (`{"marques":{…}}`, §5.5), puis, pour chaque service, le dernier
@@ -411,6 +422,17 @@ modifiée de mautrix-discord) :
   espace ses requêtes (400 ms au moins) et le serveur en précharge moins
   (§5.8). Pas d'archives chez Discord (celles de Jasette, §5.5) ; 10 Mo au
   plus par fichier envoyé.
+- **Pièces jointes** (`download`) : pour l'affichage, une **vignette** WebP
+  (1024 px de large et 2048 de haut au plus, par le proxy
+  `media.discordapp.net` avec `width`, `height`, `format=webp`, signature de
+  l'adresse gardée) dès que l'image est plus grande ou pèse plus de
+  300 Kio ; GIF, vidéos, sons et documents : l'original. L'original d'une
+  image seulement sur demande : `{"cmd":"download",…,"full":true}` (ouvrir
+  en grand, enregistrer). La réponse `media` porte `full` (vrai : c'est
+  l'original ; les autres ponts n'envoient que des originaux, sans ce champ).
+  Au plus 3 téléchargements à la fois, un seul par fichier (une seule
+  réponse `media` pour tous ceux qui l'attendent), au rythme du CDN (150 ms
+  entre requêtes). Vignettes : `<médias>/pieces/<hash>-v.webp`.
 
 **Reddit** (le chat de Reddit : conversations, groupes privés et chats de
 subreddit ; le chat de Reddit est un serveur Matrix, `matrix.redditspace.com`,
@@ -1561,7 +1583,14 @@ Les événements contiennent des chemins de fichiers **du serveur** :
 chemins avant de passer l'événement à l'interface. Règle de `distant.rs` :
 toute valeur chaîne qui **commence par `/`** sous une clé `path`, `avatar`,
 `photo`, `image`, `thumb` ou `fichier`, à toute profondeur. Si le
-téléchargement échoue, l'événement passe tel quel.
+téléchargement échoue, l'événement passe tel quel ; sauf `media`, qui
+devient un échec (`path` retiré, `error`). Les `media` se traitent sur leur
+propre fil : les autres événements ne les attendent jamais.
+
+Les clients ne demandent (`download`) que les images **à l'écran**, ou
+presque, du fil ouvert (et les premières de la galerie) : rien pour les
+fils fermés ni pour l'historique hors écran ; un média en échec n'est
+redemandé que sur un geste de l'utilisateur.
 
 ### 6.1 Télécharger : `get`
 
@@ -1586,6 +1615,12 @@ Réponses (trames `fichier`, intercalées avec les événements) :
 Morceaux de 192 Kio au plus (avant base64), dans l'ordre ; le dernier porte
 `fin: true` (il peut être vide). Écrire dans un fichier temporaire, puis
 renommer.
+
+Les `get` d'un client se mettent en file (la lecture de ses commandes n'est
+jamais bloquée) et sont servis 2 à la fois. Au-delà de 48 en attente, ou
+après 90 s d'attente, les plus vieux sont abandonnés :
+`{"fichier":{"id":7,"erreur":"abandonné : trop de fichiers en attente","fin":true}}` ;
+le client redemandera s'il en a encore besoin.
 
 Le serveur ne sert que des fichiers réguliers :
 

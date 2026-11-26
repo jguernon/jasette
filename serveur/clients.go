@@ -12,7 +12,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"os"
@@ -31,7 +30,7 @@ const (
 	delaiSilence    = 90 * time.Second // sans rien recevoir : client perdu
 	delaiAccueil    = 20 * time.Second // poignée de main TLS + auth/jumelage
 	dureeDepots     = time.Hour
-	getsSimultanes  = 4
+	getsSimultanes  = 2
 	depotsSimultane = 8
 )
 
@@ -52,22 +51,27 @@ type Serveur struct {
 	depots    string
 	limiteur  *Limiteur
 	mcp       *ServiceMCP // le serveur MCP (mcp.go)
+
+	// Sous mu : le pont d'où vient chaque fichier annoncé par `media` (trace).
+	origines map[string]string
 }
 
 type Client struct {
 	srv     *Serveur
-	conn    *tls.Conn
+	conn    net.Conn // *tls.Conn ; une autre connexion dans les tests
 	nom     string
 	hachage string
 	adresse string
 
+	// Les files d'envoi (envoi.go) : evs et reponses passent avant fichiers.
 	evs      chan []byte // événements diffusés : jamais bloquant
-	fichiers chan []byte // morceaux de fichiers, réponses : bloquant
+	reponses chan envoi  // réponses à ce client seul : bloquant
+	fichiers chan envoi  // morceaux de fichiers : bloquant, débit plafonné
 	fini     chan struct{}
 	unique   sync.Once
 
-	gets   chan struct{}
-	depots map[int64]*depot // lu et écrit par le seul fil de lecture
+	filesGets                  // les `get` en attente (envoi.go)
+	depots    map[int64]*depot // lu et écrit par le seul fil de lecture
 }
 
 type depot struct {
@@ -254,11 +258,8 @@ func (s *Serveur) servir(brute net.Conn) {
 			return
 		}
 		s.limiteur.oublier("a" + adresse)
-		c := &Client{
-			srv: s, conn: conn, nom: nom, hachage: hacherJeton(a.Auth.Jeton), adresse: adresse,
-			evs: make(chan []byte, 8192), fichiers: make(chan []byte, 4), fini: make(chan struct{}),
-			gets: make(chan struct{}, getsSimultanes), depots: map[int64]*depot{},
-		}
+		c := nouveauClient(s, conn, nom, hacherJeton(a.Auth.Jeton), adresse)
+		reglerTampon(conn)
 		services := s.servicesTries()
 		if ecrireJSON(conn, map[string]any{"auth": "ok", "nom": nom, "services": services}) != nil {
 			return
@@ -268,6 +269,16 @@ func (s *Serveur) servir(brute net.Conn) {
 	default:
 		_ = ecrireJSON(conn, map[string]any{"erreur": "trame", "texte": "attendu : jumeler ou auth"})
 	}
+}
+
+func nouveauClient(s *Serveur, conn net.Conn, nom, hachage, adresse string) *Client {
+	c := &Client{
+		srv: s, conn: conn, nom: nom, hachage: hachage, adresse: adresse,
+		evs: make(chan []byte, 8192), reponses: make(chan envoi, 256), fichiers: make(chan envoi, 2),
+		fini: make(chan struct{}), depots: map[int64]*depot{},
+	}
+	c.signalGets = make(chan struct{}, 1)
+	return c
 }
 
 func (c *Client) fermer() {
@@ -281,6 +292,9 @@ func (c *Client) boucle(lu *bufio.Reader) {
 	logf("appareil %q branché depuis %s", c.nom, c.adresse)
 	c.srv.inscrire(c)
 	go c.ecrivain()
+	for range getsSimultanes {
+		go c.ouvrierGets()
+	}
 	defer func() {
 		c.srv.desinscrire(c)
 		c.fermer()
@@ -302,49 +316,6 @@ func (c *Client) boucle(lu *bufio.Reader) {
 	}
 }
 
-// ecrivain : seul à écrire sur la connexion. Les événements passent avant
-// les morceaux de fichiers.
-func (c *Client) ecrivain() {
-	ping := time.NewTicker(intervallePing)
-	defer ping.Stop()
-	ecrire := func(t []byte) bool {
-		_ = c.conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
-		if _, err := c.conn.Write(append(t, '\n')); err != nil {
-			c.fermer()
-			return false
-		}
-		return true
-	}
-	for {
-		select {
-		case t := <-c.evs:
-			if !ecrire(t) {
-				return
-			}
-			continue
-		case <-c.fini:
-			return
-		default:
-		}
-		select {
-		case t := <-c.evs:
-			if !ecrire(t) {
-				return
-			}
-		case t := <-c.fichiers:
-			if !ecrire(t) {
-				return
-			}
-		case <-ping.C:
-			if !ecrire(fmt.Appendf(nil, `{"ping":%d}`, time.Now().UnixMilli())) {
-				return
-			}
-		case <-c.fini:
-			return
-		}
-	}
-}
-
 // envoyerA : une réponse pour ce client seulement (bloque si sa file est pleine).
 func (c *Client) envoyerA(v any) {
 	t, err := json.Marshal(v)
@@ -352,7 +323,7 @@ func (c *Client) envoyerA(v any) {
 		return
 	}
 	select {
-	case c.fichiers <- t:
+	case c.reponses <- envoi{t, "réponses"}:
 	case <-c.fini:
 	}
 }
@@ -409,16 +380,9 @@ func (c *Client) trame(ligne []byte) {
 	case t.Rejouer != "":
 		c.srv.rejouer(c, t.Rejouer)
 	case t.Get != nil:
-		g := *t.Get
-		select {
-		case c.gets <- struct{}{}:
-		case <-c.fini:
-			return
-		}
-		go func() {
-			defer func() { <-c.gets }()
-			c.servirFichier(g.ID, g.Chemin, g.Sha256)
-		}()
+		// En file, sans bloquer la lecture : une commande (`send`…) ne
+		// doit jamais attendre derrière des fichiers.
+		c.demanderGet(t.Get.ID, t.Get.Chemin, t.Get.Sha256)
 	case t.Put != nil:
 		c.deposer(t.Put.ID, t.Put.Nom, t.Put.Donnees, t.Put.Fin)
 	}
@@ -441,6 +405,7 @@ func (c *Client) commande(svc string, brute json.RawMessage) {
 		Conv   string          `json:"conv"`
 		Before json.RawMessage `json:"before"`
 		Count  int             `json:"count"`
+		Media  string          `json:"media_id"`
 	}
 	if json.Unmarshal(brute, &tete) != nil {
 		return
@@ -467,6 +432,11 @@ func (c *Client) commande(svc string, brute json.RawMessage) {
 		} else {
 			p.noterDemande(tete.Conv)
 		}
+		c.srv.mu.Unlock()
+	case "download":
+		// La réponse `media` reviendra à cet appareil seulement (envoi.go).
+		c.srv.mu.Lock()
+		p.noterTelechargement(tete.Media, c.hachage)
 		c.srv.mu.Unlock()
 	case "quit":
 		// Le pont appartient au serveur : un client qui part ne l'arrête pas.
@@ -586,6 +556,7 @@ func (c *Client) servirFichier(id int64, demande, shaConnu string) {
 		echec("fichier illisible")
 		return
 	}
+	sorte := c.srv.origine(demande)
 	buf := make([]byte, tailleMorceau)
 	premier := true
 	for {
@@ -600,8 +571,8 @@ func (c *Client) servirFichier(id int64, demande, shaConnu string) {
 			m["taille"], m["sha256"] = st.Size(), somme
 			premier = false
 		}
-		c.envoyerA(map[string]any{"fichier": m})
-		if fin {
+		t, _ := json.Marshal(map[string]any{"fichier": m})
+		if !c.envoyerFichier(t, sorte) || fin {
 			return
 		}
 		select {
