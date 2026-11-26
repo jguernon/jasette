@@ -371,7 +371,11 @@ object Depot {
                 service.serveurSeulement -> PontLocal(service.cle, executableDe(service)!!, environnement(), recu)
                 else -> {
                     val env = environnement() + ("JASETTE_META_SERVICE" to service.cle)
-                    PontLocal(service.cle, executable("libjasette-meta.so"), env, recu)
+                    // Instagram a changé de protocole : son propre pont (instameow),
+                    // comme au bureau ; l'ancien pont Meta y plante (« base_url not found »).
+                    val ig = executable("libjasette-ig.so")
+                    val bin = if (service == Service.INSTAGRAM && ig.isFile) ig else executable("libjasette-meta.so")
+                    PontLocal(service.cle, bin, env, recu)
                 }
             }
         } catch (e: Exception) {

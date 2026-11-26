@@ -50,6 +50,7 @@ construire() { # <dossier du pont> <nom de la .so>
 }
 construire pont libjasette-pont.so
 construire pont-meta libjasette-meta.so
+construire pont-ig libjasette-ig.so  # Instagram : son nouveau protocole (instameow), comme au bureau
 construire pont-wa libjasette-wa.so
 construire pont-x libjasette-x.so
 construire pont-telegram libjasette-telegram.so
