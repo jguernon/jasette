@@ -78,6 +78,8 @@ type depot struct {
 	f      *os.File
 	chemin string
 	taille int64
+	// contact : une photo de contact perso (`"garder":"contact"`).
+	contact bool
 }
 
 // ---- Diffusion ----
@@ -354,6 +356,9 @@ type trame struct {
 		Nom     string `json:"nom"`
 		Donnees string `json:"donnees"`
 		Fin     bool   `json:"fin"`
+		// Garder : "contact" pour une photo de contact perso (gardée sous
+		// <médias>/contacts, pas effacée au bout d'une heure).
+		Garder string `json:"garder"`
 	} `json:"put"`
 }
 
@@ -384,7 +389,7 @@ func (c *Client) trame(ligne []byte) {
 		// doit jamais attendre derrière des fichiers.
 		c.demanderGet(t.Get.ID, t.Get.Chemin, t.Get.Sha256)
 	case t.Put != nil:
-		c.deposer(t.Put.ID, t.Put.Nom, t.Put.Donnees, t.Put.Fin)
+		c.deposer(t.Put.ID, t.Put.Nom, t.Put.Donnees, t.Put.Fin, t.Put.Garder)
 	}
 }
 
@@ -583,7 +588,7 @@ func (c *Client) servirFichier(id int64, demande, shaConnu string) {
 	}
 }
 
-func (c *Client) deposer(id int64, nom, donnees string, fin bool) {
+func (c *Client) deposer(id int64, nom, donnees string, fin bool, garder string) {
 	echec := func(texte string) {
 		if d := c.depots[id]; d != nil {
 			_ = d.f.Close()
@@ -609,7 +614,7 @@ func (c *Client) deposer(id int64, nom, donnees string, fin bool) {
 			echec("fichier de dépôt impossible")
 			return
 		}
-		d = &depot{f: f, chemin: chemin}
+		d = &depot{f: f, chemin: chemin, contact: garder == "contact"}
 		c.depots[id] = d
 	}
 	brut, err := base64.StdEncoding.DecodeString(donnees)
@@ -632,6 +637,16 @@ func (c *Client) deposer(id int64, nom, donnees string, fin bool) {
 			return
 		}
 		delete(c.depots, id)
+		if d.contact {
+			// Une photo de contact perso : gardée pour de bon, sous les médias.
+			garde, err := garderPhotoContact(d.chemin)
+			if err != nil {
+				c.envoyerA(map[string]any{"depose": map[string]any{"id": id, "erreur": err.Error()}})
+				return
+			}
+			c.envoyerA(map[string]any{"depose": map[string]any{"id": id, "chemin": garde, "taille": d.taille}})
+			return
+		}
 		c.envoyerA(map[string]any{"depose": map[string]any{"id": id, "chemin": d.chemin, "taille": d.taille}})
 	}
 }

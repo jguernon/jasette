@@ -522,7 +522,7 @@ que le pont parle avec mautrix-go comme le client web) :
   d'historique** (une page à l'ouverture), aucune action automatique. Pas
   d'archives chez Reddit (celles de Jasette, §5.5).
 
-### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, personnes, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*)
+### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, personnes, contacts perso, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
@@ -556,6 +556,11 @@ personnes » plus bas) :
   `[{"id":"p…","convs":["<id>","m:<id>"],"principal":"<id>"}]` ;
 - `personnes_refus` : les paires « Pas la même personne »,
   `[["<id A>","<id B>"]]`.
+
+Et un objet pour le **nom et la photo choisis à la main** dans la fiche
+(voir « Règle des contacts perso » plus bas) :
+
+- `contacts_perso` : `{"<id>":{"nom":"Maman","photo":"/…/media/contacts/9f3c….jpg","google":true}}`.
 
 Et des réglages (facultatifs) :
 
@@ -608,7 +613,7 @@ C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 changement, à **tous** les clients) :
 
 ```json
-{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"personnes":[{"id":"p1764160000000a3f","convs":["123","m:99"],"principal":"123"}],"personnes_refus":[["i:42","m:99"]],"version":7}}
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"personnes":[{"id":"p1764160000000a3f","convs":["123","m:99"],"principal":"123"}],"personnes_refus":[["i:42","m:99"]],"contacts_perso":{"123":{"nom":"Maman","photo":"/srv/jasette/media/contacts/9f3c0a.jpg"}},"version":7}}
 ```
 
 `version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
@@ -617,7 +622,7 @@ encore rien reçu (listes vides).
 **Client → serveur** :
 
 ```json
-{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"personnes":[…],"personnes_refus":[…],"version":7,"id":12}}
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"personnes":[…],"personnes_refus":[…],"contacts_perso":{…},"version":7,"id":12}}
 ```
 
 - `version` : la dernière version reçue du serveur (0 si aucune).
@@ -670,6 +675,15 @@ encore rien reçu (listes vides).
   refus est une paire de deux ids différents, rangée (le plus petit
   d'abord), sans doublon ; 5000 paires au plus. Toujours envoyé ; absent de
   `marques.json` : `[]`.
+- `contacts_perso` : comme `moods` (absent ou `null`, rien ne change ;
+  présent, c'est l'objet complet : une clé absente veut dire « Rétablir »).
+  Une entrée mal formée est sautée. Nettoyage : id de 512 octets au plus ;
+  `nom` sans espaces autour, 256 octets au plus, sans saut de ligne (sinon
+  vidé) ; `photo` : un chemin de 1024 octets au plus, gardé **tel quel**
+  (le serveur ne le vérifie pas : `get` ne sert de toute façon que ses
+  racines, §6.1) ; `google` : vrai ou absent. Une entrée sans nom ni photo
+  disparaît ; 5000 entrées au plus. Toujours envoyé (objet, jamais `null`) ;
+  absent de `marques.json` : `{}`.
 
 Règles du serveur :
 
@@ -688,7 +702,8 @@ Règles du serveur :
      du serveur qu'il n'a pas, **moins** les conversations que le client
      relie déjà à une autre personne (une personne qui n'a plus deux
      conversations tombe). Pour `personnes_refus` (même garde-fou) : l'union
-     des paires.
+     des paires. Pour `contacts_perso` (même garde-fou) : comme `moods`, les
+     entrées du client, puis celles du serveur pour les ids qu'il n'a pas.
 3. Si rien ne change, seul l'expéditeur reçoit l'état courant (avec son
    `id`). Sinon le serveur écrit `marques.json`, passe à `version+1` et
    diffuse les nouvelles marques à tous (l'expéditeur les reçoit avec son `id`).
@@ -719,7 +734,9 @@ copies : `garder_archives` de celle qui passe d'abord. Idem pour
 `notes_services`. Pour `personnes` et `personnes_refus`, l'union suit la
 règle du serveur (personnes par id, celles de la copie qui passe d'abord
 gagnent ; union des refus) ; un serveur d'avant ces champs ne les envoie
-pas, et le client garde les siens pour lui.
+pas, et le client garde les siens pour lui. De même pour `contacts_perso`
+(union par id, celle de la copie qui passe d'abord gagne ; un serveur d'avant
+ce champ : le client garde les siens pour lui).
 
 **Règle des personnes** (fiche de la personne).
 
@@ -773,6 +790,52 @@ pas, et le client garde les siens pour lui.
   ouverte.
 - Le serveur ne fait **aucune** correspondance : il garde, nettoie, unit et
   diffuse les deux listes.
+
+**Règle des contacts perso** (crayon sur le grand avatar de la fiche).
+
+- Le crayon ouvre une petite fenêtre : le champ **Nom**, « Changer la
+  photo » (sélecteur de photos du système sur Android, sélecteur de fichiers
+  au bureau ; recadrée en carré au centre, réduite à 512 px, JPEG) et
+  l'aperçu ; « Enregistrer », « Rétablir » (si une entrée existe), « Annuler ».
+- **La clé** : l'id d'une conversation à deux. Pour trouver l'entrée d'une
+  conversation, le client prend celle de son id, sinon celle de la
+  principale de sa personne (`personnes`), sinon celle d'une autre de ses
+  conversations (dans l'ordre de `convs`). En enregistrant, il garde la clé
+  de l'entrée trouvée, sinon prend la principale, sinon la conversation d'où
+  la fiche est ouverte ; et si la fiche montre plusieurs conversations (même
+  numéro), il les relie à la main dans une personne (créée au besoin, sans
+  toucher au `principal`), pour que le nom vaille pour toutes.
+- **L'effet** : comme `principal`, mais plus fort. Le `nom` (non vide) et la
+  `photo` (non vide et lisible) remplacent ceux du service et de la
+  principale **partout** : listes, Head, en-tête du fil, fiche,
+  notifications, raccourcis, recherche (le nom d'origine se trouve aussi),
+  Nouveau message, partage. Les lignes de la fiche gardent le nom et la
+  photo de chaque service. Les groupes ne sont jamais touchés.
+- « **Rétablir** » retire l'entrée : le nom et la photo du service reviennent
+  (une photo de contact du téléphone aussi, si le réglage est actif).
+- **La photo** : en mode serveur, le client la téléverse par `put` avec
+  `"garder":"contact"` (§6.2) et met le chemin rendu dans `photo` ; les
+  autres appareils la téléchargent par `get` à la réception des marques (et
+  au rejeu, pour un appareil qui arrive après). Sans serveur, `photo` est un
+  chemin local de l'appareil, et la marque reste locale comme les autres.
+- **Contacts Google** (Android seulement, permission `WRITE_CONTACTS`
+  demandée au moment d'enregistrer, avec une explication) : pour une personne
+  qui a un numéro de téléphone (Google Messages, WhatsApp, Signal, Telegram,
+  ou une conversation liée à l'une d'elles), la case « Enregistrer aussi dans
+  les Contacts Google » (cochée par défaut si la permission est déjà
+  accordée). Après confirmation, le téléphone met à jour le nom affiché et
+  la photo du contact qui porte ce numéro, sinon crée un contact dans le
+  compte Google principal du téléphone (`com.google`, celui qui a le plus de
+  contacts) ; le carnet se synchronise lui-même avec Google. Sans numéro,
+  sans compte Google, ou si la permission est refusée : la marque Jasette
+  seulement, et l'app le dit. L'entrée porte alors `"google":true`.
+- **Depuis le bureau** : la case « Aussi dans les Contacts Google (par le
+  téléphone) » met `"google":true`. Un téléphone jumelé au même serveur qui a
+  **déjà** la permission `WRITE_CONTACTS` applique une telle entrée une fois
+  (il garde pour lui la signature nom + photo des entrées déjà appliquées ;
+  à sa toute première synchronisation, il marque les entrées existantes comme
+  appliquées sans rien écrire). Il ne demande jamais la permission pour une
+  entrée venue d'ailleurs.
 
 **Règle des moods.**
 
@@ -1696,6 +1759,13 @@ Le serveur ne sert que des fichiers réguliers :
 - Ensuite : `{"svc":"google","cmd":{"cmd":"send_media","path":"<chemin>",…}}`.
   Les dépôts sont effacés au bout d'une heure, ou si la connexion tombe en
   plein téléversement.
+- **Photo de contact perso** (§5.5, « Règle des contacts perso ») : la
+  première trame porte en plus `"garder":"contact"`. À la fin, le serveur
+  garde le fichier (jpg, png ou webp, 8 Mio au plus) sous
+  `<médias>/contacts/<SHA-256, 32 hex>.<ext>` (le même contenu, le même
+  fichier), efface le dépôt et répond ce chemin-là dans `depose.chemin` ; il
+  est servi par `get` comme les autres médias. Une photo que plus aucune
+  entrée de `contacts_perso` ne nomme est effacée après un jour.
 
 ## 7. Données du serveur
 

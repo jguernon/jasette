@@ -1,5 +1,5 @@
 // Les marques : le Head, les favoris, les épinglées, les archives, les
-// privées, les moods, les emojis rapides, les personnes (fiche de la
+// privées, les moods, les emojis rapides, les personnes et les contacts perso (fiche de la
 // personne, personnes.go) et les réglages garder_archives et
 // cacher_apres_jours de Jasette, partagés entre tous les appareils de l'utilisateur (voir
 // PROTOCOLE.md, §5.5).
@@ -85,7 +85,10 @@ type Marques struct {
 	// Absents (ancien fichier) : vides.
 	Personnes      []Personne `json:"personnes"`
 	PersonnesRefus [][]string `json:"personnes_refus"`
-	Version        int64      `json:"version"`
+	// ContactsPerso : le nom et la photo choisis à la main dans la fiche
+	// (contacts_perso.go), {id: {nom, photo, google}}. Absent : vide.
+	ContactsPerso map[string]ContactPerso `json:"contacts_perso"`
+	Version       int64                   `json:"version"`
 	// Propre au serveur, jamais envoyé aux clients : depuis quand (ms, horloge
 	// du serveur) chaque id est dans Archives. Seul un message reçu après
 	// cette heure ramène la conversation dans l'Inbox (une réaction ou une
@@ -116,6 +119,7 @@ func (m *Marques) normaliser() {
 	m.NotesServices = nettoyerServicesNotes(m.NotesServices)
 	m.Personnes = nettoyerPersonnes(m.Personnes)
 	m.PersonnesRefus = nettoyerRefus(m.PersonnesRefus)
+	m.ContactsPerso = nettoyerContactsPerso(m.ContactsPerso)
 	depuis := make(map[string]int64, len(m.Archives))
 	maintenant := time.Now().UnixMilli()
 	for _, id := range m.Archives {
@@ -139,7 +143,8 @@ func (m *Marques) memesListes(n *Marques) bool {
 		m.CacherApresJours == n.CacherApresJours && m.PresenceEnLigne == n.PresenceEnLigne &&
 		m.SonsConversation == n.SonsConversation && m.NotesContacts == n.NotesContacts &&
 		m.NotesMusique == n.NotesMusique && m.NotesMusiqueFormat == n.NotesMusiqueFormat && egales(m.NotesServices, n.NotesServices) &&
-		egalesPersonnes(m.Personnes, n.Personnes) && egalesRefus(m.PersonnesRefus, n.PersonnesRefus)
+		egalesPersonnes(m.Personnes, n.Personnes) && egalesRefus(m.PersonnesRefus, n.PersonnesRefus) &&
+		egalesContactsPerso(m.ContactsPerso, n.ContactsPerso)
 }
 
 // cacherApresJoursMax : au-delà de dix ans, autant tout afficher.
@@ -358,7 +363,8 @@ func trameMarques(m Marques, id json.RawMessage, refus string) []byte {
 		"cacher_apres_jours": m.CacherApresJours, "presence_en_ligne": m.PresenceEnLigne,
 		"sons_conversation": jeuSons(m.SonsConversation), "notes_contacts": m.NotesContacts,
 		"notes_musique": m.NotesMusique, "notes_musique_format": formatMusique(m.NotesMusiqueFormat), "notes_services": nettoyerServicesNotes(m.NotesServices),
-		"personnes": nettoyerPersonnes(m.Personnes), "personnes_refus": nettoyerRefus(m.PersonnesRefus), "version": m.Version,
+		"personnes": nettoyerPersonnes(m.Personnes), "personnes_refus": nettoyerRefus(m.PersonnesRefus),
+		"contacts_perso": nettoyerContactsPerso(m.ContactsPerso), "version": m.Version,
 	}
 	if len(id) > 0 {
 		corps["id"] = id
@@ -399,6 +405,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		NotesS   *[]string          `json:"notes_services"`
 		Pers     json.RawMessage    `json:"personnes"`
 		PersR    json.RawMessage    `json:"personnes_refus"`
+		Perso    json.RawMessage    `json:"contacts_perso"`
 		Version  int64              `json:"version"`
 		ID       json.RawMessage    `json:"id"`
 	}
@@ -472,6 +479,11 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	if l, ok := lireRefus(d.PersR); ok {
 		nouv.PersonnesRefus = l
 	}
+	// Et les contacts perso : absents (ou null), rien ne change ; présents,
+	// c'est l'objet complet (une clé absente : « Rétablir »).
+	if m, ok := lireContactsPerso(d.Perso); ok {
+		nouv.ContactsPerso = m
+	}
 	repondre := func(m Marques, refus string) {
 		select {
 		case c.evs <- trameMarques(m, d.ID, refus):
@@ -506,9 +518,15 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 			repondre(cur, "version périmée : les refus de personnes du serveur seraient vidés")
 			return
 		}
+		if len(nouv.ContactsPerso) == 0 && len(cur.ContactsPerso) > 0 {
+			logf("marques de %q refusées : contacts perso vides, version %d < %d", c.nom, d.Version, cur.Version)
+			repondre(cur, "version périmée : les contacts perso du serveur seraient vidés")
+			return
+		}
 		for i, l := range nouv.listes() {
 			*l = unir(*l, *cur.listes()[i])
 		}
+		nouv.ContactsPerso = unirContactsPerso(nouv.ContactsPerso, cur.ContactsPerso)
 		nouv.Personnes = unirPersonnes(nouv.Personnes, cur.Personnes)
 		nouv.PersonnesRefus = unirRefus(nouv.PersonnesRefus, cur.PersonnesRefus)
 		nouv.Moods = unirMoods(nouv.Moods, cur.Moods)
@@ -527,13 +545,17 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		return
 	}
 	s.marques = nouv
-	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s, notes_contacts %v, notes_services %v, personnes %d, refus %d",
-		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation, nouv.NotesContacts, nouv.NotesServices, len(nouv.Personnes), len(nouv.PersonnesRefus))
+	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s, notes_contacts %v, notes_services %v, personnes %d, refus %d, contacts perso %d",
+		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation, nouv.NotesContacts, nouv.NotesServices, len(nouv.Personnes), len(nouv.PersonnesRefus), len(nouv.ContactsPerso))
 	if nouv.PresenceEnLigne != cur.PresenceEnLigne {
 		s.presenceChangee(nouv.PresenceEnLigne)
 	}
 	if nouv.NotesContacts != cur.NotesContacts {
 		s.notesContactsChange(nouv.NotesContacts)
+	}
+	if !egalesContactsPerso(nouv.ContactsPerso, cur.ContactsPerso) {
+		perso := nouv.ContactsPerso
+		go menagePhotosContacts(perso)
 	}
 	tous := trameMarques(nouv, nil, "")
 	for autre := range s.clients {
