@@ -30,6 +30,7 @@ mod groupes;
 mod personne;
 mod selection;
 mod codes;
+mod groupes_auto;
 mod ponts_langue;
 
 use std::borrow::Cow;
