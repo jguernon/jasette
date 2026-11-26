@@ -215,6 +215,26 @@ object Marques {
         changement()
     }
 
+    /**
+     * La fiche de la personne (Personnes.kt) : les conversations reliées à la
+     * main (marque `personnes`) et les refus « Pas la même personne » (marque
+     * `personnes_refus`), partagés par le serveur Jasette.
+     */
+    var personnes by mutableStateOf<List<Personne>>(emptyList())
+        private set
+    var personnesRefus by mutableStateOf<List<Refus>>(emptyList())
+        private set
+
+    /** Les liens ou refus viennent de changer ici (fiche de la personne). */
+    fun changerPersonnes(p: List<Personne>, r: List<Refus>) {
+        val np = Personnes.nettoyer(p)
+        val nr = Personnes.nettoyerRefus(r)
+        if (np == personnes && nr == personnesRefus) return
+        personnes = np
+        personnesRefus = nr
+        changement()
+    }
+
     /** Chaque bulle montre son heure (et sa date si ce n'est pas aujourd'hui), comme `details_heures`. */
     var heureChaqueMessage by mutableStateOf(true)
         private set
@@ -319,6 +339,12 @@ object Marques {
         notesServices = try {
             servicesNotes(JSONArray(p.getString("notes_services", "[\"tout\"]") ?: "[]").chaines())
         } catch (_: Exception) { listOf("tout") }
+        personnes = try {
+            Personnes.lire(JSONArray(p.getString("personnes", "[]") ?: "[]"))
+        } catch (_: Exception) { emptyList() }
+        personnesRefus = try {
+            Personnes.lireRefus(JSONArray(p.getString("personnes_refus", "[]") ?: "[]"))
+        } catch (_: Exception) { emptyList() }
         archivesDepuis.clear()
         try {
             val o = JSONObject(p.getString("archives_depuis", "{}") ?: "{}")
@@ -389,6 +415,8 @@ object Marques {
             ?.putString("notes_musique", notesMusique)
             ?.putString("notes_musique_format", notesMusiqueFormat)
             ?.putString("notes_services", JSONArray(notesServices).toString())
+            ?.putString("personnes", Personnes.json(personnes).toString())
+            ?.putString("personnes_refus", Personnes.jsonRefus(personnesRefus).toString())
             ?.putString("archives_depuis", JSONObject(archivesDepuis.toMap()).toString())
             ?.putLong("version", version)
             ?.putBoolean("a_envoyer", aEnvoyer)
@@ -525,10 +553,13 @@ object Marques {
         val notesMusique: String = "",
         val notesMusiqueFormat: String = "artiste",
         val notesServices: List<String> = listOf("tout"),
+        val personnes: List<Personne> = emptyList(),
+        val personnesRefus: List<Refus> = emptyList(),
     ) {
         fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty() && privees.isEmpty() &&
             moods.isEmpty() && emojis.isEmpty() && !garderArchives && cacherApresJours == 0 && presenceEnLigne &&
-            sons == "bulle" && notesContacts && notesMusique.isEmpty() && notesMusiqueFormat == "artiste" && notesServices == listOf("tout")
+            sons == "bulle" && notesContacts && notesMusique.isEmpty() && notesMusiqueFormat == "artiste" && notesServices == listOf("tout") &&
+            personnes.isEmpty() && personnesRefus.isEmpty()
 
         /** Chaque liste de this, dans son ordre, puis les ids de [b] qui n'y sont pas. */
         fun union(b: Listes) = Listes(
@@ -551,6 +582,9 @@ object Marques {
             notesMusique,
             notesMusiqueFormat,
             notesServices,
+            // Les personnes par id (les nôtres gagnent), une conversation à une seule ; l'union des refus.
+            Personnes.unir(personnes, b.personnes),
+            Personnes.nettoyerRefus(personnesRefus + b.personnesRefus),
         )
 
         /** Les ids de this absents de [b], liste par liste. */
@@ -567,6 +601,8 @@ object Marques {
             notesMusique,
             notesMusiqueFormat,
             notesServices,
+            personnes.filter { it !in b.personnes },
+            personnesRefus.filter { it !in b.personnesRefus },
         )
     }
 
@@ -575,6 +611,7 @@ object Marques {
             head.toList(), favoris.toList(), epingles.toList(), archives.toList(), privees.toList(), moods.toMap(), emojis.toMap(),
             garderArchives, cacherApresJours, presenceEnLigne, sonsConversation,
             notesContacts, notesMusique, notesMusiqueFormat, notesServices,
+            personnes, personnesRefus,
         )
 
     private fun poser(l: Listes) {
@@ -603,6 +640,8 @@ object Marques {
         notesMusique = l.notesMusique
         notesMusiqueFormat = l.notesMusiqueFormat
         notesServices = l.notesServices
+        personnes = l.personnes
+        personnesRefus = l.personnesRefus
     }
 
     /** Envoie une trame au serveur ; faux si la connexion est coupée. Posé par [Depot] en mode client. */
@@ -649,6 +688,8 @@ object Marques {
             .put("notes_musique", l.notesMusique)
             .put("notes_musique_format", l.notesMusiqueFormat)
             .put("notes_services", JSONArray(l.notesServices))
+            .put("personnes", Personnes.json(l.personnes))
+            .put("personnes_refus", Personnes.jsonRefus(l.personnesRefus))
             .put("version", version).put("id", prochain)
         if (!envoi(JSONObject().put("marques", corps))) {
             // La connexion tombe : le rejeu suivant tranchera.
@@ -694,6 +735,9 @@ object Marques {
             (m.opt("notes_musique") as? String)?.let { bornerOctets(it, 128) } ?: notesMusique,
             (m.opt("notes_musique_format") as? String)?.let { formatMusique(it) } ?: notesMusiqueFormat,
             m.optJSONArray("notes_services")?.let { servicesNotes(it.chaines()) } ?: notesServices,
+            // Et pour les personnes (serveur d'avant la fiche de la personne) : les nôtres restent.
+            m.optJSONArray("personnes")?.let { Personnes.lire(it) } ?: personnes,
+            m.optJSONArray("personnes_refus")?.let { Personnes.lireRefus(it) } ?: personnesRefus,
         )
         val v = m.optLong("version", -1)
         if (v < 0) return

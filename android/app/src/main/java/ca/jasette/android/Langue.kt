@@ -52,6 +52,20 @@ object Langue {
 fun t(fr: String): String = if (!Langue.anglais) fr else ANGLAIS[fr] ?: fr
 
 private val ANGLAIS: Map<String, String> = mapOf(
+    // La fiche de la personne (ui/FichePersonne.kt).
+    "Même personne sur" to "Same person on",
+    "Lier une autre conversation…" to "Link another conversation…",
+    "Délier" to "Unlink",
+    "Est-ce la même personne ?" to "Is this the same person?",
+    "Pas la même personne" to "Not the same person",
+    "Oui" to "Yes",
+    "Utiliser ce nom" to "Use this name",
+    "Lié à la main" to "Linked by hand",
+    "Même numéro" to "Same number",
+    "Nom très proche" to "Very similar name",
+    "Nom d'un contact du téléphone qui a ce numéro" to "Name of a phone contact with this number",
+    "Aucune autre conversation trouvée pour cette personne." to "No other conversation found for this person.",
+    "Ici" to "Here",
     // « Quoi de neuf ? » (QuoiDeNeuf.kt, Notes.kt, Musique.kt).
     "Quoi de neuf ?" to "What's up?",
     "Quoi de neuf" to "What's up",

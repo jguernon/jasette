@@ -158,6 +158,9 @@ fun Fil(
     var conteneur by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
     val pressePapiers = LocalClipboardManager.current
     var galerie by remember { mutableStateOf(false) }
+    // La fiche de la personne (FichePersonne.kt) : conversation à deux seulement.
+    var fiche by remember { mutableStateOf(false) }
+    val aFiche = conv != null && !conv.group && !conv.large
     // La recherche dans les messages chargés : la requête et le message courant.
     var recherche by remember { mutableStateOf(false) }
     var requete by remember { mutableStateOf("") }
@@ -252,7 +255,11 @@ fun Fil(
                     if (!volet) IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Filled.ArrowBack, t("Retour")) }
                 },
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Toucher le nom ou l'avatar ouvre la fiche de la personne ; un groupe ne change pas.
+                    Row(
+                        Modifier.let { if (aFiche) it.clickable { fiche = true } else it },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         if (entete != null) Avatar(entete, 36.dp, grise = absente.grise(), presence = true, fondPoint = if (P.ega) P.barre else P.fil)
                         Spacer(Modifier.width(10.dp))
                         // Le nom et le service, serrés et centrés sur l'avatar : la barre donne
@@ -483,6 +490,7 @@ fun Fil(
     }
 
     if (galerie) Galerie(liste, fermer = { galerie = false }) { plein = it }
+    if (fiche) FichePersonne(id, fermer = { fiche = false })
 
     plein?.let { chemin ->
         Dialog(onDismissRequest = { plein = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
