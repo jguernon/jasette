@@ -161,6 +161,7 @@ func (p *Pont) syncLoop(ctx context.Context, gen int, fromLogin bool) {
 			p.emitAccount()
 			emitState("ready")
 			p.listConversations(false)
+			go p.photoMoi(ctx)
 		}
 		if premier {
 			premier = false
@@ -346,7 +347,7 @@ func (p *Pont) traiterSalon(rid string, room *syncRoom, peek, direct bool) {
 func (p *Pont) noterType(s *salon) {
 	t := s.Type
 	switch t {
-	case "", "direct", "reddit_titled_direct", "private_group":
+	case "", "direct", "reddit_titled_direct", "private_group", "reddit_modmail":
 		return
 	}
 	if p.inconnus[t] {

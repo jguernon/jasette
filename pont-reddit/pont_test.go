@@ -288,6 +288,9 @@ func TestClassement(t *testing.T) {
 
 type fauxServeur struct {
 	mu       sync.Mutex
+	graphql  [][]string // les ids de chaque requête ChatRedditors
+	abouts   []string
+	medias   []string
 	syncs    int
 	envoyes  []string
 	recus    []string
@@ -398,6 +401,8 @@ func nouveauFaux(t *testing.T) *fauxServeur {
 			}
 			fmt.Fprint(w, `{"chunk":[{"type":"m.room.message","sender":"@t2_a:reddit.com","event_id":"$m1","origin_server_ts":1000,"content":{"msgtype":"m.text","body":"Allo !"}}],"end":"e1",
 			  "state":[{"type":"m.room.member","state_key":"@t2_a:reddit.com","content":{"membership":"join","displayname":"alice"}}]}`)
+		case "!sr:reddit.com":
+			fmt.Fprint(w, `{"chunk":[{"type":"m.room.message","sender":"@t2_b:reddit.com","event_id":"$s1","origin_server_ts":2000,"content":{"msgtype":"m.text","body":"Bienvenue"}}],"end":"t0_0"}`)
 		default:
 			fmt.Fprint(w, `{"chunk":[]}`)
 		}
@@ -422,9 +427,65 @@ func nouveauFaux(t *testing.T) *fauxServeur {
 		fmt.Fprintf(w, `{"room_id":%q}`, r.PathValue("room"))
 	}))
 	mux.HandleFunc("GET /_matrix/media/v3/download/{srv}/{id}", auth(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.medias = append(f.medias, "v3 "+r.PathValue("id"))
+		f.mu.Unlock()
+		if r.PathValue("id") == "img404" {
+			w.WriteHeader(404)
+			fmt.Fprint(w, `{"errcode":"M_NOT_FOUND","error":"?"}`)
+			return
+		}
 		w.Header().Set("Content-Type", "image/jpeg")
 		_, _ = w.Write([]byte("\xff\xd8\xff\xe0 jpeg"))
 	}))
+	mux.HandleFunc("GET /_matrix/client/v1/media/download/{srv}/{id}", auth(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.medias = append(f.medias, "v1 "+r.PathValue("id"))
+		f.mu.Unlock()
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("\x89PNG\r\n\x1a\n v1"))
+	}))
+	// Les photos des personnes (ChatRedditors) et des subreddits (about.json).
+	mux.HandleFunc("POST /svc/shreddit/graphql", func(w http.ResponseWriter, r *http.Request) {
+		var corps struct {
+			Operation string `json:"operation"`
+			Variables struct {
+				IDs []string `json:"ids"`
+			} `json:"variables"`
+			CSRF string `json:"csrf_token"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&corps)
+		ck, _ := r.Cookie("reddit_session")
+		if corps.Operation != "ChatRedditors" || corps.CSRF != "c5rf" || ck == nil || !strings.Contains(r.UserAgent(), "Chrome") {
+			w.WriteHeader(403)
+			return
+		}
+		f.mu.Lock()
+		f.graphql = append(f.graphql, corps.Variables.IDs)
+		f.mu.Unlock()
+		var l []string
+		for _, id := range corps.Variables.IDs {
+			if id == "t2_c" {
+				l = append(l, `{"id":"t2_c","icon":null}`)
+				continue
+			}
+			l = append(l, fmt.Sprintf(`{"id":%q,"icon":{"url":"%s/img/%s.png?width=256&s=SIGNATURE123"}}`, id, f.srv.URL, id))
+		}
+		fmt.Fprintf(w, `{"data":{"redditorsInfoByIds":[%s]}}`, strings.Join(l, ","))
+	})
+	mux.HandleFunc("GET /r/{nom}/about.json", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.abouts = append(f.abouts, r.PathValue("nom"))
+		f.mu.Unlock()
+		fmt.Fprintf(w, `{"data":{"community_icon":"%s/img/sr.png?width=256&amp;s=SIGNATURE123","icon_img":""}}`, f.srv.URL)
+	})
+	mux.HandleFunc("GET /img/{nom}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Errorf("photo : jeton envoyé au CDN")
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("\x89PNG\r\n\x1a\n " + r.PathValue("nom")))
+	})
 	f.srv = httptest.NewServer(mux)
 	t.Cleanup(f.srv.Close)
 	_ = moi
@@ -474,7 +535,9 @@ func TestPontContreFauxServeur(t *testing.T) {
 		r, _ := it["reactions"].([]any)
 		return e["ev"] == "message" && it["id"] == "$m2" && len(r) == 1
 	})
-	sortie.attendre(t, func(e map[string]any) bool { return e["ev"] == "typing" && e["on"] == true && e["conv"] == "!dm:reddit.com" })
+	sortie.attendre(t, func(e map[string]any) bool {
+		return e["ev"] == "typing" && e["on"] == true && e["conv"] == "!dm:reddit.com"
+	})
 
 	// Le salon absent de /sync, retrouvé par /joined_rooms.
 	sortie.attendre(t, func(e map[string]any) bool {

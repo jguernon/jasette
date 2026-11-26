@@ -725,4 +725,3 @@ func plier(s string) string {
 		"î", "i", "ï", "i", "ô", "o", "ö", "o", "ù", "u", "û", "u", "ü", "u", "ç", "c", "œ", "oe", "æ", "ae")
 	return r.Replace(strings.ToLower(s))
 }
-

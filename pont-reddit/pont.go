@@ -26,24 +26,26 @@ type reactionMem struct {
 type Pont struct {
 	ctx context.Context
 
-	mu      sync.Mutex
-	sf      *sessionFile
-	cli     *mautrix.Client
-	gen     int // la session en cours ; une boucle /sync d'une ancienne s'arrête
-	ready   bool
-	stop    context.CancelFunc
-	me      string // @t2_xxx:reddit.com
-	monNom  string // le nom d'utilisateur Reddit
-	salons  map[string]*salon
-	msgs    map[string][]Message // par conversation, du plus vieux au plus récent
-	older   map[string]string    // conversation → jeton de la page plus ancienne
-	reacts  map[string]reactionMem
-	noms    map[string]string // id Matrix → nom d'utilisateur (com.reddit.profile)
-	icones  map[string]string // id Matrix → adresse de sa photo
-	typing  map[string]map[string]bool
-	avatars map[string]string // conversation ou personne → adresse déjà annoncée
-	inconnus map[string]bool  // types de salon inconnus déjà notés au journal
-	sale    bool              // salons.json à réécrire
+	mu            sync.Mutex
+	sf            *sessionFile
+	cli           *mautrix.Client
+	gen           int // la session en cours ; une boucle /sync d'une ancienne s'arrête
+	ready         bool
+	stop          context.CancelFunc
+	me            string // @t2_xxx:reddit.com
+	monNom        string // le nom d'utilisateur Reddit
+	salons        map[string]*salon
+	msgs          map[string][]Message // par conversation, du plus vieux au plus récent
+	older         map[string]string    // conversation → jeton de la page plus ancienne
+	reacts        map[string]reactionMem
+	noms          map[string]string // id Matrix → nom d'utilisateur (com.reddit.profile)
+	icones        map[string]string // id Matrix → adresse de sa photo
+	typing        map[string]map[string]bool
+	avatars       map[string]string // conversation ou personne → adresse déjà annoncée
+	inconnus      map[string]bool   // types de salon inconnus déjà notés au journal
+	photos        *annuaire         // photos des personnes et icônes des subreddits (photos.go)
+	auteursVoulus map[string]bool   // auteurs dont on attend la photo (sender_avatar)
+	sale          bool              // salons.json à réécrire
 
 	refreshMu sync.Mutex // un seul renouvellement du jeton à la fois
 
@@ -56,18 +58,20 @@ type Pont struct {
 
 func newPont(ctx context.Context) *Pont {
 	p := &Pont{
-		ctx:      ctx,
-		salons:   map[string]*salon{},
-		msgs:     map[string][]Message{},
-		older:    map[string]string{},
-		reacts:   map[string]reactionMem{},
-		noms:     map[string]string{},
-		icones:   map[string]string{},
-		typing:   map[string]map[string]bool{},
-		avatars:  map[string]string{},
-		inconnus: map[string]bool{},
-		rest:     throttle{gap: 350 * time.Millisecond},
-		cdn:      throttle{gap: 200 * time.Millisecond},
+		ctx:           ctx,
+		salons:        map[string]*salon{},
+		msgs:          map[string][]Message{},
+		older:         map[string]string{},
+		reacts:        map[string]reactionMem{},
+		noms:          map[string]string{},
+		icones:        map[string]string{},
+		typing:        map[string]map[string]bool{},
+		avatars:       map[string]string{},
+		inconnus:      map[string]bool{},
+		photos:        nouvelAnnuaire(),
+		auteursVoulus: map[string]bool{},
+		rest:          throttle{gap: 350 * time.Millisecond},
+		cdn:           throttle{gap: 200 * time.Millisecond},
 	}
 	p.httpCli = newHTTPClient(&p.rest, 75*time.Second)
 	p.webCli = newHTTPClient(&p.rest, 45*time.Second)
@@ -182,6 +186,7 @@ func (p *Pont) connect(fromLogin bool) {
 	p.mu.Unlock()
 	go p.syncLoop(ctx, gen, fromLogin)
 	go p.boucleJeton(ctx, gen)
+	go p.bouclePhotos(ctx)
 }
 
 // arreter : la boucle /sync en cours s'arrête.
@@ -323,7 +328,9 @@ func (p *Pont) forget() {
 	p.noms = map[string]string{}
 	p.icones = map[string]string{}
 	p.avatars = map[string]string{}
+	p.auteursVoulus = map[string]bool{}
 	p.mu.Unlock()
+	p.photos.oublier()
 }
 
 // unpair : on oublie la session. Pas de /logout : le jeton de chat est celui

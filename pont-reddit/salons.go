@@ -7,7 +7,8 @@ package main
 //
 // Le classement suit l'événement d'état « com.reddit.chat.type » ({"type":
 // …}) : « direct » et « reddit_titled_direct » (à deux), « private_group »
-// (groupe). Les chats de subreddit ne sont décrits par aucune référence
+// (groupe), « reddit_modmail » (messagerie de modération d'un subreddit :
+// un groupe aussi). Les chats de subreddit ne sont décrits par aucune référence
 // publique : un salon d'un autre type, ou dont un état com.reddit.* nomme un
 // subreddit, est pris pour un salon de communauté (onglet Groupes, jamais la
 // boîte de réception). Le pont note dans son journal chaque type inconnu
@@ -72,6 +73,12 @@ func (s *salon) sorte() string {
 	case "direct", "reddit_titled_direct":
 		return sorteDirect
 	case "private_group", "group":
+		return sorteGroupe
+	case "reddit_modmail", "modmail":
+		// La messagerie de modération : un échange entre moi et l'équipe
+		// d'un subreddit (demande d'adhésion, appel…). C'est une
+		// conversation qui attend ma réponse, pas un salon public : un
+		// groupe, dans la boîte de réception, même si un subreddit est nommé.
 		return sorteGroupe
 	}
 	if s.Subreddit != "" || strings.Contains(t, "subreddit") || strings.Contains(t, "community") ||
