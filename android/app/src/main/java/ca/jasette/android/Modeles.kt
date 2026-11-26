@@ -7,10 +7,11 @@ import org.json.JSONObject
  * Les services. Les ids des services autres que Google portent un préfixe dans
  * l'interface, comme sur le bureau : « m: » pour Messenger, « i: » pour
  * Instagram, « w: » pour WhatsApp, « s: » pour Signal, « x: » pour X, « t: »
- * pour Telegram, « b: » pour Bluesky, « d: » pour Discord, « r: » pour Reddit. Le
+ * pour Telegram, « b: » pour Bluesky, « d: » pour Discord, « r: » pour Reddit,
+ * « l: » pour LinkedIn. Le
  * préfixe dit aussi à quel pont envoyer une commande.
  *
- * WhatsApp, Signal, X, Telegram, Bluesky, Discord et Reddit : leurs ponts tournent sur le serveur Jasette, ou
+ * WhatsApp, Signal, X, Telegram, Bluesky, Discord, Reddit et LinkedIn : leurs ponts tournent sur le serveur Jasette, ou
  * sur le téléphone (mode « Sur cet appareil ») quand l'APK les embarque
  * (voir [serveurSeulement] et Depot.services).
  */
@@ -24,7 +25,8 @@ enum class Service(val titre: String, val court: String, val prefixe: String, va
     TELEGRAM("Telegram", "Telegram", "t:", "telegram"),
     BLUESKY("Bluesky", "Bluesky", "b:", "bluesky"),
     DISCORD("Discord", "Discord", "d:", "discord"),
-    REDDIT("Reddit", "Reddit", "r:", "reddit");
+    REDDIT("Reddit", "Reddit", "r:", "reddit"),
+    LINKEDIN("LinkedIn", "LinkedIn", "l:", "linkedin");
 
     /** Un service préfixé (tous sauf Google) : ses nouvelles passent par `nouvelleMeta`. */
     val meta get() = this != GOOGLE
@@ -38,13 +40,13 @@ enum class Service(val titre: String, val court: String, val prefixe: String, va
     val archiveNatif get() = (this == GOOGLE && !Depot.smsActif) || this == WHATSAPP || this == TELEGRAM
 
     /**
-     * WhatsApp, Signal, X, Telegram, Bluesky ou Discord : servi par le serveur Jasette, ou sur cet appareil
+     * WhatsApp, Signal, X, Telegram, Bluesky, Discord, Reddit ou LinkedIn : servi par le serveur Jasette, ou sur cet appareil
      * seulement si son pont a été compilé dans l'APK (sinon, service absent).
      */
-    val serveurSeulement get() = this == WHATSAPP || this == SIGNAL || this == X || this == TELEGRAM || this == BLUESKY || this == DISCORD || this == REDDIT
+    val serveurSeulement get() = this == WHATSAPP || this == SIGNAL || this == X || this == TELEGRAM || this == BLUESKY || this == DISCORD || this == REDDIT || this == LINKEDIN
 
     /** « Nouveau message » interroge-t-il ce pont (commande `search`) ? */
-    val cherchePersonnes get() = this == MESSENGER || this == INSTAGRAM || this == WHATSAPP || this == SIGNAL || this == TELEGRAM || this == BLUESKY || this == DISCORD || this == REDDIT
+    val cherchePersonnes get() = this == MESSENGER || this == INSTAGRAM || this == WHATSAPP || this == SIGNAL || this == TELEGRAM || this == BLUESKY || this == DISCORD || this == REDDIT || this == LINKEDIN
 
     /** Un numéro tapé se cherche-t-il aussi dans ce pont ? (pas chez Meta) */
     val chercheNumeros get() = this == GOOGLE || this == WHATSAPP || this == SIGNAL
@@ -59,6 +61,8 @@ enum class Service(val titre: String, val court: String, val prefixe: String, va
         this == DISCORD -> 10L shl 20
         // Reddit : des images seulement, 20 Mo (100 Mo pour un GIF, vérifié par le pont).
         this == REDDIT -> 100L shl 20
+        // LinkedIn : 20 Mo (vérifié par le pont).
+        this == LINKEDIN -> 20L shl 20
         else -> 25L shl 20
     }
 
@@ -129,7 +133,7 @@ data class Conv(
     val order: Int = 0,
     /** Les non-lus qui me mentionnent, quand le service les compte lui-même. */
     val mentions: Int = 0,
-    /** Une demande de message pas encore acceptée (Reddit) : « Accepter » ou « Ignorer ». */
+    /** Une demande de message pas encore acceptée (Reddit, LinkedIn) : « Accepter » ou « Ignorer ». */
     val request: Boolean = false,
 ) {
     val service get() = Service.de(id)

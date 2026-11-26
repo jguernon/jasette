@@ -362,6 +362,8 @@ private fun SectionComptes(connecter: (Service, String) -> Unit) {
                         Service.DISCORD -> BoutonAccent(t("Connecter Discord")) { connecter(s, "") }
                         // Reddit : la fenêtre web de reddit.com (Connexion.kt).
                         Service.REDDIT -> BoutonAccent(t("Se connecter")) { connecter(s, "reddit") }
+                        // LinkedIn : la fenêtre web de linkedin.com (Connexion.kt).
+                        Service.LINKEDIN -> BoutonAccent(t("Se connecter")) { connecter(s, "linkedin") }
                     }
                 }
             }

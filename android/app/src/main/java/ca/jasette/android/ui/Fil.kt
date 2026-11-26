@@ -338,7 +338,7 @@ fun Fil(
                 ),
             ) {
                 Column {
-                    // Une demande de message (Reddit) : l'accepter (l'expéditeur le voit)
+                    // Une demande de message (Reddit, LinkedIn) : l'accepter (l'expéditeur le voit)
                     // ou l'ignorer. Répondre l'accepte aussi.
                     if (conv?.request == true) DemandeMessage(id)
                     Saisie(id, actif = Depot.pret(Service.de(id)) && conv?.readOnly != true)

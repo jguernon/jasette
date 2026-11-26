@@ -649,6 +649,7 @@ private fun detailPersonne(s: Service, id: String): String = when (s) {
     Service.BLUESKY -> t("Nouvelle conversation Bluesky")
     Service.DISCORD -> t("Nouvelle conversation Discord")
     Service.REDDIT -> t("Nouvelle conversation Reddit")
+    Service.LINKEDIN -> t("Nouvelle conversation LinkedIn")
 }
 
 /**

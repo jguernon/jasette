@@ -107,6 +107,26 @@ private object Pages {
     val REDDIT_REQUIS = setOf("reddit_session")
     val REDDIT_VOULUS = REDDIT_REQUIS + setOf("csrf_token", "token_v2", "loid", "session_tracker", "edgebucket", "rdt", "csv")
 
+    // LinkedIn : la même page et les mêmes cookies que connexion/jasette-connexion-linkedin.py.
+    const val LINKEDIN_DEBUT = "https://www.linkedin.com/login"
+    val LINKEDIN_DOMAINES = listOf("https://www.linkedin.com/", "https://linkedin.com/")
+    val LINKEDIN_REQUIS = setOf("li_at", "JSESSIONID")
+    val LINKEDIN_VOULUS = LINKEDIN_REQUIS + setOf(
+        "bcookie", "bscookie", "lidc", "li_mc", "liap", "li_rm", "lang", "li_theme", "li_theme_set",
+        "timezone", "li_sugr", "UserMatchHistory", "AnalyticsSyncHistory", "lms_ads", "lms_analytics", "fptctx2", "__cf_bm",
+    )
+    // Les pages où la connexion n'est pas finie.
+    private val LINKEDIN_EN_COURS = listOf("/login", "/checkpoint", "/uas/", "/authwall", "/signup")
+
+    fun linkedinConnecte(url: String): Boolean {
+        val chemin = when {
+            url.startsWith("https://www.linkedin.com/") -> url.removePrefix("https://www.linkedin.com")
+            url.startsWith("https://linkedin.com/") -> url.removePrefix("https://linkedin.com")
+            else -> return false
+        }
+        return LINKEDIN_EN_COURS.none { chemin.startsWith(it) }
+    }
+
     fun estReddit(url: String) = listOf(
         "https://www.reddit.com/", "https://reddit.com/", "https://old.reddit.com/",
         "https://new.reddit.com/", "https://chat.reddit.com/", "https://sh.reddit.com/",
@@ -156,7 +176,16 @@ fun Connexion(service: Service, plateforme: String, fini: () -> Unit) {
     fun verifier() {
         if (etat.fini) return
         val url = etat.vue?.url ?: return
-        if (service == Service.REDDIT) {
+        if (service == Service.LINKEDIN) {
+            // Connecté : li_at et JSESSIONID, hors des pages de connexion et de vérification.
+            if (!Pages.linkedinConnecte(url)) return
+            val c = lireCookies(Pages.LINKEDIN_DOMAINES, Pages.LINKEDIN_VOULUS)
+            if (!c.keys.containsAll(Pages.LINKEDIN_REQUIS)) return
+            etat.fini = true
+            // L'agent de cette WebView : le pont le reprend (pas un cookie).
+            Depot.connecterMeta(Service.LINKEDIN, c + ("jasette_user_agent" to Pages.AGENT_META), "linkedin")
+            fini()
+        } else if (service == Service.REDDIT) {
             if (!Pages.estReddit(url)) return
             val c = lireCookies(Pages.REDDIT_DOMAINES, Pages.REDDIT_VOULUS)
             if (!c.keys.containsAll(Pages.REDDIT_REQUIS)) return
@@ -223,6 +252,7 @@ fun Connexion(service: Service, plateforme: String, fini: () -> Unit) {
         Service.INSTAGRAM -> t("Connexion à Instagram")
         Service.X -> t("Connexion à X")
         Service.REDDIT -> t("Connexion à Reddit")
+        Service.LINKEDIN -> t("Connexion à LinkedIn")
         // WhatsApp et Signal s'associent par code (Association.kt) : jamais ici.
         else -> service.court
     }
@@ -265,6 +295,7 @@ fun Connexion(service: Service, plateforme: String, fini: () -> Unit) {
                             Service.GOOGLE -> Pages.GOOGLE
                             Service.X -> Pages.X_DEBUT
                             Service.REDDIT -> Pages.REDDIT_DEBUT
+                            Service.LINKEDIN -> Pages.LINKEDIN_DEBUT
                             else -> Pages.META_DEBUT.getValue(plateforme)
                         },
                     )

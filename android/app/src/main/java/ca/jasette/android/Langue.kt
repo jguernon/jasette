@@ -389,6 +389,9 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Nouvelle conversation Reddit" to "New Reddit chat",
     // Reddit (Connexion.kt, Fil.kt).
     "Connexion à Reddit" to "Sign in to Reddit",
+    // LinkedIn (Connexion.kt, App.kt).
+    "Connexion à LinkedIn" to "Sign in to LinkedIn",
+    "Nouvelle conversation LinkedIn" to "New LinkedIn conversation",
     "Demande de message" to "Message request",
     "Accepter" to "Accept",
     "Ignorer" to "Ignore",
@@ -803,6 +806,7 @@ internal val PONT_EXACTS: List<Pair<String, String>> = listOf(
     "Conversation Signal" to "Signal conversation",
     "Conversation Telegram" to "Telegram conversation",
     "Conversation X" to "X conversation",
+    "Conversation LinkedIn" to "LinkedIn conversation",
 )
 
 /** Le début d'une ligne (la suite est gardée, traduite si elle est connue). */

@@ -518,6 +518,7 @@ object Depot {
         Service.BLUESKY -> executable("libjasette-bluesky.so")
         Service.DISCORD -> executable("libjasette-discord.so")
         Service.REDDIT -> executable("libjasette-reddit.so")
+        Service.LINKEDIN -> executable("libjasette-linkedin.so")
         else -> null
     }
 

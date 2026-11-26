@@ -2,7 +2,7 @@
 # Jasette Android — compile les ponts Go pour android/arm64.
 #
 # Les ponts (../pont, ../pont-meta, ../pont-wa, ../pont-x, ../pont-telegram, ../pont-bluesky,
-# ../pont-discord, ../pont-reddit
+# ../pont-discord, ../pont-reddit, ../pont-linkedin
 # et ../pont-signal)
 # ne sont pas modifiés : on les compile
 # tels quels en exécutables, nommés lib*.so et rangés dans
@@ -58,6 +58,7 @@ construire pont-telegram libjasette-telegram.so
 construire pont-bluesky libjasette-bluesky.so
 construire pont-discord libjasette-discord.so
 construire pont-reddit libjasette-reddit.so
+construire pont-linkedin libjasette-linkedin.so
 
 LIBSIGNAL="$CACHE/libsignal-target/aarch64-linux-android/release"
 if [[ -f "$LIBSIGNAL/libsignal_ffi.a" ]]; then
