@@ -62,6 +62,9 @@ type Conversation struct {
 	Archived bool     `json:"archived"`
 	// Toujours vrai sur Signal : tout est chiffré de bout en bout.
 	E2EE bool `json:"e2ee"`
+	// Le numéro de l'autre (conversation à deux), s'il est connu (E.164) :
+	// la fiche de la personne relie ainsi Google, WhatsApp et Signal.
+	Number string `json:"number,omitempty"`
 }
 
 type Message struct {

@@ -92,7 +92,9 @@ type Conversation struct {
 	Large bool   `json:"large,omitempty"`
 	Kind  string `json:"kind,omitempty"`
 	// Les non-lus qui me mentionnent (unread_mentions_count de Telegram).
-	Mentions int `json:"mentions,omitempty"`
+	Mentions int `json:"mentions,omitempty"` // Le numéro de l'autre (conversation à deux), si Telegram le montre
+	// (contact du carnet, ou numéro public) : pour la fiche de la personne.
+	Number string `json:"number,omitempty"`
 }
 
 type Message struct {

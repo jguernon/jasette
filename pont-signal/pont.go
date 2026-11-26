@@ -689,6 +689,12 @@ func (p *Pont) convOut(id string, c *convState) Conversation {
 	}
 	t := max(c.LastActivity, c.LastTime)
 	unread := !c.LastFromMe && c.LastTime > c.ReadWM && c.LastTime > 0
+	var number string
+	if !c.Group && id != me {
+		if ct := p.contacts[id]; ct != nil {
+			number = ct.Number
+		}
+	}
 	return Conversation{
 		ID:       id,
 		Name:     name,
@@ -700,6 +706,7 @@ func (p *Pont) convOut(id string, c *convState) Conversation {
 		Members:  orEmpty(members),
 		ReadOnly: c.ReadOnly,
 		E2EE:     true,
+		Number:   number,
 	}
 }
 

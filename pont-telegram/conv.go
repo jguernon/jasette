@@ -33,12 +33,15 @@ func (p *Pont) convOut(id string, c *convState) Conversation {
 	name := ""
 	group, readOnly := false, false
 	var members []string
+	number := ""
 	if pe != nil {
 		name = pe.Name
 		switch pe.Kind {
 		case 'u':
 			if pe.Self {
 				name = "Messages enregistrés"
+			} else if pe.Phone != "" {
+				number = "+" + strings.TrimPrefix(pe.Phone, "+")
 			}
 			if name != "" {
 				members = []string{name}
@@ -66,6 +69,7 @@ func (p *Pont) convOut(id string, c *convState) Conversation {
 		Large:    large,
 		Kind:     kind,
 		Mentions: c.Mentions,
+		Number:   number,
 	}
 }
 
