@@ -121,6 +121,9 @@ type Cmd struct {
 	Key     []byte `json:"key"`
 	Mime    string `json:"mime"`
 	On      bool   `json:"on"`
+	// create_group : les identifiants (ACI, PNI:… ou numéros) des membres et le nom (facultatif).
+	Members []string `json:"members"`
+	Name    string   `json:"name"`
 	// react : le message visé et l'emoji (vide = retirer ma réaction).
 	ID    string `json:"id"`
 	Emoji string `json:"emoji"`
@@ -307,6 +310,8 @@ func main() {
 			go p.download(cmd)
 		case "new":
 			go p.newChat(cmd)
+		case "create_group":
+			go p.createGroup(cmd)
 		case "search":
 			go p.search(strings.TrimSpace(cmd.Text))
 		case "search_messages":

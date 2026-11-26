@@ -100,6 +100,9 @@ type Cmd struct {
 	Key     []byte            `json:"key"`
 	Mime    string            `json:"mime"`
 	Archive bool              `json:"archived"`
+	// create_group : les numéros des membres et le nom (facultatif, RCS seulement).
+	Members []string `json:"members"`
+	Name    string   `json:"name"`
 	// react : le message visé et l'emoji (vide = retirer ma réaction).
 	ID    string `json:"id"`
 	Emoji string `json:"emoji"`
@@ -1156,6 +1159,8 @@ func main() {
 			go p.sendReaction(cmd)
 		case "new":
 			go p.newChat(cmd)
+		case "create_group":
+			go p.createGroup(cmd)
 		case "contacts":
 			go p.listContacts()
 		case "search":

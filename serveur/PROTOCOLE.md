@@ -179,6 +179,7 @@ Révocation : `jasette-serveur --appareils` liste les appareils,
 
 - `{"cmd":"quit"}` est **ignoré** : le pont appartient au serveur.
 - `{"cmd":"delete","conv":"<id>"}` : supprime la conversation (§5.6).
+- `{"cmd":"create_group","members":[…],"name":"…"}` : crée un groupe (§5.6 bis).
 - `send_media` : `path` doit être un chemin **renvoyé par un dépôt** (§6.2) ;
   tout autre chemin est refusé.
 - Service non offert, ou pont en train de redémarrer : le serveur répond
@@ -588,6 +589,36 @@ conversation tout de suite (liste, archives, messages, marques).
     l'erreur le dit (« supprime-le dans l'app Messenger »).
 - C'est « Supprimer la discussion » : seulement pour moi, sur tous mes
   appareils ; un groupe n'est **pas** quitté.
+
+### 5.6 bis Créer un groupe : `create_group`
+
+```json
+{"svc":"whatsapp","cmd":{"cmd":"create_group","members":["<id>","<id>"],"name":"Les amis"}}
+```
+
+Toutes les personnes viennent du **même service** (celui de la trame). Les
+`members` sont des identifiants rendus par `search` (sans préfixe, comme
+toujours côté pont) ou des numéros de téléphone ; jamais un groupe. Au moins
+deux personnes, au plus 50 (moi en plus) ; `name` est facultatif.
+
+| Service | Pont | Bibliothèque | Nom |
+|---|---|---|---|
+| `google` | `pont` | `GetOrCreateConversation` à plusieurs numéros (RCS si tous l'ont, sinon MMS), comme mautrix-gmessages | groupe RCS seulement |
+| `messenger` | `pont-meta` | `CreateGroupTask`, puis `RenameThreadTask` pour le nom | oui |
+| `instagram` | `pont-ig` | `CreateGroup` d'instameow | non (ignoré) |
+| `whatsapp` | `pont-wa` | `CreateGroup` de whatsmeow | oui, 25 caractères ; sans nom : ceux des membres |
+| `signal` | `pont-signal` | `CreateGroup` de signalmeow (les PNI sont invités) | oui, 32 caractères ; sans nom : ceux des membres |
+| `telegram` | `pont-telegram` | `messages.createChat` (groupe simple) | oui, 128 caractères ; sans nom : ceux des membres |
+
+X (mautrix-twitter ne sait pas créer de groupe XChat) et Bluesky (les
+messages privés n'y ont pas de groupes) ne l'offrent pas : le pont répond
+`commande inconnue`, et l'interface n'offre pas « Créer un groupe ».
+
+- Réussite : `{"ev":"conversation","item":{…},"open":true}`, comme `new` :
+  l'interface ouvre le groupe.
+- Échec : `{"ev":"error","where":"create_group","text":"…"}` (personne
+  introuvable, groupe refusé par le service…).
+- Le serveur la relaie telle quelle ; le MCP ne l'offre pas.
 
 ### 5.7 Reconnexion (côté client)
 
