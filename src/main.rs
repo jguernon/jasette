@@ -8465,7 +8465,9 @@ impl Jasette {
                     .bg(linear_gradient(180., linear_color_stop(givre(0.), 0.), linear_color_stop(givre(1.), 1.))),
             )
             .child(
-                div().h(px(HAUT_ENTETE)).flex().flex_row().items_center().gap(px(12.)).px(px(20.)).when_some(
+                // `occlude` : la barre du haut flotte sur le fil ; un clic sur elle ne
+                // doit pas aussi toucher le message (lien, image) qui défile dessous.
+                div().h(px(HAUT_ENTETE)).occlude().flex().flex_row().items_center().gap(px(12.)).px(px(20.)).when_some(
                     choisie.clone(),
                     |d, conv| {
                         let nom = if conv.name.is_empty() { t("Sans nom").to_string() } else { conv.name.clone() };
