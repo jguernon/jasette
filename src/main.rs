@@ -951,6 +951,7 @@ enum Service {
     Telegram,
     Bluesky,
     Discord,
+    Reddit,
 }
 
 impl Service {
@@ -965,6 +966,7 @@ impl Service {
             Service::Telegram => "Telegram",
             Service::Bluesky => "Bluesky",
             Service::Discord => "Discord",
+            Service::Reddit => "Reddit",
         }
     }
 
@@ -980,6 +982,7 @@ impl Service {
             Service::Telegram => "Telegram",
             Service::Bluesky => "Bluesky",
             Service::Discord => "Discord",
+            Service::Reddit => "Reddit",
         }
     }
 
@@ -995,6 +998,7 @@ impl Service {
             Service::Telegram => "t:",
             Service::Bluesky => "b:",
             Service::Discord => "d:",
+            Service::Reddit => "r:",
         }
     }
 
@@ -1022,13 +1026,14 @@ impl Service {
             Service::Telegram => "telegram",
             Service::Bluesky => "bluesky",
             Service::Discord => "discord",
+            Service::Reddit => "reddit",
         }
     }
 
     /// Un service facultatif : son pont n'existe que si son binaire est là
     /// (ou si le serveur Jasette l'offre) ; sinon il est absent de l'interface.
     fn facultatif(self) -> bool {
-        matches!(self, Service::WhatsApp | Service::Signal | Service::X | Service::Telegram | Service::Bluesky | Service::Discord)
+        matches!(self, Service::WhatsApp | Service::Signal | Service::X | Service::Telegram | Service::Bluesky | Service::Discord | Service::Reddit)
     }
 
     /// Les ids d'éléments propres à ce service (barre latérale, pastilles).
@@ -1043,6 +1048,7 @@ impl Service {
             Service::Telegram => "r-telegram",
             Service::Bluesky => "r-bluesky",
             Service::Discord => "r-discord",
+            Service::Reddit => "r-reddit",
         }
     }
 
@@ -1057,6 +1063,7 @@ impl Service {
             Service::Telegram => "chargement-telegram",
             Service::Bluesky => "chargement-bluesky",
             Service::Discord => "chargement-discord",
+            Service::Reddit => "chargement-reddit",
         }
     }
 }
@@ -1097,8 +1104,8 @@ fn lancer_pont(r: &Reglages, svc: Service) -> Result<Pont, String> {
 
 /// Les services autres que Google, tous gérés comme un compte Meta : le pont
 /// Meta (une copie par service) pour Messenger et Instagram, un pont chacun
-/// (même protocole) pour WhatsApp, Signal, X, Telegram, Bluesky et Discord.
-const SERVICES_META: [Service; 8] = [
+/// (même protocole) pour WhatsApp, Signal, X, Telegram, Bluesky, Discord et Reddit.
+const SERVICES_META: [Service; 9] = [
     Service::Messenger,
     Service::Instagram,
     Service::WhatsApp,
@@ -1107,6 +1114,7 @@ const SERVICES_META: [Service; 8] = [
     Service::Telegram,
     Service::Bluesky,
     Service::Discord,
+    Service::Reddit,
 ];
 
 /// Un compte Meta : son pont, son état, sa fenêtre de connexion.
@@ -1201,6 +1209,9 @@ fn image_service(s: Service, taille: f32) -> Arc<gpui::Image> {
         // EGA, Live et Sirène : la manette en pixels, aux couleurs EGA.
         Service::Discord if th().ega || retro::retro() => (9u8, variantes!("discord-ega")),
         Service::Discord => (8u8, variantes!("discord")),
+        // EGA, Live et Sirène : Snoo en pixels, rouge clair EGA.
+        Service::Reddit if th().ega || retro::retro() => (11u8, variantes!("reddit-ega")),
+        Service::Reddit => (10u8, variantes!("reddit")),
         Service::X => return image_service_svg(s, taille),
     };
     let voulu = taille * 2.;
@@ -1333,6 +1344,10 @@ struct Conv {
     /// Les non-lus qui me mentionnent (compte du service).
     #[serde(default)]
     mentions: u32,
+    /// Une demande de message pas encore acceptée (Reddit) : « Accepter » ou
+    /// « Ignorer » au-dessus du champ ; répondre l'accepte aussi.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    request: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -2168,6 +2183,7 @@ struct Jasette {
     telegram: CompteMeta,
     bluesky: CompteMeta,
     discord: CompteMeta,
+    reddit: CompteMeta,
     /// L'écran d'association ouvert (WhatsApp, Signal ou X), dans Comptes.
     ajout_service: Option<Service>,
     /// WhatsApp : le numéro pour « Associer avec un numéro de téléphone ».
@@ -2772,7 +2788,7 @@ fn adresse_appel(conv: &Conv) -> Option<String> {
         Service::Instagram => Some(format!("https://www.instagram.com/direct/t/{id}/")),
         Service::Discord => Some(format!("https://discord.com/channels/@me/{id}")),
         // Pas d'appel par le web pour ceux-là : l'app du téléphone.
-        Service::WhatsApp | Service::Signal | Service::X | Service::Telegram | Service::Bluesky => None,
+        Service::WhatsApp | Service::Signal | Service::X | Service::Telegram | Service::Bluesky | Service::Reddit => None,
     }
 }
 
@@ -3186,6 +3202,7 @@ impl Jasette {
             telegram: CompteMeta::lancer(Service::Telegram, &reglages),
             bluesky: CompteMeta::lancer(Service::Bluesky, &reglages),
             discord: CompteMeta::lancer(Service::Discord, &reglages),
+            reddit: CompteMeta::lancer(Service::Reddit, &reglages),
             ajout_service: None,
             telephone_wa,
             cookies_x: None,
@@ -3375,6 +3392,7 @@ impl Jasette {
             Service::Telegram => &self.telegram,
             Service::Bluesky => &self.bluesky,
             Service::Discord => &self.discord,
+            Service::Reddit => &self.reddit,
             Service::Messenger | Service::GoogleMessages => &self.messenger,
         }
     }
@@ -3388,6 +3406,7 @@ impl Jasette {
             Service::Telegram => &mut self.telegram,
             Service::Bluesky => &mut self.bluesky,
             Service::Discord => &mut self.discord,
+            Service::Reddit => &mut self.reddit,
             Service::Messenger | Service::GoogleMessages => &mut self.messenger,
         }
     }
@@ -3712,9 +3731,15 @@ impl Jasette {
         if self.meta(svc).connexion_ouverte {
             return;
         }
+        // Reddit : la fenêtre reddit.com ; ses cookies vont au pont par `login`.
+        if svc == Service::Reddit {
+            self.ajout_service = Some(Service::Reddit);
+            self.section = Some(Section::Comptes);
+        }
         let (nom, option) = match svc {
             Service::Instagram => ("jasette-connexion-meta.py", "--instagram"),
             Service::X => ("jasette-connexion-x.py", "--sans-code"),
+            Service::Reddit => ("jasette-connexion-reddit.py", "--reddit"),
             _ => ("jasette-connexion-meta.py", "--messenger"),
         };
         let Some(script) = script_connexion_nomme(nom) else {
@@ -5562,13 +5587,14 @@ impl Jasette {
                 )
             })
             // WhatsApp, Signal et X : seulement s'ils ont donné une photo.
-            .children([Service::WhatsApp, Service::Signal, Service::X, Service::Telegram, Service::Bluesky, Service::Discord].into_iter().filter(|s| self.meta(*s).avatar.is_some()).map(|svc| {
+            .children([Service::WhatsApp, Service::Signal, Service::X, Service::Telegram, Service::Bluesky, Service::Discord, Service::Reddit].into_iter().filter(|s| self.meta(*s).avatar.is_some()).map(|svc| {
                 let (id, titre, initiale, couleur) = match svc {
                     Service::WhatsApp => ("av-wa", t("Avatar de WhatsApp"), "W", "#25d366"),
                     Service::Signal => ("av-signal", t("Avatar de Signal"), "S", "#3a76f0"),
                     Service::Telegram => ("av-telegram", t("Avatar de Telegram"), "T", "#2aabee"),
                     Service::Bluesky => ("av-bluesky", t("Avatar de Bluesky"), "B", "#1185fe"),
                     Service::Discord => ("av-discord", t("Avatar de Discord"), "D", "#5865f2"),
+                    Service::Reddit => ("av-reddit", t("Avatar de Reddit"), "R", "#ff4500"),
                     _ => ("av-x", t("Avatar de X"), "X", "#000000"),
                 };
                 let compte = self.meta(svc);
@@ -8254,6 +8280,54 @@ impl Jasette {
     }
 
     fn composeur(&self, conv: Option<&Conv>, cx: &mut Context<Self>) -> AnyElement {
+        let Some(c) = conv.filter(|c| c.request) else {
+            return self.composeur_simple(conv, cx);
+        };
+        // Une demande de message : l'accepter (l'expéditeur le voit) ou
+        // l'ignorer (cachée chez Reddit, sans rien lui dire).
+        let (id_a, id_i) = (c.id.clone(), c.id.clone());
+        let bouton = |id: &'static str, texte: &'static str| {
+            div()
+                .id(id)
+                .px(px(14.))
+                .py(px(6.))
+                .rounded(rayon(999.))
+                .bg(th().surface)
+                .border_1()
+                .border_color(th().surface_bord)
+                .cursor_pointer()
+                .hover(|s| s.opacity(0.8))
+                .text_size(px(13.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(th().texte_fort)
+                .child(t(texte))
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(10.))
+                    .child(div().text_size(px(13.)).text_color(th().texte_pale).child(t("Demande de message")))
+                    .child(bouton("demande-accepter", "Accepter").on_click(cx.listener(move |this, _, _, cx| {
+                        this.commande(json!({"cmd": "accept", "conv": id_a}));
+                        cx.notify();
+                    })))
+                    .child(bouton("demande-ignorer", "Ignorer").on_click(cx.listener(move |this, _, _, cx| {
+                        this.commande(json!({"cmd": "ignore", "conv": id_i}));
+                        cx.notify();
+                    }))),
+            )
+            .child(self.composeur_simple(conv, cx))
+            .into_any_element()
+    }
+
+    fn composeur_simple(&self, conv: Option<&Conv>, cx: &mut Context<Self>) -> AnyElement {
         if conv.is_some_and(|c| c.read_only) {
             return div()
                 .text_center()
@@ -10014,6 +10088,7 @@ impl Jasette {
                                 Service::Telegram => ("Telegram", "gotd/td"),
                                 Service::Bluesky => ("Bluesky", "XRPC (AT Protocol)"),
                                 Service::Discord => ("Discord", "mautrix-discord"),
+                                Service::Reddit => ("Reddit", "mautrix-go (Matrix)"),
                                 _ => ("X", "twittermeow (mautrix-twitter)"),
                             };
                             [ligne_info(nom, bibli.into()).into_any_element(), separateur().into_any_element()]
@@ -10970,6 +11045,7 @@ impl Jasette {
             match svc {
                 Service::Instagram => t("Connectez-vous dans la fenêtre Instagram…").to_string(),
                 Service::X => t("Connectez-vous dans la fenêtre x.com…").to_string(),
+                Service::Reddit => t("Connectez-vous dans la fenêtre reddit.com…").to_string(),
                 _ => t("Connectez-vous dans la fenêtre Facebook…").to_string(),
             }
         } else if svc.facultatif() && compte.etat == Etat::Association {
@@ -11107,6 +11183,7 @@ impl Jasette {
                 Service::Telegram => "choix-telegram",
                 Service::Bluesky => "choix-bluesky",
                 Service::Discord => "choix-discord",
+                Service::Reddit => "choix-reddit",
                 _ => "choix-x",
             };
             carte = carte.child(
@@ -11399,6 +11476,27 @@ impl Jasette {
                     );
                 }
             }
+            Service::Reddit => {
+                if compte.connexion_ouverte {
+                    carte = carte.child(attente("Connectez-vous dans la fenêtre reddit.com…"));
+                } else if matches!(compte.etat, Etat::Association | Etat::Connexion) {
+                    carte = carte.child(attente("Connexion au chat de Reddit…"));
+                } else {
+                    carte = carte
+                        .child(texte(t("Jasette lit et envoie vos messages du chat de Reddit (conversations, groupes, chats de subreddit). Connectez-vous à reddit.com dans la fenêtre qui s'ouvre : captcha et double authentification s'y font comme d'habitude.").into()))
+                        .child(Self::bouton_principal("rd-fenetre", t("Se connecter à reddit.com")).mt(px(6.)).on_click(cx.listener(|this, _, _, cx| {
+                            this.connecter_meta(Service::Reddit);
+                            cx.notify();
+                        })));
+                }
+                carte = carte.child(
+                    div()
+                        .text_center()
+                        .text_size(px(12.))
+                        .text_color(th().texte_pale)
+                        .child(t("Reddit n'a pas d'API officielle pour le chat : utilisez Jasette à vos risques. Jasette n'agit que sur vos actions.")),
+                );
+            }
             _ => {
                 if compte.connexion_ouverte {
                     carte = carte.child(attente("Connectez-vous dans la fenêtre x.com…"));
@@ -11490,7 +11588,7 @@ impl Jasette {
                 div()
                     .text_center()
                     .text_color(th().texte)
-                    .child(t("Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram, Bluesky et Discord au même endroit.")),
+                    .child(t("Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram, Bluesky, Discord et Reddit au même endroit.")),
             );
 
         if let Some(emoji) = &self.emoji {
@@ -11539,6 +11637,7 @@ impl Jasette {
             carte = carte.child(div().mt(px(10.)).text_color(th().texte).child(match svc {
                 Service::Instagram => t("Connectez-vous dans la fenêtre Instagram…"),
                 Service::X => t("Connectez-vous dans la fenêtre x.com…"),
+                Service::Reddit => t("Connectez-vous dans la fenêtre reddit.com…"),
                 _ => t("Connectez-vous dans la fenêtre Facebook…"),
             }));
         } else if self.serveur_occupe {
@@ -11645,6 +11744,7 @@ impl Jasette {
                         Service::Telegram => "accueil-telegram",
                         Service::Bluesky => "accueil-bluesky",
                         Service::Discord => "accueil-discord",
+                        Service::Reddit => "accueil-reddit",
                         _ => "accueil-x",
                     };
                     service(id, svc).on_click(cx.listener(move |this, _, _, cx| {
@@ -12953,8 +13053,8 @@ fn t(fr: &'static str) -> &'static str {
         "Jasette s'ouvre toute seule à l'ouverture de session : les messages arrivent dès le départ." => "Jasette opens by itself when you log in, so messages arrive right away.",
         "Icône de l'app" => "App icon",
         "Blanche" => "White",
-        "Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram, Bluesky et Discord au même endroit." => {
-            "Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram, Bluesky and Discord in one place."
+        "Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram, Bluesky, Discord et Reddit au même endroit." => {
+            "Google Messages, Messenger, Instagram, WhatsApp, Signal, X, Telegram, Bluesky, Discord and Reddit in one place."
         }
         "Connectez un premier service :" => "Connect a first service:",
         "← Autres services" => "← Other services",
@@ -13192,6 +13292,20 @@ fn t(fr: &'static str) -> &'static str {
         "Choisis les personnes du groupe" => "Pick the people for the group",
         "Supprimer : pas encore pour ce service." => "Delete: not yet for this service.",
         "Connectez-vous dans la fenêtre x.com…" => "Sign in in the x.com window…",
+        "Connectez-vous dans la fenêtre reddit.com…" => "Sign in in the reddit.com window…",
+        "Connexion au chat de Reddit…" => "Connecting to Reddit chat…",
+        "Se connecter à reddit.com" => "Sign in to reddit.com",
+        "Avatar de Reddit" => "Reddit avatar",
+        "Nouvelle conversation Reddit" => "New Reddit chat",
+        "Jasette lit et envoie vos messages du chat de Reddit (conversations, groupes, chats de subreddit). Connectez-vous à reddit.com dans la fenêtre qui s'ouvre : captcha et double authentification s'y font comme d'habitude." => {
+            "Jasette reads and sends your Reddit chat messages (chats, groups, subreddit chats). Sign in to reddit.com in the window that opens: captcha and two-factor authentication work as usual."
+        }
+        "Reddit n'a pas d'API officielle pour le chat : utilisez Jasette à vos risques. Jasette n'agit que sur vos actions." => {
+            "Reddit has no official chat API: use Jasette at your own risk. Jasette only acts on your actions."
+        }
+        "Demande de message" => "Message request",
+        "Accepter" => "Accept",
+        "Ignorer" => "Ignore",
         "Association en cours…" => "Pairing…",
         "Tous vos services sont déjà connectés." => "All your services are already connected.",
         "Sur votre téléphone : WhatsApp → Appareils connectés → Connecter un appareil, puis scannez ce code." => {

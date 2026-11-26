@@ -16,8 +16,9 @@ fn tr(fr: &'static str, en: &'static str) -> &'static str {
 }
 
 /// L'ordre des sections : les services qui ont le plus de grands espaces d'abord.
-const ORDRE_GROUPES: [Service; 9] = [
+const ORDRE_GROUPES: [Service; 10] = [
     Service::Discord,
+    Service::Reddit,
     Service::Telegram,
     Service::WhatsApp,
     Service::Messenger,
@@ -34,6 +35,7 @@ fn icone_sorte(c: &Conv) -> &'static str {
         "server" if c.announce => "megaphone",
         "server" => "hash",
         "channel" | "broadcast" | "newsletter" => "volume-2",
+        "subreddit" => "hash",
         _ if c.announce => "megaphone",
         _ => "users",
     }
@@ -112,6 +114,7 @@ pub(crate) fn detail_espace(c: &Conv, service: Service) -> String {
             "newsletter" => tr("Chaîne", "Channel"),
             "broadcast" => tr("Canal de diffusion", "Broadcast channel"),
             "community_chat" => tr("Discussion de communauté", "Community chat"),
+            "subreddit" => tr("Subreddit", "Subreddit"),
             _ => tr("Groupe", "Group"),
         }
         .to_string()
@@ -382,7 +385,7 @@ impl Jasette {
         // Les salons, sans la conversation parente (une communauté) elle-même.
         let n = salons.iter().filter(|c| c.id != cle).count().max(1);
         let enfants: Vec<&&Conv> = salons.iter().filter(|c| c.id != cle).collect();
-        let (un, plusieurs) = if enfants.iter().any(|c| c.kind == "server") {
+        let (un, plusieurs) = if enfants.iter().any(|c| matches!(c.kind.as_str(), "server" | "subreddit")) {
             (tr("salon", "channel"), tr("salons", "channels"))
         } else if !enfants.is_empty() && enfants.iter().all(|c| matches!(c.kind.as_str(), "channel" | "broadcast" | "newsletter")) {
             (tr("canal", "channel"), tr("canaux", "channels"))
