@@ -463,30 +463,44 @@ func (p *Pont) onMetaEvent(ctx context.Context, raw any) {
 	}
 }
 
-// Récupère les fils plus anciens que la première page (fils normaux puis chiffrés).
+// Récupère les fils plus anciens que la première page (fils normaux puis
+// chiffrés), au rythme d'une page par seconde. Voir fils.go pour le groupe 95.
 func (p *Pont) threadBackfill() {
 	cli := p.client()
 	if cli == nil {
 		return
 	}
-	var deja bool
-	var raw []byte
-	if p.db.QueryRowContext(p.ctx, "SELECT v FROM jasette_kv WHERE k='threads_done'").Scan(&raw) == nil {
-		deja = string(raw) == "true"
+	fait := func(k string) bool {
+		var raw []byte
+		if p.db.QueryRowContext(p.ctx, "SELECT v FROM jasette_kv WHERE k=?", k).Scan(&raw) == nil {
+			return string(raw) == "true"
+		}
+		return false
 	}
-	limite := 15
-	if deja {
-		limite = 2
-	}
-	for _, groupe := range []int64{1, 95} {
-		if groupe == 95 {
-			ctx, annule := context.WithTimeout(p.ctx, 30*time.Second)
-			err := cli.WaitForInitialThreadRange(ctx, groupe)
-			annule()
+	p.logBilan("cache", bilanRecus{})
+	var recus bilanRecus
+	for _, groupe := range []int64{1, groupeChiffre} {
+		cle := "threads_done"
+		if groupe == groupeChiffre {
+			cle = "threads95_done"
+		}
+		limite := 15
+		if fait(cle) {
+			limite = 2
+		}
+		if groupe == groupeChiffre {
+			if p.client() != cli {
+				return
+			}
+			b, err := p.premierePageChiffree(cli)
 			if err != nil {
-				log.Debug().Err(err).Msg("fils chiffrés : pas de plage initiale")
+				log.Warn().Err(err).Msg("fils chiffrés : première page")
 				continue
 			}
+			recus.Chiffres += b.Chiffres
+			recus.Normaux += b.Normaux
+			p.emitList()
+			time.Sleep(time.Second)
 		}
 		var prev int64
 		for lot := 0; lot < limite; lot++ {
@@ -504,8 +518,11 @@ func (p *Pont) threadBackfill() {
 			if tbl == nil {
 				break
 			}
+			b := compteFils(tbl)
+			recus.Chiffres += b.Chiffres
+			recus.Normaux += b.Normaux
 			p.handleTable(tbl, false)
-			if groupe == 95 {
+			if groupe == groupeChiffre {
 				ctx, annule := context.WithTimeout(p.ctx, 30*time.Second)
 				_ = cli.WaitForThreadRange(ctx, groupe, gen)
 				annule()
@@ -516,9 +533,14 @@ func (p *Pont) threadBackfill() {
 			prev = ks.MinThreadKey
 			time.Sleep(time.Second)
 		}
+		p.saveKV(cle, true)
 	}
-	p.saveKV("threads_done", true)
+	p.logBilan("démarrage", recus)
 	p.emitList()
+	p.mu.Lock()
+	n := p.listCount
+	p.mu.Unlock()
+	p.completerContacts(cli, n, 25)
 }
 
 // ---- Les fils ----

@@ -80,6 +80,13 @@ func (p *Pont) handleTable(tbl *table.LSTable, initial bool) {
 	for _, th := range tbl.LSDeleteThenInsertThread {
 		key := p.canon(th.ThreadKey)
 		c := p.getOrMakeConv(key, th.ThreadType)
+		if ancienFilOuvert(th.ThreadKey, key, th.LastActivityTimestampMs, c) {
+			// Le fil ouvert d'avant, remplacé par ce fil chiffré : il ne
+			// lui prend ni son nom, ni son aperçu, ni son dossier.
+			c.ReadWM = max(c.ReadWM, th.LastReadWatermarkTimestampMs)
+			touched[idStr(key)] = true
+			continue
+		}
 		c.Name = th.ThreadName
 		if th.Snippet != "" || th.LastActivityTimestampMs >= c.LastActivity {
 			c.Snippet = th.Snippet
@@ -87,7 +94,7 @@ func (p *Pont) handleTable(tbl *table.LSTable, initial bool) {
 		}
 		c.Picture = th.ThreadPictureUrl
 		if th.FolderName != "" {
-			c.Folder = th.FolderName
+			c.Folder = dossierNormal(th.FolderName)
 		}
 		if th.ParentThreadKey > 0 {
 			c.Parent = th.ParentThreadKey
@@ -100,6 +107,11 @@ func (p *Pont) handleTable(tbl *table.LSTable, initial bool) {
 	for _, th := range tbl.LSUpdateOrInsertThread {
 		key := p.canon(th.ThreadKey)
 		c := p.getOrMakeConv(key, th.ThreadType)
+		if ancienFilOuvert(th.ThreadKey, key, th.LastActivityTimestampMs, c) {
+			c.ReadWM = max(c.ReadWM, th.LastReadWatermarkTimestampMs)
+			touched[idStr(key)] = true
+			continue
+		}
 		if th.ThreadName != "" {
 			c.Name = th.ThreadName
 		}
@@ -111,7 +123,7 @@ func (p *Pont) handleTable(tbl *table.LSTable, initial bool) {
 			c.Picture = th.ThreadPictureUrl
 		}
 		if th.FolderName != "" {
-			c.Folder = th.FolderName
+			c.Folder = dossierNormal(th.FolderName)
 		}
 		if th.ParentThreadKey > 0 {
 			c.Parent = th.ParentThreadKey
@@ -125,7 +137,7 @@ func (p *Pont) handleTable(tbl *table.LSTable, initial bool) {
 		key := p.canon(th.ThreadKey)
 		c := p.getOrMakeConv(key, th.ThreadType)
 		if th.FolderName != "" && c.Folder == "" {
-			c.Folder = th.FolderName
+			c.Folder = dossierNormal(th.FolderName)
 		}
 		if th.ParentThreadKey > 0 && c.Parent == 0 {
 			c.Parent = th.ParentThreadKey
