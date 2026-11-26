@@ -145,6 +145,10 @@ fun AProposMiseAJour() {
             color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 16.sp,
         )
         Text(
+            "${t("Créé par")}${t(" : ")}Jonathan Guernon",
+            color = P.texte, fontSize = 13.sp,
+        )
+        Text(
             "${t("Version installée")}${t(" : ")}${MiseAJour.nomInstalle}",
             color = P.textePale, fontSize = 13.sp,
         )

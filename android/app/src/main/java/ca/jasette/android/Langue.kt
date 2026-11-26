@@ -518,6 +518,7 @@ private val ANGLAIS: Map<String, String> = mapOf(
         "A button right of the message box sends it in one tap when the box is empty.",
     // La mise à jour dans l'app (MiseAJour.kt, ui/MiseAJourUi.kt).
     "À propos" to "About",
+    "Créé par" to "Created by",
     "Version installée" to "Installed version",
     "Chercher une mise à jour" to "Check for updates",
     "Jasette est à jour." to "Jasette is up to date.",
