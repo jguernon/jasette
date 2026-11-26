@@ -526,7 +526,7 @@ impl Jasette {
         let choisie = self.choisie.as_deref() == Some(conv.id.as_str());
         let id = conv.id.clone();
         let nom = self.nom_affiche(&conv);
-        let apercu = if conv.preview.trim().is_empty() { t("📎 Pièce jointe").to_string() } else { une_ligne(&conv.preview) };
+        let apercu = if conv.preview.trim().is_empty() { t("📎 Pièce jointe").to_string() } else { une_ligne(&crate::ponts_langue::affiche(&conv.preview, false)) };
         let plus = self.plus_liste();
         let n = niveau(if self.est_fantome(&conv.id) { Etat::NonAssocie } else { self.etat_service(svc) });
         let rangee = div()

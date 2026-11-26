@@ -437,6 +437,7 @@ func convertMessage(m *discordgo.Message, r resolver) Message {
 // retired : un message retiré ; il reste, barré, comme chez les autres services.
 func retired(m Message) Message {
 	m.Text, m.Media, m.Attachments, m.ReplyTo, m.ReplyText, m.Reactions, m.LinkPreview = "🚫 Message retiré", "", nil, "", "", nil, nil
+	m.System = "deleted"
 	return m
 }
 

@@ -182,7 +182,9 @@ fun Fil(
     // Les résultats, du plus récent au plus ancien.
     val q = plier(requete.trim())
     val resultats = if (!recherche || q.isEmpty()) emptyList()
-        else liste.filter { plier(it.text).contains(q) }.map { it.id }.asReversed()
+        else liste.filter {
+            plier(it.text).contains(q) || plier(ca.jasette.android.traduirePont(it.text, it.kind == "admin")).contains(q)
+        }.map { it.id }.asReversed()
     fun allerA(mid: String) {
         courant = mid
         val i = liste.indexOfFirst { it.id == mid }
@@ -643,14 +645,16 @@ private fun Message(
                         PieceAutre(p.name.ifEmpty { p.mime }, p, appuiLong)
                     }
                 }
-                if (m.attachments.isEmpty() && m.media.isNotEmpty()) PieceAutre(m.media, null, appuiLong)
+                if (m.attachments.isEmpty() && m.media.isNotEmpty()) PieceAutre(ca.jasette.android.traduirePont(m.media), null, appuiLong)
                 // Une carte avec titre et image dit déjà où mène le lien : l'adresse
                 // sort du texte (et la bulle disparaît s'il ne restait qu'elle).
                 val apercuLien = ca.jasette.android.Apercus.de(m)
+                // Un texte d'un pont (« 🚫 Message retiré »…), dans la langue de l'interface.
+                val texteMontre = ca.jasette.android.traduirePont(m.text, m.kind == "admin")
                 val texteSansLien = apercuLien
                     ?.takeIf { (a, img) -> a.title.isNotEmpty() && img != null && java.io.File(img).isFile }
-                    ?.let { (a, _) -> ca.jasette.android.Liens.sansLien(m.text, a.url) }
-                    ?: m.text
+                    ?.let { (a, _) -> ca.jasette.android.Liens.sansLien(texteMontre, a.url) }
+                    ?: texteMontre
                 // Un seul émoji : deux fois plus gros, sans bulle (et un pop s'il vient d'arriver).
                 val seul = apercuLien == null && ca.jasette.android.emojiSeul(texteSansLien)
                 if (seul) {

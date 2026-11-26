@@ -95,7 +95,7 @@ class PontService : ServiceAndroid() {
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
         val titre = conv?.let { nomAffiche(it) }?.ifEmpty { null } ?: m.sender.ifEmpty { Service.de(m.conv).court }
-        val texte = if (conv?.group == true && m.sender.isNotEmpty()) "${m.sender}${t(" : ")}${m.apercu()}" else m.apercu()
+        val texte = if (conv?.group == true && m.sender.isNotEmpty()) "${m.sender}${t(" : ")}${traduirePont(m.apercu(), m.kind == "admin")}" else traduirePont(m.apercu(), m.kind == "admin")
         // L'avatar de la personne : photo du contact si on l'utilise, sinon celle du service.
         val photo = conv?.let { Contacts.photoPour(it, grande = true) ?: Depot.avatarDe(it) } ?: Depot.avatars[m.conv]
         // Un groupe sans image : la mosaïque de ses membres (avatars_groupe), comme dans l'app.
@@ -111,7 +111,7 @@ class PontService : ServiceAndroid() {
             .build()
         val moi = androidx.core.app.Person.Builder().setName(t("Moi")).build()
         val style = NotificationCompat.MessagingStyle(moi)
-            .addMessage(m.apercu(), m.time, personne)
+            .addMessage(traduirePont(m.apercu(), m.kind == "admin"), m.time, personne)
             .also { if (conv?.group == true) { it.setConversationTitle(titre); it.setGroupConversation(true) } }
         val n = NotificationCompat.Builder(this, CANAL_MESSAGES)
             .setSmallIcon(R.drawable.ic_notif)

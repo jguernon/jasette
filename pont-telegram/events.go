@@ -175,6 +175,7 @@ func mergeOld(r, old *msgRow) {
 // Un message retiré : il reste, barré, comme sur les autres services.
 func (p *Pont) retire(r *msgRow) {
 	r.Text, r.Body, r.Media, r.Attachments, r.ReplyTo, r.ReplyText, r.Reactions = "🚫 Message retiré", "🚫 Message retiré", "", nil, "", "", nil
+	r.System = "deleted"
 	p.putMsg(r)
 	p.noteLastIfLatest(r.Conv, r)
 	p.emitMsg(r, false)
@@ -297,6 +298,9 @@ func (p *Pont) reactionsOf(mr tg.MessageReactions) []Reaction {
 	return out
 }
 
+// Le code neutre (PROTOCOLE.md §5.14) des messages de service sans nom.
+var systemCodes = map[string]string{"📞 Appel": "call", "Historique effacé": "history_cleared"}
+
 // Le texte d'un message de service (quelqu'un entre, le titre change…).
 func (p *Pont) actionText(a tg.MessageActionClass, who string) string {
 	who = firstOf(who, "Quelqu'un")
@@ -360,7 +364,7 @@ func (p *Pont) convert(mc tg.MessageClass) *msgRow {
 			return nil
 		}
 		return &msgRow{
-			Message: Message{ID: msgKey(conv, m.ID), Conv: conv, Text: text, FromMe: m.Out, Time: int64(m.Date) * 1000, Kind: "admin", Status: "INCOMING_COMPLETE"},
+			Message: Message{ID: msgKey(conv, m.ID), Conv: conv, Text: text, System: systemCodes[text], FromMe: m.Out, Time: int64(m.Date) * 1000, Kind: "admin", Status: "INCOMING_COMPLETE"},
 			Body:    text, SenderID: sender, Num: m.ID,
 		}
 	}

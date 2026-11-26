@@ -312,7 +312,7 @@ private fun LigneConv(c: Conv, active: Boolean, detail: String?, toucher: (() ->
             val activite = Depot.presenceDe(c)?.let { texteActivite(it, System.currentTimeMillis()) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    activite ?: c.preview.replace('\n', ' ').ifEmpty { c.service.court },
+                    activite ?: ca.jasette.android.traduirePont(c.preview).replace('\n', ' ').ifEmpty { c.service.court },
                     color = if (c.unread) P.texteFort else P.textePale, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )

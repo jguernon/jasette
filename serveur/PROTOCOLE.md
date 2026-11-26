@@ -1573,6 +1573,47 @@ conversation `large` (§5.8) ; l'historique n'est demandé qu'à l'ouverture.
 - Google Messages, Signal, X, Bluesky : seulement des groupes de
   personnes ; rien de neuf.
 
+### 5.14 Textes des ponts et langue : `system`
+
+Les ponts écrivent eux-mêmes certains textes, **en français** : message
+retiré (« 🚫 Message retiré »), pièce jointe (« 📷 Photo », « 📎 Pièce
+jointe »), message transféré (« ↗️ Message transféré »), aperçu
+(« 🔒 Conversation chiffrée », « Demande de message · … »), messages de
+service (`kind` `admin` : « Alice a ajouté Bob », « 📞 Appel »…). Ils ne
+connaissent pas la langue de l'interface, et le serveur garde ces textes en
+cache tels quels.
+
+**Le client les traduit à l'affichage** (bulle, aperçu de la liste,
+notification, recherche) : il reconnaît la chaîne exacte d'une ligne, son
+début (« ↗️ Message transféré … », « 📊 Sondage : … ») ou sa forme
+(« {a} a quitté le groupe » ; les formes à fin libre, « {a} a ajouté {b} »,
+seulement dans un message `kind` `admin`). Tables : `src/ponts_langue.rs`
+(bureau) et `Langue.kt` (Android), identiques (un test du bureau le vérifie).
+Les vieux ponts et les vieux caches se traduisent donc aussi. Un pont qui
+ajoute un texte doit l'ajouter à ces deux tables.
+
+**Champ neutre `system`** (facultatif, ponts récents) : sur un message dont
+**tout le texte** est un message de service fixe, un code ; le client montre
+alors le texte du code dans sa langue, et `text` sinon (code inconnu, vieux
+client). `text` reste rempli, en français, pour les vieux clients.
+
+```json
+{"id":"…","conv":"…","text":"🚫 Message retiré","system":"deleted","kind":"discord",…}
+```
+
+| `system` | texte français | ponts |
+|---|---|---|
+| `deleted` | 🚫 Message retiré | tous (X, Signal écrivaient « 🚫 Message supprimé », Reddit « Message retiré ») |
+| `call` | 📞 Appel | Telegram |
+| `history_cleared` | Historique effacé | Telegram |
+| `safety_number_changed` | 🔐 Le numéro de sécurité de cette personne a changé | Signal |
+| `decrypt_failed` | ⚠ Un message n'a pas pu être déchiffré : vérifie dans Signal sur le téléphone | Signal |
+
+Seulement des états définitifs : un texte provisoire (« ⏳ Message en
+attente », « 🔒 Message chiffré pas encore lisible ») est remplacé plus tard
+par le vrai message, et n'a pas de code (la reconnaissance de la chaîne
+suffit). Les aperçus des conversations (`preview`) n'ont pas de code.
+
 ## 6. Fichiers
 
 Les événements contiennent des chemins de fichiers **du serveur** :

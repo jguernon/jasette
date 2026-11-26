@@ -689,7 +689,7 @@ impl Jasette {
         let apercu = match self.activite(conv) {
             Some(a) => a,
             None if conv.preview.is_empty() => svc.nom().to_string(),
-            None => conv.preview.replace('\n', " "),
+            None => crate::ponts_langue::affiche(&conv.preview, false).replace('\n', " "),
         };
         div()
             .flex()

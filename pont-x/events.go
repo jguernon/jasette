@@ -64,7 +64,7 @@ func (p *Pont) onEvent(ctx context.Context, evt types.TwitterEvent, rest bool) {
 			if r == nil {
 				continue
 			}
-			r.Text, r.Media, r.Attachments, r.Reactions = "🚫 Message supprimé", "", nil, nil
+			r.Text, r.Media, r.Attachments, r.Reactions, r.System = "🚫 Message supprimé", "", nil, nil, "deleted"
 			p.putMsg(r)
 			p.noteLastIfLatest(r.Conv, r)
 			p.emitMsg(r, false)

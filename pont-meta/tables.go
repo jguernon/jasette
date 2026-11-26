@@ -305,7 +305,7 @@ func (p *Pont) handleTable(tbl *table.LSTable, initial bool) {
 	}
 	for _, d := range tbl.LSDeleteMessage {
 		if r := p.getMsg(d.MessageId); r != nil {
-			r.Text, r.Media, r.Attachments = "🚫 Message retiré", "", nil
+			r.Text, r.Media, r.Attachments, r.System = "🚫 Message retiré", "", nil, "deleted"
 			p.putMsg(r)
 			p.emitMsg(r, false)
 		}
@@ -541,7 +541,7 @@ func (p *Pont) fbRow(wm *table.WrappedMessage) *msgRow {
 		}
 	}
 	if wm.IsUnsent {
-		r.Text, r.Attachments = "🚫 Message retiré", nil
+		r.Text, r.Attachments, r.System = "🚫 Message retiré", nil, "deleted"
 	}
 	if wm.PollQuestion != "" {
 		r.Text = "📊 Sondage : " + wm.PollQuestion

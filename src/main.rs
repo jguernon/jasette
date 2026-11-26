@@ -30,7 +30,9 @@ mod groupes;
 mod personne;
 mod selection;
 mod codes;
+mod ponts_langue;
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -1430,6 +1432,30 @@ struct Msg {
     /// `sender_avatar` (§5.13).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     sender_id: String,
+    /// Un message de service connu (« deleted »…, PROTOCOLE.md §5.14) : son
+    /// texte vient de src/ponts_langue.rs plutôt que de `text`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    system: String,
+}
+
+impl Msg {
+    /// Le texte, en français (celui du champ `system` s'il est connu).
+    fn texte_fr(&self) -> &str {
+        ponts_langue::francais(&self.text, &self.system)
+    }
+
+    /// Le texte montré : traduit (src/ponts_langue.rs) s'il vient d'un pont.
+    fn texte_affiche(&self) -> Cow<'_, str> {
+        ponts_langue::affiche(self.texte_fr(), self.kind == "admin")
+    }
+
+    /// Une copie avec le texte montré, si elle diffère.
+    fn traduit(&self) -> Option<Msg> {
+        match self.texte_affiche() {
+            Cow::Borrowed(t) if t == self.text => None,
+            t => Some(Msg { text: t.into_owned(), system: String::new(), ..self.clone() }),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -4374,8 +4400,8 @@ impl Jasette {
         };
         let corps = if !self.reglages.apercu {
             t("Nouveau message").into()
-        } else if !m.text.is_empty() {
-            m.text.clone()
+        } else if !m.texte_fr().is_empty() {
+            m.texte_affiche().into_owned()
         } else if m.attachments.iter().any(Piece::est_image) {
             "📷 Photo".into()
         } else {
@@ -4686,8 +4712,8 @@ impl Jasette {
                     let actif = self.active;
                     if let Some(conv) = self.convs.iter_mut().find(|c| c.id == m.conv) {
                         if nouveau || conv.time <= m.time {
-                            conv.preview = if !m.text.is_empty() {
-                                m.text.clone()
+                            conv.preview = if !m.texte_fr().is_empty() {
+                                m.texte_fr().to_string()
                             } else if m.attachments.iter().any(Piece::est_image) {
                                 "📷 Photo".into()
                             } else if m.attachments.iter().any(Piece::est_audio) {
@@ -4855,7 +4881,13 @@ impl Jasette {
             && let Some(liste) = self.choisie.as_ref().and_then(|id| self.messages.get(id))
         {
             self.fil_trouves =
-                liste.iter().filter(|m| plier(&m.text).contains(&self.fil_requete)).map(|m| m.id.clone()).collect();
+                liste
+                    .iter()
+                    .filter(|m| {
+                        plier(&m.text).contains(&self.fil_requete) || plier(&m.texte_affiche()).contains(&self.fil_requete)
+                    })
+                    .map(|m| m.id.clone())
+                    .collect();
         }
         if self.fil_courant.as_ref().is_some_and(|c| !self.fil_trouves.contains(c)) {
             self.fil_courant = None;
@@ -5084,6 +5116,7 @@ impl Jasette {
             mentions_me: false,
             reply_to_me: false,
             sender_id: String::new(),
+            system: String::new(),
         });
         self.descendre = true;
         tmp
@@ -6974,7 +7007,7 @@ impl Jasette {
                                                 if conv.preview.trim().is_empty() {
                                                     t("📎 Pièce jointe").to_string()
                                                 } else {
-                                                    une_ligne(&conv.preview)
+                                                    une_ligne(&ponts_langue::affiche(&conv.preview, false))
                                                 },
                                                 if conv.unread { th().texte_fort } else { th().apercu },
 
@@ -7073,7 +7106,7 @@ impl Jasette {
             } else {
                 String::new()
             };
-            let (texte, plage) = extrait(&r.text, &q);
+            let (texte, plage) = extrait(&ponts_langue::affiche(&r.text, false), &q);
             let plage = plage.map(|p| (p.start + qui.len()..p.end + qui.len(), alpha(couleur_trouve(), if th().ega { 1. } else { 0.45 })));
             let (cid, mid) = (r.conv.clone(), r.id.clone());
             col = col.child(
@@ -7517,9 +7550,12 @@ impl Jasette {
                         .when(flou, |d| d.shadow(tache(ton(blanc(0.85), th().surface), 16.)))
                         .when(!flou, |d| d.bg(ton(blanc(0.7), th().surface)).text_color(th().texte))
                         .child(icone("paperclip", 14., if flou { invisible } else { th().texte }))
-                        .child(m.media.clone()),
+                        .child(ponts_langue::affiche(&m.media, false).into_owned()),
                 );
             }
+            // Un texte d'un pont (« 🚫 Message retiré »…), dans la langue de l'interface.
+            let traduit = m.traduit();
+            let m = traduit.as_ref().unwrap_or(m);
             // Le message d'origine (la carte de l'aperçu cherche son lien dans
             // le texte complet) ; `m` : le texte montré, sans l'adresse si la
             // carte a titre et image.

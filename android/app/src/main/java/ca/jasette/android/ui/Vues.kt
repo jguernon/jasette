@@ -582,7 +582,7 @@ fun Rangee(
                     if (Depot.ecritDe(c.id) != null) {
                         ApercuEcrit(Taille.liste(14f), if (blanc) P.surSelection else P.accent, Modifier.weight(1f))
                     } else Text(
-                        (if (c.fromMe && c.preview.isNotEmpty()) t("Vous : ") else "") + c.preview.replace('\n', ' '),
+                        (if (c.fromMe && c.preview.isNotEmpty()) t("Vous : ") else "") + ca.jasette.android.traduirePont(c.preview).replace('\n', ' '),
                         color = if (blanc) P.surSelection else if (c.unread) P.texteFort else P.apercu, fontSize = Taille.liste(14f),
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                     )

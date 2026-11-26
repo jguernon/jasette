@@ -158,6 +158,7 @@ func (p *Pont) handleMessage(cli *whatsmeow.Client, evt *events.Message, live bo
 		case waE2E.ProtocolMessage_REVOKE:
 			if r := p.getMsg(pm.GetKey().GetID()); r != nil {
 				r.Text, r.Body, r.Media, r.Attachments, r.ReplyTo, r.ReplyText = "🚫 Message retiré", "🚫 Message retiré", "", nil, "", ""
+				r.System = "deleted"
 				p.putMsg(r)
 				p.noteLastIfLatest(r.Conv, r)
 				p.emitMsg(r, false)

@@ -122,7 +122,7 @@ func (p *Pont) handleDelta(ctx context.Context, cli *instameow.Client, d *slidet
 		}
 	case *slidetypes.DeleteMessageEvent:
 		if r := p.getMsg(evt.MessageID); r != nil {
-			r.Text, r.Media, r.Attachments = "🚫 Message retiré", "", nil
+			r.Text, r.Media, r.Attachments, r.System = "🚫 Message retiré", "", nil, "deleted"
 			p.putMsg(r)
 			p.noteLastIfLatest(conv, r)
 			p.emitMsg(r, false)

@@ -335,6 +335,12 @@ func (p *Pont) longText(a *signalpb.AttachmentPointer) string {
 	return string(data)
 }
 
+// Le code neutre (PROTOCOLE.md §5.14) des messages de service connus.
+var systemCodes = map[string]string{
+	"🔐 Le numéro de sécurité de cette personne a changé":                            "safety_number_changed",
+	"⚠ Un message n'a pas pu être déchiffré : vérifie dans Signal sur le téléphone": "decrypt_failed",
+}
+
 // Un message « système » (appel, erreur de déchiffrement…).
 func (p *Pont) adminMessage(conv string, sender uuid.UUID, ts uint64, text string) {
 	if conv == "" {
@@ -345,6 +351,7 @@ func (p *Pont) adminMessage(conv string, sender uuid.UUID, ts uint64, text strin
 			ID:     "admin|" + msgID(sender, ts),
 			Conv:   conv,
 			Text:   text,
+			System: systemCodes[text],
 			Time:   int64(ts),
 			Kind:   "admin",
 			Status: "INCOMING_COMPLETE",
@@ -385,7 +392,7 @@ func (p *Pont) handleDelete(conv, id string) {
 	if target == nil {
 		return
 	}
-	target.Text = "🚫 Message supprimé"
+	target.Text, target.System = "🚫 Message supprimé", "deleted"
 	target.Attachments, target.Media, target.Reactions = nil, "", nil
 	p.putMsg(target)
 	p.noteLastIfLatest(conv, target)

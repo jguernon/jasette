@@ -694,3 +694,217 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "SMS non envoyé" to "SMS not sent",
     "Impossible d'ouvrir cette conversation SMS" to "Couldn't open this SMS conversation",
 )
+
+
+// ---- Les textes des ponts ----
+//
+// Les ponts (Go) écrivent en français leurs propres textes : message retiré,
+// pièce jointe, message de service (« Alice a ajouté Bob »)… Le serveur les
+// garde en cache tels quels : le client les traduit au moment de les montrer
+// (bulle, aperçu, notification, recherche du fil), en reconnaissant la chaîne
+// exacte, son début ou sa forme. Les vieux ponts et vieux caches aussi.
+// Les mêmes tables, mot pour mot, que src/ponts_langue.rs (bureau) : un test
+// du bureau le vérifie.
+
+/** Les codes du champ `system` d'un message (PROTOCOLE.md §5.14) et leur texte. */
+internal val PONT_SYSTEME: List<Pair<String, String>> = listOf(
+    "deleted" to "🚫 Message retiré",
+    "call" to "📞 Appel",
+    "history_cleared" to "Historique effacé",
+    "safety_number_changed" to "🔐 Le numéro de sécurité de cette personne a changé",
+    "decrypt_failed" to "⚠ Un message n'a pas pu être déchiffré : vérifie dans Signal sur le téléphone",
+)
+
+/** Une ligne entière. */
+internal val PONT_EXACTS: List<Pair<String, String>> = listOf(
+    "🚫 Message retiré" to "🚫 Message removed",
+    "Message retiré" to "Message removed",
+    "🚫 Message supprimé" to "🚫 Message deleted",
+    "Message supprimé" to "Message deleted",
+    "📷 Photo" to "📷 Photo",
+    "🎬 Vidéo" to "🎬 Video",
+    "🎤 Message vocal" to "🎤 Voice message",
+    "📎 Pièce jointe" to "📎 Attachment",
+    "📎 Fichier" to "📎 File",
+    "📷 Photo (expirée)" to "📷 Photo (expired)",
+    "📎 Fichier (expiré)" to "📎 File (expired)",
+    "Autocollant" to "Sticker",
+    "(autocollant)" to "(sticker)",
+    "pièce jointe" to "attachment",
+    "message vocal" to "voice message",
+    "autocollant" to "sticker",
+    "📍 Position" to "📍 Location",
+    "📍 Position en direct" to "📍 Live location",
+    "📞 Appel" to "📞 Call",
+    "Historique effacé" to "History cleared",
+    "Le groupe est devenu un supergroupe" to "The group became a supergroup",
+    "🔒 Conversation chiffrée" to "🔒 Encrypted conversation",
+    "🔒 Message chiffré pas encore lisible (il arrivera peut-être plus tard)" to "🔒 Encrypted message not readable yet (it may arrive later)",
+    "🔒 Message chiffré dans un format que Jasette ne sait pas encore lire : ouvre X pour le voir." to "🔒 Encrypted message in a format Jasette can't read yet: open X to see it.",
+    "🔒 Message chiffré illisible (clé du fil manquante)." to "🔒 Unreadable encrypted message (missing thread key).",
+    "📍 Partage de position en direct (visible dans Messenger)" to "📍 Live location sharing (visible in Messenger)",
+    "👤 Fiche de contact (visible dans Messenger)" to "👤 Contact card (visible in Messenger)",
+    "(contenu partagé : ouvre Messenger)" to "(shared content: open Messenger)",
+    "⤴ a remonté un message" to "⤴ bumped a message",
+    "(photo éphémère : ouvre Messenger)" to "(disappearing photo: open Messenger)",
+    "📷 Photo éphémère : ouvre Instagram pour la voir" to "📷 Disappearing photo: open Instagram to see it",
+    "🎬 Vidéo éphémère : ouvre Instagram pour la voir" to "🎬 Disappearing video: open Instagram to see it",
+    "(pièce jointe non prise en charge)" to "(unsupported attachment)",
+    "📞 Appel Signal : réponds sur le téléphone" to "📞 Signal call: answer on the phone",
+    "📞 Appel de groupe Signal" to "📞 Signal group call",
+    "🔐 Le numéro de sécurité de cette personne a changé" to "🔐 This person's safety number changed",
+    "👁 Média à vue unique : ouvre Signal sur le téléphone pour le voir" to "👁 View-once media: open Signal on the phone to see it",
+    "💸 Paiement Signal : ouvre Signal sur le téléphone" to "💸 Signal payment: open Signal on the phone",
+    "🎁 Badge cadeau : ouvre Signal sur le téléphone" to "🎁 Gift badge: open Signal on the phone",
+    "⏱ Messages éphémères désactivés" to "⏱ Disappearing messages off",
+    "⚠ Un message n'a pas pu être déchiffré : vérifie dans Signal sur le téléphone" to "⚠ A message couldn't be decrypted: check Signal on the phone",
+    "⏳ Message en attente (ouvre WhatsApp sur le téléphone s'il n'arrive pas)" to "⏳ Waiting for this message (open WhatsApp on the phone if it doesn't arrive)",
+    "👁 Message à vue unique : ouvre WhatsApp sur le téléphone" to "👁 View-once message: open WhatsApp on the phone",
+    "(vote dans Signal)" to "(vote in Signal)",
+    "(vote sur le téléphone)" to "(vote on the phone)",
+    "Demande de message" to "Message request",
+    // Noms donnés par les ponts (conversation sans nom, compte disparu…).
+    "Messages enregistrés" to "Saved Messages",
+    "Note à moi-même" to "Note to Self",
+    "Compte supprimé" to "Deleted Account",
+    "Groupe" to "Group",
+    "Conversation Messenger" to "Messenger conversation",
+    "Conversation Instagram" to "Instagram conversation",
+    "Conversation WhatsApp" to "WhatsApp conversation",
+    "Conversation Signal" to "Signal conversation",
+    "Conversation Telegram" to "Telegram conversation",
+    "Conversation X" to "X conversation",
+)
+
+/** Le début d'une ligne (la suite est gardée, traduite si elle est connue). */
+internal val PONT_DEBUTS: List<Pair<String, String>> = listOf(
+    "↗️ Message transféré" to "↗️ Forwarded message",
+    "↗ Transféré de " to "↗ Forwarded from ",
+    "📊 Sondage : " to "📊 Poll: ",
+    "⏱ Messages éphémères : " to "⏱ Disappearing messages: ",
+    "👤 Contact : " to "👤 Contact: ",
+    "👥 Contacts : " to "👥 Contacts: ",
+    "Demande de message · " to "Message request · ",
+    "↪ Vous : " to "↪ You: ",
+)
+
+/** La fin d'une ligne (un aperçu met tout le message sur une ligne). */
+internal val PONT_FINS: List<Pair<String, String>> = listOf(
+    "(vote dans Signal)" to "(vote in Signal)",
+    "(vote sur le téléphone)" to "(vote on the phone)",
+)
+
+/** Des formes avec des noms ({a}, {b}), à fin fixe : reconnues partout. */
+internal val PONT_FORMES: List<Pair<String, String>> = listOf(
+    "📞 {a} a lancé un appel" to "📞 {a} started a call",
+    "{a} a quitté le groupe" to "{a} left the group",
+    "{a} a rejoint le groupe" to "{a} joined the group",
+    "{a} a changé l'image du groupe" to "{a} changed the group image",
+    "{a} a changé la photo du groupe" to "{a} changed the group photo",
+    "{a} a retiré la photo du groupe" to "{a} removed the group photo",
+    "{a} a épinglé un message" to "{a} pinned a message",
+    "{a} est maintenant sur Telegram" to "{a} is now on Telegram",
+    "{a} a créé le groupe « {b} »" to "{a} created the group “{b}”",
+    "{a} a renommé le groupe « {b} »" to "{a} renamed the group “{b}”",
+    "Canal « {a} » créé" to "Channel “{a}” created",
+    "👥 Invitation au groupe « {a} »" to "👥 Group invite “{a}”",
+    "(message non pris en charge : ouvre {a})" to "(unsupported message: open {a})",
+)
+
+/** Des formes à fin libre : seulement pour un message de service (`kind` « admin »). */
+internal val PONT_FORMES_SERVICE: List<Pair<String, String>> = listOf(
+    "{a} a renommé le groupe : {b}" to "{a} renamed the group: {b}",
+    "{a} a ajouté {b}" to "{a} added {b}",
+    "{a} a retiré {b}" to "{a} removed {b}",
+)
+
+private val PONT_EXACTS_MAP = PONT_EXACTS.toMap()
+
+/** Le texte (français) d'un code `system`, ou null s'il est inconnu. */
+fun texteSysteme(code: String): String? = PONT_SYSTEME.firstOrNull { it.first == code }?.second
+
+/** Un texte venu d'un pont, dans la langue de l'interface (voir [traduirePontEn]). */
+fun traduirePont(texte: String, service: Boolean = false): String =
+    if (!Langue.anglais) texte else traduirePontEn(texte, service)
+
+/**
+ * Traduit en anglais les textes connus des ponts, ligne par ligne ; le reste
+ * est gardé. [service] : un message de service, où les formes à fin libre
+ * sont aussi reconnues.
+ */
+fun traduirePontEn(texte: String, service: Boolean = false): String {
+    if (texte.isEmpty()) return texte
+    val seule = '\n' !in texte
+    return texte.split('\n').joinToString("\n") { ligneEn(it, service && seule) }
+}
+
+private fun ligneEn(l: String, service: Boolean): String {
+    PONT_EXACTS_MAP[l]?.let { return it }
+    for ((fr, en) in PONT_DEBUTS) {
+        if (l.startsWith(fr)) {
+            val reste = l.substring(fr.length)
+            if (fr.endsWith(' ') || reste.isEmpty() || reste[0].isWhitespace()) return en + ligneEn(reste, false)
+        }
+    }
+    // La citation d'une réponse : « ↪ Alice : 📷 Photo ».
+    if (l.startsWith("↪ ")) {
+        val reste = l.substring(2)
+        val i = reste.indexOf(" : ")
+        if (i >= 0) {
+            val cite = reste.substring(i + 3)
+            val c = ligneEn(cite, false)
+            if (c != cite) return "↪ " + reste.substring(0, i) + ": " + c
+        }
+        val c = ligneEn(reste, false)
+        return if (c != reste) "↪ $c" else l
+    }
+    val formes = if (service) PONT_FORMES + PONT_FORMES_SERVICE else PONT_FORMES
+    for ((fr, en) in formes) forme(l, fr, en)?.let { return it }
+    for ((fr, en) in PONT_FINS) if (l.endsWith(fr)) return l.dropLast(fr.length) + en
+    return l
+}
+
+/** [l] a-t-elle la forme [fr] (« {a} a ajouté {b} ») ? Sa traduction selon [en]. */
+private fun forme(l: String, fr: String, en: String): String? {
+    val fixes = ArrayList<String>()
+    val trous = ArrayList<String>()
+    var reste = fr
+    while (true) {
+        val i = reste.indexOf('{')
+        if (i < 0) break
+        fixes.add(reste.substring(0, i))
+        trous.add(reste.substring(i, i + 3))
+        reste = reste.substring(i + 3)
+    }
+    fixes.add(reste)
+    if (!l.startsWith(fixes[0])) return null
+    var s = l.substring(fixes[0].length)
+    val valeurs = ArrayList<String>()
+    for (k in 1 until fixes.size) {
+        val fixe = fixes[k]
+        val v: String
+        if (k == fixes.size - 1) {
+            if (!s.endsWith(fixe)) return null
+            v = s.substring(0, s.length - fixe.length)
+        } else {
+            val i = s.indexOf(fixe)
+            if (i < 0) return null
+            v = s.substring(0, i)
+            s = s.substring(i + fixe.length)
+        }
+        if (v.isBlank()) return null
+        valeurs.add(v)
+    }
+    var t = en
+    for ((trou, v) in trous.zip(valeurs)) t = t.replace(trou, noms(v))
+    return t
+}
+
+/** « Quelqu'un », dans une liste de noms (« Alice, quelqu'un »). */
+private fun noms(v: String): String = v.split(", ").joinToString(", ") {
+    when (it) {
+        "Quelqu'un" -> "Someone"
+        "quelqu'un" -> "someone"
+        else -> it
+    }
+}

@@ -552,7 +552,7 @@ impl Jasette {
         let id = conv.id.clone();
         let nom = self.nom_affiche(&conv);
         let mentions = self.mentions_espace(conv);
-        let apercu = if conv.preview.trim().is_empty() { String::new() } else { une_ligne(&conv.preview) };
+        let apercu = if conv.preview.trim().is_empty() { String::new() } else { une_ligne(&crate::ponts_langue::affiche(&conv.preview, false)) };
         div()
             .id(SharedString::from(format!("c-{}", conv.id)))
             .flex()

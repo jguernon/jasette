@@ -285,7 +285,7 @@ func (p *Pont) handleWAMessage(evt *events.FBMessage, fromHistory bool) *msgRow 
 		if app := payload.GetApplicationData(); app != nil {
 			if rev := app.GetRevoke(); rev != nil {
 				if r := p.getMsg(rev.GetKey().GetID()); r != nil {
-					r.Text, r.Media, r.Attachments = "🚫 Message retiré", "", nil
+					r.Text, r.Media, r.Attachments, r.System = "🚫 Message retiré", "", nil, "deleted"
 					p.putMsg(r)
 					p.emitMsg(r, false)
 				}

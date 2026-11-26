@@ -287,7 +287,9 @@ data class Msg(
             return Msg(
                 id = o.chaine("id"),
                 conv = o.chaine("conv"),
-                text = o.chaine("text"),
+                // Un message de service connu (`system`, PROTOCOLE.md §5.14) : son
+                // texte français de référence, traduit à l'affichage (traduirePont).
+                text = texteSysteme(o.chaine("system")) ?: o.chaine("text"),
                 media = o.chaine("media"),
                 fromMe = o.optBoolean("from_me"),
                 sender = o.chaine("sender"),

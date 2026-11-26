@@ -93,9 +93,12 @@ type Conversation struct {
 }
 
 type Message struct {
-	ID     string `json:"id"`
-	Conv   string `json:"conv"`
-	Text   string `json:"text"`
+	ID   string `json:"id"`
+	Conv string `json:"conv"`
+	Text string `json:"text"`
+	// Un message de service connu (« deleted »…) : le client montre son
+	// texte dans sa langue (PROTOCOLE.md §5.14).
+	System string `json:"system,omitempty"`
 	Media  string `json:"media,omitempty"`
 	FromMe bool   `json:"from_me"`
 	Sender string `json:"sender"`
@@ -124,7 +127,7 @@ type Message struct {
 }
 
 type Attachment struct {
-	MediaID string `json:"media_id"` // l'adresse mxc:// de l'image
+	MediaID string `json:"media_id"`      // l'adresse mxc:// de l'image
 	Key     []byte `json:"key,omitempty"` // inutilisé, jamais null (Reddit ne chiffre pas)
 	Mime    string `json:"mime"`
 	Name    string `json:"name"`

@@ -324,7 +324,7 @@ func convertir(ev mxEvent, conv, me string, nom func(string) string) (Message, b
 
 // retire : le message effacé (rédaction).
 func retire(m Message) Message {
-	m.Text = "Message retiré"
+	m.Text, m.System = "Message retiré", "deleted"
 	m.Kind = "admin"
 	m.Attachments = nil
 	m.Reactions = nil

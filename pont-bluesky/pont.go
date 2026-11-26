@@ -632,7 +632,7 @@ func (p *Pont) convert(conv string, m *msgView) Message {
 		out.Sender = p.personName(m.Sender.DID)
 	}
 	if m.deleted() {
-		out.Text = "🚫 Message retiré"
+		out.Text, out.System = "🚫 Message retiré", "deleted"
 		return out
 	}
 	out.Text = p.textOf(m)
