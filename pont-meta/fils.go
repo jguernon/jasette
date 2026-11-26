@@ -15,11 +15,13 @@ package main
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"slices"
 	"strings"
 	"time"
 
 	"go.mau.fi/mautrix-meta/pkg/messagix"
+	"go.mau.fi/mautrix-meta/pkg/messagix/graphql"
 	"go.mau.fi/mautrix-meta/pkg/messagix/socket"
 	"go.mau.fi/mautrix-meta/pkg/messagix/table"
 )
@@ -106,12 +108,74 @@ func (p *Pont) bilanListe(now int64) bilanListe {
 	return b
 }
 
-func (p *Pont) logBilan(etape string, recus bilanRecus) {
+// Toutes les lignes de fils reçues depuis le lancement, d'où qu'elles
+// viennent (réponses à nos demandes ou flux du socket) : de quoi voir, sans
+// nom ni contenu, si les fils chiffrés arrivent et avec quelle date.
+type compteurFils struct {
+	Remplaces, MisAJour      int // LSDeleteThenInsertThread, LSUpdateOrInsertThread
+	Chiffres, Normaux        int
+	Nouveaux, Rajeunis       int // fil inconnu jusque-là ; date d'activité avancée
+	ChiffresMois, ChiffresAn int // date de la ligne chiffrée : < 30 j, < 1 an
+	ChiffresVieux, SansDate  int // plus vieille ; aucune date
+	Douteux                  int // clé, type ou date invraisemblable (champs décalés ?)
+}
+
+const jourMs = int64(24 * 3600 * 1000)
+
+// Note une ligne de fil. À appeler avec p.mu.
+func (k *compteurFils) noter(remplace bool, cle int64, tt table.ThreadType, activite int64, nouveau, rajeuni bool, now int64) {
+	if remplace {
+		k.Remplaces++
+	} else {
+		k.MisAJour++
+	}
+	if nouveau {
+		k.Nouveaux++
+	}
+	if rajeuni {
+		k.Rajeunis++
+	}
+	if ligneDouteuse(cle, tt, activite, now) {
+		k.Douteux++
+	}
+	if !tt.IsWhatsApp() {
+		k.Normaux++
+		return
+	}
+	k.Chiffres++
+	switch {
+	case activite <= 0:
+		k.SansDate++
+	case activite > now-30*jourMs:
+		k.ChiffresMois++
+	case activite > now-365*jourMs:
+		k.ChiffresAn++
+	default:
+		k.ChiffresVieux++
+	}
+}
+
+// Une ligne de fil qu'un décalage des champs aurait abîmée : clé nulle,
+// type inconnu de messagix, date hors de 2004 .. demain.
+func ligneDouteuse(cle int64, tt table.ThreadType, activite, now int64) bool {
+	if cle <= 0 || tt <= table.UNKNOWN_THREAD_TYPE || tt > 1000 {
+		return true
+	}
+	return activite != 0 && (activite < 1072915200000 || activite > now+jourMs)
+}
+
+func (p *Pont) logBilan(etape string) {
 	p.mu.Lock()
 	b := p.bilanListe(time.Now().UnixMilli())
+	k := p.recus
 	p.mu.Unlock()
 	log.Info().Str("étape", etape).
-		Int("reçus_chiffrés", recus.Chiffres).Int("reçus_normaux", recus.Normaux).
+		Int("reçus_chiffrés", k.Chiffres).Int("reçus_normaux", k.Normaux).
+		Int("lignes_remplace", k.Remplaces).Int("lignes_maj", k.MisAJour).
+		Int("nouveaux", k.Nouveaux).Int("rajeunis", k.Rajeunis).
+		Int("chiffrés_30j", k.ChiffresMois).Int("chiffrés_1an", k.ChiffresAn).
+		Int("chiffrés_vieux", k.ChiffresVieux).Int("sans_date", k.SansDate).
+		Int("douteux", k.Douteux).
 		Int("fils", b.Total).Int("chiffrés", b.Chiffres).Int("cachés", b.Caches).
 		Int("montrés", b.Montres).Int("montrés_chiffrés", b.MontresChiffres).
 		Int("récents_30j", b.Recents).Int("récents_chiffrés", b.RecentsChiffres).
@@ -123,7 +187,7 @@ func (p *Pont) logBilan(etape string, recus bilanRecus) {
 
 // Redemande la première page du groupe 95 (la réponse de messagix est
 // perdue), et met à jour la plage pour la pagination qui suit.
-func (p *Pont) premierePageChiffree(cli *messagix.Client) (bilanRecus, error) {
+func (p *Pont) premierePageChiffree(cli *messagix.Client) {
 	gen := cli.ThreadRangeGeneration(groupeChiffre)
 	ctx, annule := context.WithTimeout(p.ctx, 45*time.Second)
 	tbl, err := cli.ExecuteTasks(ctx, &socket.FetchThreadsTask{
@@ -136,16 +200,76 @@ func (p *Pont) premierePageChiffree(cli *messagix.Client) (bilanRecus, error) {
 	})
 	annule()
 	if err != nil {
-		return bilanRecus{}, err
+		log.Warn().Err(err).Msg("fils chiffrés : première page")
+		return
 	}
 	recus := compteFils(tbl)
 	p.handleTable(tbl, false)
 	cli.PostHandlePublishResponse(tbl)
 	// La plage arrive parfois à part, par le flux du groupe 95.
 	ctx, annule = context.WithTimeout(p.ctx, 15*time.Second)
-	_ = cli.WaitForThreadRange(ctx, groupeChiffre, gen)
+	plage := cli.WaitForThreadRange(ctx, groupeChiffre, gen) == nil
 	annule()
-	return recus, nil
+	log.Info().Int("réponse_chiffrés", recus.Chiffres).Int("réponse_normaux", recus.Normaux).
+		Bool("plage_reçue", plage).Msg("fils Messenger : première page du groupe 95")
+}
+
+// L'instantané du groupe 95 par GraphQL, comme au chargement de la page
+// quand elle n'a pas de synchro (had_page_sync=false) : messagix le demande
+// aussi, mais n'en garde que les liens « fil ouvert -> fil chiffré ». Une
+// seule requête, sans toucher aux curseurs du flux.
+func (p *Pont) instantaneChiffre(cli *messagix.Client) {
+	version, params, ok := paramsSynchro(cli)
+	for essai := 0; !ok && essai < 5 && p.ctx.Err() == nil; essai++ {
+		// L'état n'est lisible qu'une fois le socket synchronisé.
+		time.Sleep(2 * time.Second)
+		version, params, ok = paramsSynchro(cli)
+	}
+	if !ok {
+		log.Info().Msg("fils Messenger : instantané du groupe 95 impossible (pas de paramètres)")
+		return
+	}
+	ctx, annule := context.WithTimeout(p.ctx, 45*time.Second)
+	tbl, err := cli.GetHTTP().MakeLSRequest(ctx, &graphql.LSPlatformGraphQLLightspeedVariables{
+		Database:          groupeChiffre,
+		Version:           version,
+		SyncParams:        &params,
+		LastAppliedCursor: nil,
+	}, 1)
+	annule()
+	if err != nil {
+		log.Warn().Err(err).Msg("fils chiffrés : instantané")
+		return
+	}
+	recus := compteFils(tbl)
+	p.handleTable(tbl, false)
+	log.Info().Int("réponse_chiffrés", recus.Chiffres).Int("réponse_normaux", recus.Normaux).
+		Int("liens_chiffrés", len(tbl.LSCreateOpenToE2EEThreadLink)+len(tbl.LSVerifyHybridThreadExists)).
+		Int("contacts", len(tbl.LSDeleteThenInsertContact)+len(tbl.LSVerifyContactRowExists)).
+		Msg("fils Messenger : instantané du groupe 95")
+}
+
+// La version et les paramètres de synchro « contact » (ceux que messagix
+// donne au groupe 95), lus dans l'état de messagix : rien n'est gardé ni
+// écrit dans le journal.
+func paramsSynchro(cli *messagix.Client) (int64, string, bool) {
+	raw, err := cli.DumpState()
+	if err != nil || raw == nil {
+		return 0, "", false
+	}
+	var etat struct {
+		Configs *struct {
+			VersionID          int64
+			BrowserConfigTable *struct {
+				LSPlatformMessengerSyncParams struct{ Contact string }
+			}
+		}
+	}
+	if json.Unmarshal(raw, &etat) != nil || etat.Configs == nil || etat.Configs.BrowserConfigTable == nil {
+		return 0, "", false
+	}
+	params := etat.Configs.BrowserConfigTable.LSPlatformMessengerSyncParams.Contact
+	return etat.Configs.VersionID, params, etat.Configs.VersionID != 0 && params != ""
 }
 
 // ---- Les noms qui manquent ----

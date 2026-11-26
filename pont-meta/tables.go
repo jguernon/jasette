@@ -77,9 +77,12 @@ func (p *Pont) handleTable(tbl *table.LSTable, initial bool) {
 	}
 
 	// Fils.
+	now := time.Now().UnixMilli()
 	for _, th := range tbl.LSDeleteThenInsertThread {
 		key := p.canon(th.ThreadKey)
+		_, connu := p.convs[idStr(key)]
 		c := p.getOrMakeConv(key, th.ThreadType)
+		p.recus.noter(true, th.ThreadKey, th.ThreadType, th.LastActivityTimestampMs, !connu, th.LastActivityTimestampMs > c.LastActivity, now)
 		if ancienFilOuvert(th.ThreadKey, key, th.LastActivityTimestampMs, c) {
 			// Le fil ouvert d'avant, remplacé par ce fil chiffré : il ne
 			// lui prend ni son nom, ni son aperçu, ni son dossier.
@@ -106,7 +109,9 @@ func (p *Pont) handleTable(tbl *table.LSTable, initial bool) {
 	}
 	for _, th := range tbl.LSUpdateOrInsertThread {
 		key := p.canon(th.ThreadKey)
+		_, connu := p.convs[idStr(key)]
 		c := p.getOrMakeConv(key, th.ThreadType)
+		p.recus.noter(false, th.ThreadKey, th.ThreadType, th.LastActivityTimestampMs, !connu, th.LastActivityTimestampMs > c.LastActivity, now)
 		if ancienFilOuvert(th.ThreadKey, key, th.LastActivityTimestampMs, c) {
 			c.ReadWM = max(c.ReadWM, th.LastReadWatermarkTimestampMs)
 			touched[idStr(key)] = true
@@ -125,9 +130,10 @@ func (p *Pont) handleTable(tbl *table.LSTable, initial bool) {
 		if th.FolderName != "" {
 			c.Folder = dossierNormal(th.FolderName)
 		}
-		if th.ParentThreadKey > 0 {
-			c.Parent = th.ParentThreadKey
-		}
+		// Pas de ParentThreadKey ici : Meta a ajouté une colonne avant elle
+		// (vers l'index 11..35), messagix lit à sa place ThemeFbid. Les
+		// champs 0 à 10 (date, aperçu, nom, image, clé, type, dossier)
+		// sont, eux, à leur place. Le parent vient de LSDeleteThenInsertThread.
 		c.LastActivity = max(c.LastActivity, th.LastActivityTimestampMs)
 		c.ReadWM = max(c.ReadWM, th.LastReadWatermarkTimestampMs)
 		c.Hidden = false

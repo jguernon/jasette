@@ -53,6 +53,7 @@ type Pont struct {
 	contacts   map[int64]*contact
 	threadMap  map[int64]int64 // fil Facebook « hybride » -> fil chiffré
 	openThread map[int64]int64 // fil ouvert (ancien) -> fil chiffré qui l'a remplacé
+	recus      compteurFils    // lignes de fils reçues depuis le lancement (diagnostic, fils.go)
 
 	tableMu  sync.Mutex
 	waiters  map[string][]chan struct{} // fil -> qui attend des messages
@@ -354,11 +355,14 @@ func (p *Pont) dropCookies() {
 func (p *Pont) periodicSave(ctx context.Context) {
 	t := time.NewTicker(10 * time.Minute)
 	defer t.Stop()
-	for {
+	for tour := 1; ; tour++ {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			if tour%6 == 0 {
+				p.resumeAvertissements() // une ligne par heure au plus
+			}
 			p.mu.Lock()
 			s := p.sess
 			p.mu.Unlock()
@@ -477,8 +481,7 @@ func (p *Pont) threadBackfill() {
 		}
 		return false
 	}
-	p.logBilan("cache", bilanRecus{})
-	var recus bilanRecus
+	p.logBilan("cache")
 	for _, groupe := range []int64{1, groupeChiffre} {
 		cle := "threads_done"
 		if groupe == groupeChiffre {
@@ -492,17 +495,18 @@ func (p *Pont) threadBackfill() {
 			if p.client() != cli {
 				return
 			}
-			b, err := p.premierePageChiffree(cli)
-			if err != nil {
-				log.Warn().Err(err).Msg("fils chiffrés : première page")
-				continue
+			p.instantaneChiffre(cli)
+			time.Sleep(time.Second)
+			if p.client() != cli {
+				return
 			}
-			recus.Chiffres += b.Chiffres
-			recus.Normaux += b.Normaux
+			p.premierePageChiffree(cli)
 			p.emitList()
 			time.Sleep(time.Second)
 		}
 		var prev int64
+		lots := 0
+		var total bilanRecus
 		for lot := 0; lot < limite; lot++ {
 			if p.client() != cli {
 				return
@@ -518,9 +522,10 @@ func (p *Pont) threadBackfill() {
 			if tbl == nil {
 				break
 			}
+			lots++
 			b := compteFils(tbl)
-			recus.Chiffres += b.Chiffres
-			recus.Normaux += b.Normaux
+			total.Chiffres += b.Chiffres
+			total.Normaux += b.Normaux
 			p.handleTable(tbl, false)
 			if groupe == groupeChiffre {
 				ctx, annule := context.WithTimeout(p.ctx, 30*time.Second)
@@ -533,14 +538,30 @@ func (p *Pont) threadBackfill() {
 			prev = ks.MinThreadKey
 			time.Sleep(time.Second)
 		}
+		ks := cli.GetSyncGroupKeyStore(groupe)
+		log.Info().Int64("groupe", groupe).Int("pages", lots).
+			Int("réponse_chiffrés", total.Chiffres).Int("réponse_normaux", total.Normaux).
+			Bool("plage_connue", ks != nil && ks.MinThreadKey != 0).Bool("encore", ks != nil && ks.HasMoreBefore).
+			Msg("fils Messenger : pages plus anciennes")
 		p.saveKV(cle, true)
 	}
-	p.logBilan("démarrage", recus)
+	p.logBilan("démarrage")
+	p.resumeAvertissements()
 	p.emitList()
 	p.mu.Lock()
 	n := p.listCount
 	p.mu.Unlock()
 	p.completerContacts(cli, n, 25)
+	// Les lignes poussées par le socket arrivent parfois après nos demandes.
+	select {
+	case <-time.After(2 * time.Minute):
+	case <-p.ctx.Done():
+		return
+	}
+	if p.client() == cli {
+		p.logBilan("après 2 min")
+		p.resumeAvertissements()
+	}
 }
 
 // ---- Les fils ----

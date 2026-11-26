@@ -144,3 +144,57 @@ func TestContactsManquants(t *testing.T) {
 		t.Errorf("manquants : %v", got)
 	}
 }
+
+// Toutes les lignes de fils comptent, celles de LSUpdateOrInsertThread
+// aussi (le flux du socket en envoie surtout de cette sorte).
+func TestCompteurFils(t *testing.T) {
+	p := pontDeTest(t)
+	now := time.Now().UnixMilli()
+	p.convs["60"] = &convState{Key: 60, Type: table.ONE_TO_ONE, Folder: "inbox", LastActivity: now - 500*jourMs}
+	p.handleTable(&table.LSTable{
+		LSUpdateOrInsertThread: []*table.LSUpdateOrInsertThread{
+			{ThreadKey: 60, ThreadType: table.ONE_TO_ONE, LastActivityTimestampMs: now - 100*jourMs},
+			{ThreadKey: 70, ThreadType: table.ENCRYPTED_OVER_WA_ONE_TO_ONE, LastActivityTimestampMs: now - 4*jourMs},
+			{ThreadKey: 71, ThreadType: table.ENCRYPTED_OVER_WA_ONE_TO_ONE, LastActivityTimestampMs: now - 900*jourMs},
+			{ThreadKey: 72, ThreadType: table.ENCRYPTED_OVER_WA_ONE_TO_ONE},
+		},
+		LSDeleteThenInsertThread: []*table.LSDeleteThenInsertThread{
+			{ThreadKey: 73, ThreadType: table.ENCRYPTED_OVER_WA_GROUP, LastActivityTimestampMs: now - 40*jourMs},
+			{ThreadKey: 74, ThreadType: 9999, LastActivityTimestampMs: 5},
+		},
+	}, false)
+	k := p.recus
+	attendu := compteurFils{
+		Remplaces: 2, MisAJour: 4, Chiffres: 4, Normaux: 2, Nouveaux: 5, Rajeunis: 5,
+		ChiffresMois: 1, ChiffresAn: 1, ChiffresVieux: 1, SansDate: 1, Douteux: 1,
+	}
+	if k != attendu {
+		t.Errorf("compteur\n %+v\nattendu\n %+v", k, attendu)
+	}
+	if c := p.convs["70"]; c == nil || c.LastActivity != now-4*jourMs || c.Hidden || !c.Type.IsWhatsApp() {
+		t.Errorf("fil chiffré par LSUpdateOrInsertThread : %+v", c)
+	}
+}
+
+func TestLigneDouteuse(t *testing.T) {
+	now := time.Now().UnixMilli()
+	cas := []struct {
+		cle      int64
+		tt       table.ThreadType
+		activite int64
+		douteuse bool
+	}{
+		{1, table.ONE_TO_ONE, now - jourMs, false},
+		{1, table.ENCRYPTED_OVER_WA_ONE_TO_ONE, 0, false},
+		{0, table.ONE_TO_ONE, now, true},
+		{1, table.UNKNOWN_THREAD_TYPE, now, true},
+		{1, 16384, now, true},
+		{1, table.ONE_TO_ONE, 1234, true},
+		{1, table.ONE_TO_ONE, now + 2*jourMs, true},
+	}
+	for _, c := range cas {
+		if d := ligneDouteuse(c.cle, c.tt, c.activite, now); d != c.douteuse {
+			t.Errorf("%+v : %v", c, d)
+		}
+	}
+}

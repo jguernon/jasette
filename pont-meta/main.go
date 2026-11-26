@@ -267,6 +267,7 @@ func main() {
 	log = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr, NoColor: true}).Level(level).With().Timestamp().Str("pont", "meta").Logger()
 	// Certaines parties de messagix journalisent avec le journal par défaut.
 	zerolog.DefaultContextLogger = &log
+	filtrerBruitMessagix(os.Stderr)
 
 	ctx, cancel := context.WithCancel(log.WithContext(context.Background()))
 	defer cancel()
