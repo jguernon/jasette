@@ -172,7 +172,7 @@ fun BarreCreer(choix: ChoixNouveau, nom: String, changerNom: (String) -> Unit, c
     ) {
         if (ChoixNouveau.nommeGroupes(s)) {
             Box(
-                Modifier.weight(1f).carte(14.dp).padding(horizontal = 14.dp, vertical = 11.dp),
+                Modifier.weight(1f).champRond().padding(horizontal = 12.dp, vertical = 10.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 if (nom.isEmpty()) Text(t("Nom du groupe (facultatif)"), color = P.textePale, fontSize = 15.sp, maxLines = 1)

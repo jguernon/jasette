@@ -861,6 +861,12 @@ fn verre(opacite: f32, r: f32) -> Div {
     }
     div().bg(blanc(opacite)).border_1().border_color(blanc(0.75)).rounded(rayon(r))
 }
+/// Le fond, le contour et le rayon communs des champs de saisie arrondis
+/// (recherche, nouveau message, nom du groupe, « Quoi de neuf ? », réglages,
+/// connexion des services) : une pilule, carrée en EGA et en Sirène (`verre`).
+fn champ_rond() -> Div {
+    verre(0.7, 999.).when(th().sombre, |d| d.bg(th().champ))
+}
 /// Le dégradé bleu-violet du verre ; en sombre, le bleu plat ; en EGA, le
 /// bleu EGA (#0000AA) des remplissages de Claude.
 fn degrade_accent() -> gpui::Background {
@@ -3735,8 +3741,8 @@ impl Jasette {
                     .flex_row()
                     .items_center()
                     .gap(px(8.))
-                    .child(verre(0.8, 999.).w(px(110.)).flex_none().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.api_id_tg).appearance(false)))
-                    .child(verre(0.8, 999.).flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.api_hash_tg).appearance(false)))
+                    .child(champ_rond().w(px(110.)).flex_none().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.api_id_tg).appearance(false)))
+                    .child(champ_rond().flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.api_hash_tg).appearance(false)))
                     .child(bouton_texte("tg-api", t("Enregistrer"), ACCENT).on_click(cx.listener(|this, _, window, cx| {
                         this.tg_enregistrer_api(window, cx);
                         cx.notify();
@@ -5903,8 +5909,7 @@ impl Jasette {
             );
         let champ = |etat: &Entity<InputState>, nom: &'static str| {
             div().px(px(14.)).pb(px(10.)).child(
-                verre(0.7, 999.)
-                    .when(th().sombre, |d| d.bg(th().champ))
+                champ_rond()
                     .flex()
                     .flex_row()
                     .items_center()
@@ -10283,7 +10288,7 @@ impl Jasette {
         let titre = |texte: &'static str| {
             div().pt(px(22.)).pb(px(12.)).text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).text_color(th().texte).child(t(texte))
         };
-        let champ_serveur = |e: &Entity<InputState>| verre(0.8, 999.).pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
+        let champ_serveur = |e: &Entity<InputState>| champ_rond().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
         match mode {
             m if self.choix_client && m != "client" => {
                 let mut boite = div().flex().flex_col().gap(px(10.)).p(px(16.));
@@ -10555,7 +10560,7 @@ impl Jasette {
                         .child(div().text_size(px(12.)).text_color(th().texte).child(t(
                             "Pour voir l'historique chiffré, entrez le NIP de Messenger (celui choisi dans l'app).",
                         )))
-                        .child(verre(0.8, 999.).pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.nip).appearance(false))),
+                        .child(champ_rond().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.nip).appearance(false))),
                 )
             })
     }
@@ -10736,7 +10741,7 @@ impl Jasette {
                             .items_center()
                             .gap(px(8.))
                             .child(
-                                verre(0.8, 999.)
+                                champ_rond()
                                     .flex_1()
                                     .pl(px(14.))
                                     .pr(px(6.))
@@ -10767,7 +10772,7 @@ impl Jasette {
                 );
             }
             Service::Bluesky => {
-                let champ = |e: &Entity<InputState>| verre(0.8, 999.).w_full().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
+                let champ = |e: &Entity<InputState>| champ_rond().w_full().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
                 if matches!(compte.etat, Etat::Association | Etat::Connexion) {
                     carte = carte.child(attente("Connexion…"));
                 } else {
@@ -10797,7 +10802,7 @@ impl Jasette {
                 }
             }
             Service::Discord => {
-                let champ = |e: &Entity<InputState>| verre(0.8, 999.).flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
+                let champ = |e: &Entity<InputState>| champ_rond().flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
                 if let Some(nom) = &self.qr_lu_dc {
                     // Lu par le téléphone : Discord y demande de confirmer.
                     let qui = if nom.is_empty() { String::new() } else { format!(" ({nom})") };
@@ -10851,7 +10856,7 @@ impl Jasette {
                 }
             }
             Service::Telegram => {
-                let champ = |e: &Entity<InputState>| verre(0.8, 999.).flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
+                let champ = |e: &Entity<InputState>| champ_rond().flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(e).appearance(false));
                 let rangee = || div().w_full().flex().flex_row().items_center().gap(px(8.));
                 if self.api_tg != Some(true) {
                     carte = carte.child(self.bloc_api_telegram(cx).px(px(0.)));
@@ -10926,7 +10931,7 @@ impl Jasette {
                                 .flex_row()
                                 .items_center()
                                 .gap(px(8.))
-                                .child(verre(0.8, 999.).flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.code_x).appearance(false)))
+                                .child(champ_rond().flex_1().pl(px(14.)).pr(px(6.)).py(px(1.)).child(Input::new(&self.code_x).appearance(false)))
                                 .child(bouton_texte("x-continuer", t("Continuer"), ACCENT).on_click(cx.listener(|this, _, window, cx| {
                                     this.envoyer_code_x(window, cx);
                                     cx.notify();

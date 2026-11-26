@@ -393,7 +393,7 @@ private fun Champ(
     icone: androidx.compose.ui.graphics.vector.ImageVector?,
 ) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp).carte(20.dp)
+        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp).champRond()
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

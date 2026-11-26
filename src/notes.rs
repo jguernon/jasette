@@ -766,7 +766,7 @@ impl Jasette {
         }
         carte = carte
             .child(
-                verre(0.8, 999.)
+                champ_rond()
                     .flex()
                     .flex_row()
                     .items_center()

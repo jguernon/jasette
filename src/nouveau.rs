@@ -403,8 +403,7 @@ impl Jasette {
         let mut bas = div().flex().flex_row().items_center().gap(px(8.)).pb(px(8.)).h(px(46.));
         if svc.nomme_groupes() {
             bas = bas.child(
-                verre(0.7, 999.)
-                    .when(th().sombre, |d| d.bg(th().champ))
+                champ_rond()
                     .flex_1()
                     .min_w(px(0.))
                     .pl(px(12.))

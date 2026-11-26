@@ -1,5 +1,8 @@
 package ca.jasette.android.ui
 
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,8 +21,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -84,20 +85,26 @@ fun BulleQuoiDeNeuf() {
         } else {
             Text(t("Aucune note pour l'instant."), color = P.textePale, fontSize = 13.sp)
         }
-        OutlinedTextField(
-            texte, { texte = it },
-            placeholder = { Text(t("Partage une pensée…")) },
-            supportingText = {
-                Text(
-                    if (choisis.isEmpty()) t("Aucun service compatible connecté.")
-                    else "$reste ${t("caractères restants")}",
-                    color = if (reste < 0) P.danger else P.textePale,
-                )
-            },
-            isError = reste < 0,
-            maxLines = 3,
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent),
-            modifier = Modifier.fillMaxWidth(),
+        // Le champ rond commun (champRond, Theme.kt) ; sur trois lignes, il garde son rayon.
+        Box(
+            Modifier.fillMaxWidth().champRond()
+                .let { if (reste < 0) it.border(1.dp, P.danger, formeChamp) else it }
+                .padding(horizontal = 16.dp, vertical = 11.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            if (texte.isEmpty()) Text(t("Partage une pensée…"), color = P.textePale, fontSize = 15.sp, maxLines = 1)
+            BasicTextField(
+                texte, { texte = it }, maxLines = 3,
+                textStyle = TextStyle(color = P.texteFort, fontSize = 15.sp, fontFamily = P.police),
+                cursorBrush = SolidColor(P.accent),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Text(
+            if (choisis.isEmpty()) t("Aucun service compatible connecté.")
+            else "$reste ${t("caractères restants")}",
+            color = if (reste < 0) P.danger else P.textePale, fontSize = 12.sp,
+            modifier = Modifier.padding(horizontal = 16.dp),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Button(

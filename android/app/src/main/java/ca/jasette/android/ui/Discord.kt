@@ -120,6 +120,7 @@ fun AssociationDiscord(fini: () -> Unit) {
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            shape = formeChamp,
                             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent),
                             modifier = Modifier.fillMaxWidth(),
                         )

@@ -1074,7 +1074,7 @@ private fun Saisie(conv: String, actif: Boolean) {
             // Hauteur minimale : exactement celle du + (et du bouton de droite), texte
             // centré ; sur plusieurs lignes, la pastille grandit comme avant.
             Row(
-                Modifier.weight(1f).heightIn(min = HAUT_SAISIE).carte(HAUT_SAISIE / 2)
+                Modifier.weight(1f).champRond()
                     .padding(start = 12.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -1338,7 +1338,7 @@ private fun BarreRecherche(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
-            Modifier.weight(1f).heightIn(min = 40.dp).carte(20.dp)
+            Modifier.weight(1f).champRond()
                 .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

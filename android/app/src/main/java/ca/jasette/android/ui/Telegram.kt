@@ -142,6 +142,7 @@ fun ApiTelegram() {
             label = { Text("api_id") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            shape = formeChamp,
             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent),
             modifier = Modifier.fillMaxWidth(),
         )
@@ -151,6 +152,7 @@ fun ApiTelegram() {
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            shape = formeChamp,
             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent),
             modifier = Modifier.fillMaxWidth(),
         )
@@ -182,6 +184,7 @@ private fun EtapeNumero() {
             placeholder = { Text("+1 514 555 1234") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+            shape = formeChamp,
             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent),
             modifier = Modifier.fillMaxWidth(),
         )
@@ -210,6 +213,7 @@ private fun EtapeCode() {
             label = { Text(t("Code")) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            shape = formeChamp,
             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent),
             modifier = Modifier.fillMaxWidth(),
         )
@@ -237,6 +241,7 @@ private fun EtapeMotDePasse() {
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            shape = formeChamp,
             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent),
             modifier = Modifier.fillMaxWidth(),
         )

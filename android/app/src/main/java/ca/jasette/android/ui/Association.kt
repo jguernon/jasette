@@ -210,6 +210,7 @@ private fun EtapeTelephone() {
                 placeholder = { Text("+1 514 555 1234") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                shape = formeChamp,
                 colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent),
                 modifier = Modifier.fillMaxWidth(),
             )

@@ -278,6 +278,7 @@ private fun CodeXChat(cookies: Map<String, String>, fini: () -> Unit) {
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    shape = formeChamp,
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent),
                 )
                 Button(

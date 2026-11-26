@@ -1,5 +1,6 @@
 package ca.jasette.android.ui
 
+import androidx.compose.foundation.layout.heightIn
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.activity.ComponentActivity
@@ -469,6 +470,21 @@ fun Modifier.carte(r: Dp, fond: Color = P.surface, bord: Color = P.bordCarte): M
     val f = forme(r)
     return clip(f).background(fond).let { if (bord.alpha > 0f) it.border(1.dp, bord, f) else it }
 }
+
+/**
+ * Le rayon commun des champs de saisie (barre d'écriture, recherche, nouveau
+ * message, « Quoi de neuf ? », réglages…) : une pilule de [HAUT_CHAMP] ; sur
+ * plusieurs lignes, le même rayon, comme la barre d'écriture qui grandit.
+ * Carré en EGA et en Sirène (via [forme]).
+ */
+val HAUT_CHAMP = 44.dp
+val RAYON_CHAMP = HAUT_CHAMP / 2
+
+/** La forme des champs (aussi pour les OutlinedTextField). */
+val formeChamp: Shape get() = forme(RAYON_CHAMP)
+
+/** Le fond, le contour, la hauteur et le rayon communs des champs arrondis. */
+fun Modifier.champRond(): Modifier = heightIn(min = HAUT_CHAMP).carte(RAYON_CHAMP)
 
 /** Une barre flottante : ombre douce, ou fenêtre EGA cadrée à ombre portée dure. */
 fun Modifier.flottant(r: Dp): Modifier {

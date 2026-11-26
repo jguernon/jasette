@@ -717,7 +717,7 @@ private fun ChampFiltre(texte: String, focaliser: Boolean, changer: (String) -> 
     val demande = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { if (focaliser) runCatching { demande.requestFocus() } }
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).carte(20.dp)
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).champRond()
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -801,8 +801,8 @@ private fun NouveauMessage(fermer: () -> Unit, ouvrir: (String) -> Unit) {
             LazyColumn(Modifier.fillMaxSize().padding(marges).imePadding().ombreHaut(etatContacts), state = etatContacts) {
                 item {
                     Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).carte(14.dp)
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).champRond()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(t("À :"), color = P.textePale, fontSize = 16.sp)

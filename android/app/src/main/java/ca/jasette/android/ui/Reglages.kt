@@ -925,6 +925,7 @@ private fun FormulaireClient(occupe: Boolean) {
                     placeholder = { Text(t("nom ou IP (port 47800 par défaut)")) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    shape = formeChamp,
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent),
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -934,6 +935,7 @@ private fun FormulaireClient(occupe: Boolean) {
                     singleLine = true,
                     // Pas « mot de passe » : un code à usage unique, que les gestionnaires n'ont pas à retenir.
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, autoCorrectEnabled = false),
+                    shape = formeChamp,
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent),
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -1003,6 +1005,7 @@ private fun Nip() {
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            shape = formeChamp,
             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = P.accent, cursorColor = P.accent),
         )
         Depot.erreurNip?.let { Text(it, color = P.danger, fontSize = 13.sp) }
