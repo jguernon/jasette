@@ -113,6 +113,12 @@ fun App(activite: Activity, prive: Boolean = false) {
     fun aller(e: Ecran) {
         pile = pile + e
     }
+    // La section des Réglages à ouvrir d'emblée (null : la liste des sections).
+    var sectionReglages by remember { mutableStateOf<SectionReglages?>(null) }
+    fun ouvrirReglages(s: SectionReglages?) {
+        sectionReglages = s
+        aller(Ecran.Reglages)
+    }
     fun retour() {
         if (pile.size > 1) pile = pile.dropLast(1) else if (ouverte != null && !volets) ouverte = null
     }
@@ -158,7 +164,7 @@ fun App(activite: Activity, prive: Boolean = false) {
             ouvrir = { ouverte = it },
             retiree = { if (ouverte == it) ouverte = null },
             choisirVue = ::choisirVue,
-            reglages = { aller(Ecran.Reglages) },
+            reglages = ::ouvrirReglages,
             verrouiller = if (prive) ({ ca.jasette.android.Prive.verrouiller() }) else null,
             serveur = { aller(Ecran.Serveur) },
             connecter = { s, p -> aller(Ecran.Connexion(s, p)) },
@@ -179,7 +185,12 @@ fun App(activite: Activity, prive: Boolean = false) {
                 vue = vue,
                 enReglages = ecran == Ecran.Reglages || ecran == Ecran.Serveur,
                 choisir = ::choisirVue,
-                reglages = { if (ecran != Ecran.Reglages) pile = listOf(Ecran.Liste, Ecran.Reglages) },
+                reglages = {
+                    if (ecran != Ecran.Reglages) {
+                        sectionReglages = null
+                        pile = listOf(Ecran.Liste, Ecran.Reglages)
+                    }
+                },
             )
         }
         Box(Modifier.weight(1f).fillMaxHeight()) {
@@ -197,7 +208,7 @@ fun App(activite: Activity, prive: Boolean = false) {
                                     key(id) {
                                         Fil(
                                             activite, id, retour = { ouverte = null }, volet = true, retiree = { ouverte = null },
-                                            reglages = { aller(Ecran.Reglages) },
+                                            reglages = { ouvrirReglages(SectionReglages.COMPTES) },
                                         )
                                     }
                                 } else {
@@ -206,7 +217,7 @@ fun App(activite: Activity, prive: Boolean = false) {
                             }
                         }
                         id != null -> key(id) {
-                            Fil(activite, id, retour = { ouverte = null }, retiree = { ouverte = null }, reglages = { aller(Ecran.Reglages) })
+                            Fil(activite, id, retour = { ouverte = null }, retiree = { ouverte = null }, reglages = { ouvrirReglages(SectionReglages.COMPTES) })
                         }
                         else -> liste()
                     }
@@ -215,6 +226,8 @@ fun App(activite: Activity, prive: Boolean = false) {
                     retour = ::retour,
                     connecter = { s, p -> aller(Ecran.Connexion(s, p)) },
                     serveur = { aller(Ecran.Serveur) },
+                    section = sectionReglages,
+                    choisir = { sectionReglages = it },
                 )
                 Ecran.Serveur -> ServeurJasette(retour = ::retour)
                 // WhatsApp et Signal : code QR ou code à taper ; les autres : la fenêtre web (X : puis son code).
@@ -279,7 +292,7 @@ private fun Liste(
     ouvrir: (String) -> Unit,
     retiree: (String) -> Unit,
     choisirVue: (Vue) -> Unit,
-    reglages: () -> Unit,
+    reglages: (SectionReglages?) -> Unit,
     verrouiller: (() -> Unit)?,
     serveur: () -> Unit,
     connecter: (Service, String) -> Unit,
@@ -368,7 +381,7 @@ private fun Liste(
                         IconButton(onClick = verrouiller) { Icon(Icons.Filled.Lock, t("Verrouiller"), tint = P.iconeBarre) }
                     } else if (!large) {
                         // Sur grand écran, les réglages sont en bas du rail.
-                        IconButton(onClick = reglages) { Icon(Icons.Filled.Settings, t("Réglages"), tint = P.iconeBarre) }
+                        IconButton(onClick = { reglages(null) }) { Icon(Icons.Filled.Settings, t("Réglages"), tint = P.iconeBarre) }
                     }
                 },
                 colors = barreCouleurs(),
@@ -478,7 +491,8 @@ private fun Liste(
             state = etatListe,
             contentPadding = margesBas,
         ) {
-            item { Bannieres(reglages) }
+            // Les bannières (NIP Messenger, aucun service sur le serveur) mènent à Comptes.
+            item { Bannieres { reglages(SectionReglages.COMPTES) } }
             if (vue == Vue.Tout && accueilVisible()) item { Accueil(serveur, connecter) }
             val vide = when {
                 visibles.isNotEmpty() || cachees > 0 -> null

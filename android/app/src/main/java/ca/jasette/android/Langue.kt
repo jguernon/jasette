@@ -366,6 +366,13 @@ private val ANGLAIS: Map<String, String> = mapOf(
     // Réglages → Gestes : les glissements sur les conversations de la liste.
     "Gestes" to "Gestures",
     "Conversations" to "Conversations",
+    // Réglages en sections (comme au bureau).
+    "Notifications" to "Notifications",
+    "1 connecté" to "1 connected",
+    "connectés" to "connected",
+    "Dans la boîte de réception" to "In the inbox",
+    "Notifications d'Android" to "Android notifications",
+    "Sons, vibrations, bulles et notifications sur l'écran verrouillé se règlent dans Android." to "Sounds, vibration, bubbles and lock screen notifications are set in Android.",
     "Garder les conversations archivées hors de la boîte de réception" to "Keep archived conversations out of the inbox",
     "Un nouveau message ne les ramène plus dans la boîte de réception." to "A new message no longer brings them back to the inbox.",
     "Cacher les conversations plus anciennes de la boîte de réception" to "Hide older conversations from the inbox",

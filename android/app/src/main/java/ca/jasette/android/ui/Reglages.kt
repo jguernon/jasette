@@ -68,137 +68,354 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.runtime.key
 
-/** Les réglages : les comptes (connecter, déconnecter) et le NIP Messenger. */
-/** Les réglages : les comptes (ou le serveur Jasette), le mode, la langue, l'icône. */
-@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+/**
+ * Les sections des Réglages, dans l'ordre du bureau (`enum Section` de
+ * src/main.rs), plus « Conversations », propre à Android : couleur de la
+ * tuile (et son équivalent EGA, comme `ega_fond` du bureau).
+ */
+enum class SectionReglages(val nom: String, val couleur: Long, val couleurEga: Long) {
+    COMPTES("Comptes", 0x8b5cf6, 0xaa00aa),
+    NOTIFICATIONS("Notifications", 0x16a34a, 0x00aa00),
+    APPARENCE("Apparence", 0xec4899, 0xaa00aa),
+    CONVERSATIONS("Conversations", 0x14b8a6, 0x00aaaa),
+    SERVEUR("Serveur Jasette", 0x8b5cf6, 0xaa00aa),
+    PRIVE("Liste privée", 0xf59e0b, 0xaa5500),
+    LANGUE("Langue", 0x0ea5e9, 0x00aaaa),
+    APROPOS("À propos", 0x64748b, 0x555555),
+}
+
+private fun iconeSection(s: SectionReglages): androidx.compose.ui.graphics.vector.ImageVector = when (s) {
+    SectionReglages.COMPTES -> Icones.arobase
+    SectionReglages.NOTIFICATIONS -> Icons.Filled.Notifications
+    SectionReglages.APPARENCE -> Icones.palette
+    SectionReglages.CONVERSATIONS -> Icones.forum
+    SectionReglages.SERVEUR -> Icones.serveur
+    SectionReglages.PRIVE -> Icons.Filled.Lock
+    SectionReglages.LANGUE -> Icones.langue
+    SectionReglages.APROPOS -> Icons.Filled.Info
+}
+
+/** Le petit résumé à droite d'une section (« 8 connectés », la version…), ou null. */
+private fun resumeSection(s: SectionReglages): String? = when (s) {
+    SectionReglages.COMPTES -> Depot.services.count { Depot.etat(it).associe }.let { n ->
+        if (n == 1) t("1 connecté") else "$n ${t("connectés")}"
+    }
+    SectionReglages.CONVERSATIONS -> ca.jasette.android.Marques.cacherApresJours.takeIf { it > 0 }?.let { nomCacherApres(it) }
+    SectionReglages.SERVEUR -> Depot.serveur?.adresse ?: t("Sur cet appareil")
+    SectionReglages.LANGUE -> when (Langue.choix) {
+        "fr" -> "Français"
+        "en" -> "English"
+        else -> t("Automatique")
+    }
+    SectionReglages.APROPOS -> ca.jasette.android.MiseAJour.nomInstalle.takeIf { it.isNotEmpty() }
+    else -> null
+}
+
+/**
+ * Les réglages, en sections comme au bureau : d'abord la liste des sections
+ * (icône et couleur, un résumé à droite), un toucher ouvre la page de la
+ * section (flèche ou geste de retour : la liste). Sur grand écran en deux
+ * volets ([Marques.deuxVolets]) : la liste à gauche, la section à droite.
+ * [section] : la section ouverte (null : la liste), gardée par [App] pour
+ * survivre à un écran de connexion ; une bannière, un fil hors ligne y mettent
+ * Comptes d'emblée. [choisir] la change.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun Reglages(retour: () -> Unit, connecter: (Service, String) -> Unit, serveur: () -> Unit) {
-    val ctx = LocalContext.current
-    val demanderSms = rememberDemandeSms()
+fun Reglages(
+    retour: () -> Unit,
+    connecter: (Service, String) -> Unit,
+    serveur: () -> Unit,
+    section: SectionReglages? = null,
+    choisir: (SectionReglages?) -> Unit = {},
+) {
+    val largeur = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp
+    val volets = largeur >= LARGEUR_RAIL && ca.jasette.android.Marques.deuxVolets
+    // « Serveur Jasette » a son propre écran (aussi ouvert par l'accueil).
+    fun ouvrir(s: SectionReglages) {
+        if (s == SectionReglages.SERVEUR) serveur() else choisir(s)
+    }
+    // Téléphone : le retour d'une section ramène à la liste des sections.
+    BackHandler(enabled = !volets && section != null) { choisir(null) }
+    val dansSection = !volets && section != null
     Scaffold(
         containerColor = P.ecran,
         topBar = {
             BarreHaut(
-                navigationIcon = { IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Filled.ArrowBack, t("Retour")) } },
-                title = { Text(t("Réglages"), fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = { if (dansSection) choisir(null) else retour() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, t("Retour"))
+                    }
+                },
+                title = { Text(if (dansSection) t(section.nom) else t("Réglages"), fontWeight = FontWeight.Bold) },
                 colors = barreCouleurs(),
             )
         },
     ) { marges ->
-        Column(
-            Modifier.fillMaxSize().padding(marges).verticalScroll(rememberScrollState()).navigationBarsPadding()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text(t("Comptes"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            val cfg = Depot.serveur
-            if (cfg != null) {
-                // Mode client : les services se connectent sur le serveur, pas ici.
-                CarteServeur(cfg.adresse)
-                Depot.emoji?.let { e -> BandeauEmoji(e) }
-                if (Depot.besoinNip) Nip()
-            } else {
-                // Sur cet appareil : les ponts embarqués dans l'APK (WhatsApp, Signal
-                // et X seulement si leur pont a été compilé, voir Depot.services).
-                for (s in Depot.services) {
-                    // Google Messages, mode autonome : ou bien les SMS du téléphone (PontSms).
-                    val noteSms = if (s == Service.GOOGLE && (Depot.smsActif || !Depot.etat(s).associe)) {
-                        t("SMS et MMS de cet appareil, sans compte Google. Les messages RCS (chat) restent dans l'app Messages.")
-                    } else {
-                        null
-                    }
-                    Carte(s, noteSms) {
-                        val etat = Depot.etat(s)
-                        if (etat.associe || etat == Etat.ASSOCIATION) {
-                            OutlinedButton(shape = formeBouton, onClick = { Depot.deconnecter(s) }) { Text(t("Déconnecter"), color = P.danger) }
-                        } else {
-                            when (s) {
-                                Service.GOOGLE -> {
-                                    BoutonAccent(t("Se connecter")) {
-                                        // Les SMS étaient choisis (accès retiré depuis) : retour au pont Google.
-                                        if (Depot.modeSms) Depot.utiliserSms(ctx, false)
-                                        connecter(s, "google")
-                                    }
-                                    OutlinedButton(shape = formeBouton, onClick = demanderSms) { Text(t("Utiliser les SMS du téléphone")) }
-                                }
-                                Service.MESSENGER -> {
-                                    BoutonAccent(t("Avec Messenger")) { connecter(s, "messenger") }
-                                    OutlinedButton(shape = formeBouton, onClick = { connecter(s, "facebook") }) { Text(t("Avec Facebook")) }
-                                }
-                                Service.INSTAGRAM -> BoutonAccent(t("Se connecter")) { connecter(s, "instagram") }
-                                // WhatsApp : par numéro de téléphone (défaut) ou code QR (Association.kt).
-                                Service.WHATSAPP -> {
-                                    BoutonAccent(t("Avec un numéro de téléphone")) { connecter(s, "telephone") }
-                                    OutlinedButton(shape = formeBouton, onClick = { connecter(s, "qr") }) { Text(t("Code QR")) }
-                                }
-                                Service.SIGNAL -> BoutonAccent(t("Lier avec un code QR")) { connecter(s, "qr") }
-                                // X : la fenêtre web de x.com, puis le code X Chat (Connexion.kt).
-                                Service.X -> BoutonAccent(t("Se connecter")) { connecter(s, "x") }
-                                // Telegram : numéro et code, ou code QR (Telegram.kt).
-                                Service.TELEGRAM -> BoutonAccent(t("Se connecter")) { connecter(s, "") }
-                                // Bluesky : identifiant et mot de passe d'app (Bluesky.kt).
-                                Service.BLUESKY -> BoutonAccent(t("Se connecter")) { connecter(s, "") }
-                            }
-                        }
-                    }
-                    if (s == Service.GOOGLE) Depot.emoji?.let { e -> BandeauEmoji(e) }
-                    if (s == Service.MESSENGER && Depot.besoinNip) Nip()
-                    // Telegram pas encore connecté : son application (api_id, api_hash).
-                    if (s == Service.TELEGRAM && !Depot.etat(s).associe) ApiTelegram()
+        if (volets) {
+            // Deux volets : la section choisie (Comptes par défaut) à droite.
+            val montree = section ?: SectionReglages.COMPTES
+            Row(Modifier.fillMaxSize().padding(marges)) {
+                Column(
+                    Modifier.width(320.dp).fillMaxHeight().verticalScroll(rememberScrollState()).navigationBarsPadding()
+                        .padding(16.dp),
+                ) {
+                    ListeSections(choisie = montree, chevrons = false, ouvrir = ::ouvrir)
+                }
+                androidx.compose.material3.VerticalDivider(color = P.traitFin)
+                key(montree) {
+                    PageSection(montree, Modifier.weight(1f).fillMaxHeight(), connecter, serveur)
                 }
             }
-            Depot.erreur?.let { Text(it, color = P.danger, fontSize = 14.sp) }
+        } else if (section != null) {
+            key(section) { PageSection(section, Modifier.fillMaxSize().padding(marges), connecter, serveur) }
+        } else {
+            Column(
+                Modifier.fillMaxSize().padding(marges).verticalScroll(rememberScrollState()).navigationBarsPadding()
+                    .padding(16.dp),
+            ) {
+                ListeSections(choisie = null, chevrons = true, ouvrir = ::ouvrir)
+            }
+        }
+    }
+}
 
-            Spacer(Modifier.height(12.dp))
-            Text(t("Serveur Jasette"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Groupe {
-                ChoixRangee(
-                    icone = Icons.Filled.Home,
-                    titre = if (cfg != null) t("Utiliser mon serveur Jasette") else t("Sur cet appareil"),
-                    detail = if (cfg != null) cfg.adresse else t("Jasette se connecte elle-même à chaque service."),
-                    actif = false,
-                    chevron = true,
-                    onClick = serveur,
+/** La liste des sections : une tuile de couleur avec son icône, le nom, le résumé. */
+@Composable
+private fun ListeSections(choisie: SectionReglages?, chevrons: Boolean, ouvrir: (SectionReglages) -> Unit) {
+    Groupe {
+        SectionReglages.entries.forEachIndexed { i, s ->
+            if (i > 0) androidx.compose.material3.HorizontalDivider(Modifier.padding(start = 60.dp), color = P.traitFin)
+            Row(
+                Modifier.fillMaxWidth()
+                    .let { if (s == choisie) it.background(P.choisi) else it }
+                    .clickable { ouvrir(s) }
+                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(32.dp).clip(forme(9.dp)).background(couleur(if (P.ega) s.couleurEga else s.couleur)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(iconeSection(s), null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(19.dp))
+                }
+                Spacer(Modifier.width(14.dp))
+                Text(
+                    t(s.nom), color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                resumeSection(s)?.let {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        it, color = P.textePale, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 150.dp),
+                    )
+                }
+                if (chevrons || s == SectionReglages.SERVEUR) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = P.textePale)
+                }
+            }
+        }
+    }
+}
+
+/** La page d'une section : ses réglages, sur leur propre défilement. */
+@Composable
+private fun PageSection(
+    s: SectionReglages,
+    modifier: Modifier,
+    connecter: (Service, String) -> Unit,
+    serveur: () -> Unit,
+) {
+    Column(
+        modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        when (s) {
+            SectionReglages.COMPTES -> SectionComptes(connecter)
+            SectionReglages.NOTIFICATIONS -> SectionNotifications()
+            SectionReglages.APPARENCE -> {
+                ChoixTheme()
+                ChoixTeinte()
+                ChoixGrilleHead()
+                ChoixTailleMessages()
+                ChoixHeures()
+                ChoixApercus()
+                ChoixContacts()
+                ChoixVolets()
+                Spacer(Modifier.height(4.dp))
+                Titre(t("Icône de l'app"))
+                ChoixIcone()
+            }
+            SectionReglages.CONVERSATIONS -> {
+                ChoixGarderArchives()
+                ChoixCacherApres()
+                Spacer(Modifier.height(4.dp))
+                Titre(t("Gestes"))
+                ChoixGestes()
+            }
+            SectionReglages.SERVEUR -> {
+                val cfg = Depot.serveur
+                Groupe {
+                    ChoixRangee(
+                        icone = Icons.Filled.Home,
+                        titre = if (cfg != null) t("Utiliser mon serveur Jasette") else t("Sur cet appareil"),
+                        detail = if (cfg != null) cfg.adresse else t("Jasette se connecte elle-même à chaque service."),
+                        actif = false,
+                        chevron = true,
+                        onClick = serveur,
+                    )
+                }
+            }
+            SectionReglages.PRIVE -> ReglagesPrive()
+            SectionReglages.LANGUE -> ChoixLangue()
+            SectionReglages.APROPOS -> AProposMiseAJour()
+        }
+    }
+}
+
+@Composable
+private fun Titre(texte: String) {
+    Text(texte, color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+}
+
+/** Réglages → Comptes : les services (ou la carte du serveur), puis ceux montrés dans la boîte. */
+@Composable
+private fun SectionComptes(connecter: (Service, String) -> Unit) {
+    val ctx = LocalContext.current
+    val demanderSms = rememberDemandeSms()
+    val cfg = Depot.serveur
+    if (cfg != null) {
+        // Mode client : les services se connectent sur le serveur, pas ici.
+        CarteServeur(cfg.adresse)
+        Depot.emoji?.let { e -> BandeauEmoji(e) }
+        if (Depot.besoinNip) Nip()
+    } else {
+        // Sur cet appareil : les ponts embarqués dans l'APK (WhatsApp, Signal
+        // et X seulement si leur pont a été compilé, voir Depot.services).
+        for (s in Depot.services) {
+            // Google Messages, mode autonome : ou bien les SMS du téléphone (PontSms).
+            val noteSms = if (s == Service.GOOGLE && (Depot.smsActif || !Depot.etat(s).associe)) {
+                t("SMS et MMS de cet appareil, sans compte Google. Les messages RCS (chat) restent dans l'app Messages.")
+            } else {
+                null
+            }
+            Carte(s, noteSms) {
+                val etat = Depot.etat(s)
+                if (etat.associe || etat == Etat.ASSOCIATION) {
+                    OutlinedButton(shape = formeBouton, onClick = { Depot.deconnecter(s) }) { Text(t("Déconnecter"), color = P.danger) }
+                } else {
+                    when (s) {
+                        Service.GOOGLE -> {
+                            BoutonAccent(t("Se connecter")) {
+                                // Les SMS étaient choisis (accès retiré depuis) : retour au pont Google.
+                                if (Depot.modeSms) Depot.utiliserSms(ctx, false)
+                                connecter(s, "google")
+                            }
+                            OutlinedButton(shape = formeBouton, onClick = demanderSms) { Text(t("Utiliser les SMS du téléphone")) }
+                        }
+                        Service.MESSENGER -> {
+                            BoutonAccent(t("Avec Messenger")) { connecter(s, "messenger") }
+                            OutlinedButton(shape = formeBouton, onClick = { connecter(s, "facebook") }) { Text(t("Avec Facebook")) }
+                        }
+                        Service.INSTAGRAM -> BoutonAccent(t("Se connecter")) { connecter(s, "instagram") }
+                        // WhatsApp : par numéro de téléphone (défaut) ou code QR (Association.kt).
+                        Service.WHATSAPP -> {
+                            BoutonAccent(t("Avec un numéro de téléphone")) { connecter(s, "telephone") }
+                            OutlinedButton(shape = formeBouton, onClick = { connecter(s, "qr") }) { Text(t("Code QR")) }
+                        }
+                        Service.SIGNAL -> BoutonAccent(t("Lier avec un code QR")) { connecter(s, "qr") }
+                        // X : la fenêtre web de x.com, puis le code X Chat (Connexion.kt).
+                        Service.X -> BoutonAccent(t("Se connecter")) { connecter(s, "x") }
+                        // Telegram : numéro et code, ou code QR (Telegram.kt).
+                        Service.TELEGRAM -> BoutonAccent(t("Se connecter")) { connecter(s, "") }
+                        // Bluesky : identifiant et mot de passe d'app (Bluesky.kt).
+                        Service.BLUESKY -> BoutonAccent(t("Se connecter")) { connecter(s, "") }
+                    }
+                }
+            }
+            if (s == Service.GOOGLE) Depot.emoji?.let { e -> BandeauEmoji(e) }
+            if (s == Service.MESSENGER && Depot.besoinNip) Nip()
+            // Telegram pas encore connecté : son application (api_id, api_hash).
+            if (s == Service.TELEGRAM && !Depot.etat(s).associe) ApiTelegram()
+        }
+    }
+    Depot.erreur?.let { Text(it, color = P.danger, fontSize = 14.sp) }
+    ServicesDansLaBoite()
+}
+
+/**
+ * Réglages → Comptes → « Dans la boîte de réception » : les services cachés
+ * ([ServicesCaches], comme la case du choix des services de la barre du bas,
+ * et la même section du bureau). Propre à l'appareil.
+ */
+@Composable
+private fun ServicesDansLaBoite() {
+    val liste = servicesConnectes()
+    if (liste.isEmpty()) return
+    val ctx = LocalContext.current
+    Spacer(Modifier.height(4.dp))
+    Titre(t("Dans la boîte de réception"))
+    Groupe {
+        for (s in liste) {
+            val montre = !ServicesCaches.cache(s)
+            Row(
+                Modifier.fillMaxWidth().clickable { ServicesCaches.montrer(ctx, s, !montre) }
+                    .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                LogoService(s, 30.dp, gris = !montre)
+                Spacer(Modifier.width(14.dp))
+                Text(
+                    s.titre, color = if (montre) P.texteFort else P.textePale, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                androidx.compose.material3.Checkbox(
+                    checked = montre,
+                    onCheckedChange = { ServicesCaches.montrer(ctx, s, it) },
+                    colors = androidx.compose.material3.CheckboxDefaults.colors(
+                        checkedColor = P.accent, uncheckedColor = P.textePale, checkmarkColor = P.surAccent,
+                    ),
                 )
             }
+        }
+    }
+    Text(
+        t("Les services décochés sont cachés de la boîte de réception, des Head et des favoris. Rien n'est oublié : recochez-les pour les retrouver."),
+        color = P.textePale, fontSize = 12.sp,
+    )
+}
 
-            Spacer(Modifier.height(12.dp))
-            Text(t("Langue"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            ChoixLangue()
-
-            Spacer(Modifier.height(12.dp))
-            Text(t("Apparence"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            ChoixTheme()
-            ChoixGrilleHead()
-            ChoixTailleMessages()
-            ChoixHeures()
-            ChoixApercus()
-            ChoixContacts()
-            ChoixTeinte()
-            ChoixVolets()
-
-            Spacer(Modifier.height(12.dp))
-            Text(t("Conversations"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            ChoixGarderArchives()
-            ChoixCacherApres()
-
-            Spacer(Modifier.height(12.dp))
-            Text(t("Gestes"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            ChoixGestes()
-
-            Spacer(Modifier.height(12.dp))
-            Text(t("Liste privée"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            ReglagesPrive()
-
-            Spacer(Modifier.height(12.dp))
-            Text(t("Icône de l'app"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            ChoixIcone()
-
-            Spacer(Modifier.height(12.dp))
-            Text(t("À propos"), color = P.texte, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            AProposMiseAJour()
-
+/**
+ * Réglages → Notifications : Android les règle lui-même (canaux, sons,
+ * bulles) ; un bouton ouvre la page de Jasette dans les réglages du système.
+ */
+@Composable
+private fun SectionNotifications() {
+    val ctx = LocalContext.current
+    Groupe {
+        ChoixRangee(
+            icone = Icons.Filled.Notifications,
+            titre = t("Notifications d'Android"),
+            detail = t("Sons, vibrations, bulles et notifications sur l'écran verrouillé se règlent dans Android."),
+            actif = false,
+            chevron = true,
+        ) {
+            val intent = Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+            try {
+                ctx.startActivity(intent)
+            } catch (_: Exception) {
+            }
         }
     }
 }
