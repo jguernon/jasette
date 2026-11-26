@@ -52,6 +52,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -224,7 +225,8 @@ fun App(activite: Activity, prive: Boolean = false) {
                             val l = (largeur * 0.4f).coerceIn(320f, 380f).dp
                             Box(Modifier.width(l).fillMaxHeight()) { liste() }
                             VerticalDivider(color = P.traitFin)
-                            Box(Modifier.weight(1f).fillMaxHeight().background(P.fil)) {
+                            // Découpé : rien du fil (fond du Mood, ombres) ne déborde sur la liste.
+                            Box(Modifier.weight(1f).fillMaxHeight().clipToBounds().background(P.fil)) {
                                 if (id != null) {
                                     key(id) {
                                         Fil(

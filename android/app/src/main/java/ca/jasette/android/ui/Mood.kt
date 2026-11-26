@@ -38,6 +38,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -131,9 +132,11 @@ fun mix(a: Long, b: Long, t: Float): Color {
 /**
  * Le fond d'un mood : un dégradé vertical doux, puis trois taches floues
  * (dégradés radiaux superposés, couleur → transparent). [clair] : la variante
- * Verre (pastel), sinon Sombre (profond).
+ * Verre (pastel), sinon Sombre (profond). Découpé à sa boîte : les taches (rayon des
+ * trois quarts de la largeur) dépassent sinon le fil, et en deux volets (Fold déplié)
+ * elles pâlissaient la liste de gauche.
  */
-fun Modifier.fondMood(m: Mood, clair: Boolean): Modifier = if (P.retro) fondMoodDiscret(m) else drawBehind {
+fun Modifier.fondMood(m: Mood, clair: Boolean): Modifier = if (P.retro) fondMoodDiscret(m) else clipToBounds().drawBehind {
     drawRect(Brush.verticalGradient(listOf(m.haut(clair), m.bas(clair))))
     val r = size.width * 0.75f
     for ((c, a, x, y) in listOf(
