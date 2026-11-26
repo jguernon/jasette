@@ -68,7 +68,18 @@ type Marques struct {
 	// SonsConversation : le jeu de sons des conversations, "bulle" (défaut),
 	// "bois", "verre" ou "aucun" (jeuSons). Seuls les clients jouent.
 	SonsConversation string `json:"sons_conversation"`
-	Version          int64  `json:"version"`
+	// NotesContacts : « Afficher les notes de mes contacts » (bulles du Head,
+	// PROTOCOLE.md §5.12). Vrai par défaut, et pour un ancien fichier. Le
+	// serveur le transmet au pont Instagram (notes.go).
+	NotesContacts bool `json:"notes_contacts"`
+	// NotesMusique : l'appareil qui publie « ce que j'écoute » ("" : personne).
+	NotesMusique string `json:"notes_musique"`
+	// NotesMusiqueFormat : ce que dit la note musicale, "artiste" (défaut),
+	// "genre" ou "titre" (formatMusique).
+	NotesMusiqueFormat string `json:"notes_musique_format"`
+	// NotesServices : où « Quoi de neuf ? » publie, ["tout"] ou une liste.
+	NotesServices []string `json:"notes_services"`
+	Version       int64    `json:"version"`
 	// Propre au serveur, jamais envoyé aux clients : depuis quand (ms, horloge
 	// du serveur) chaque id est dans Archives. Seul un message reçu après
 	// cette heure ramène la conversation dans l'Inbox (une réaction ou une
@@ -94,6 +105,9 @@ func (m *Marques) normaliser() {
 	m.Emojis = nettoyerEmojis(m.Emojis)
 	m.CacherApresJours = bornerJours(m.CacherApresJours)
 	m.SonsConversation = jeuSons(m.SonsConversation)
+	m.NotesMusique = bornerAppareil(m.NotesMusique)
+	m.NotesMusiqueFormat = formatMusique(m.NotesMusiqueFormat)
+	m.NotesServices = nettoyerServicesNotes(m.NotesServices)
 	depuis := make(map[string]int64, len(m.Archives))
 	maintenant := time.Now().UnixMilli()
 	for _, id := range m.Archives {
@@ -115,7 +129,8 @@ func (m *Marques) memesListes(n *Marques) bool {
 	}
 	return egalesMoods(m.Moods, n.Moods) && egalesMoods(m.Emojis, n.Emojis) && m.GarderArchives == n.GarderArchives &&
 		m.CacherApresJours == n.CacherApresJours && m.PresenceEnLigne == n.PresenceEnLigne &&
-		m.SonsConversation == n.SonsConversation
+		m.SonsConversation == n.SonsConversation && m.NotesContacts == n.NotesContacts &&
+		m.NotesMusique == n.NotesMusique && m.NotesMusiqueFormat == n.NotesMusiqueFormat && egales(m.NotesServices, n.NotesServices)
 }
 
 // cacherApresJoursMax : au-delà de dix ans, autant tout afficher.
@@ -239,7 +254,7 @@ func unir(dabord, ensuite []string) []string {
 // lireMarquesFichier lit un fichier de marques ; erreur s'il est illisible.
 func lireMarquesFichier(chemin string) (Marques, error) {
 	// Les réglages vrais par défaut : un fichier d'avant eux ne les a pas.
-	m := Marques{PresenceEnLigne: true}
+	m := Marques{PresenceEnLigne: true, NotesContacts: true}
 	data, err := os.ReadFile(chemin)
 	if err != nil {
 		return m, err
@@ -273,7 +288,7 @@ func chargerMarques() Marques {
 		}
 		return b
 	}
-	m = Marques{PresenceEnLigne: true}
+	m = Marques{PresenceEnLigne: true, NotesContacts: true}
 	m.normaliser()
 	return m
 }
@@ -332,7 +347,8 @@ func trameMarques(m Marques, id json.RawMessage, refus string) []byte {
 		"head": m.Head, "favoris": m.Favoris, "epingles": m.Epingles, "archives": m.Archives,
 		"privees": m.Privees, "moods": m.Moods, "emojis": m.Emojis, "garder_archives": m.GarderArchives,
 		"cacher_apres_jours": m.CacherApresJours, "presence_en_ligne": m.PresenceEnLigne,
-		"sons_conversation": jeuSons(m.SonsConversation), "version": m.Version,
+		"sons_conversation": jeuSons(m.SonsConversation), "notes_contacts": m.NotesContacts,
+		"notes_musique": m.NotesMusique, "notes_musique_format": formatMusique(m.NotesMusiqueFormat), "notes_services": nettoyerServicesNotes(m.NotesServices), "version": m.Version,
 	}
 	if len(id) > 0 {
 		corps["id"] = id
@@ -367,6 +383,10 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		Cacher   *int               `json:"cacher_apres_jours"`
 		Presence *bool              `json:"presence_en_ligne"`
 		Sons     json.RawMessage    `json:"sons_conversation"`
+		NotesC   *bool              `json:"notes_contacts"`
+		NotesM   *string            `json:"notes_musique"`
+		NotesF   *string            `json:"notes_musique_format"`
+		NotesS   *[]string          `json:"notes_services"`
 		Version  int64              `json:"version"`
 		ID       json.RawMessage    `json:"id"`
 	}
@@ -383,6 +403,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Archives: cur.Archives,
 		Privees: cur.Privees, Moods: cur.Moods, Emojis: cur.Emojis, GarderArchives: cur.GarderArchives,
 		CacherApresJours: cur.CacherApresJours, PresenceEnLigne: cur.PresenceEnLigne, SonsConversation: cur.SonsConversation,
+		NotesContacts: cur.NotesContacts, NotesMusique: cur.NotesMusique, NotesMusiqueFormat: cur.NotesMusiqueFormat, NotesServices: cur.NotesServices,
 		ArchivesDepuis: cur.ArchivesDepuis,
 	}
 	// Une liste absente de la trame ne change pas (un ancien client, qui ne
@@ -419,6 +440,20 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	// booléen (premiers clients) : vrai "bulle", faux "aucun".
 	if j, ok := lireJeuSons(d.Sons); ok {
 		nouv.SonsConversation = j
+	}
+	// Les réglages de « Quoi de neuf ? » : absents, rien ne change ; présents,
+	// pris tels quels (des réglages : rien à unir).
+	if d.NotesC != nil {
+		nouv.NotesContacts = *d.NotesC
+	}
+	if d.NotesM != nil {
+		nouv.NotesMusique = *d.NotesM
+	}
+	if d.NotesF != nil {
+		nouv.NotesMusiqueFormat = *d.NotesF
+	}
+	if d.NotesS != nil {
+		nouv.NotesServices = *d.NotesS
 	}
 	repondre := func(m Marques, refus string) {
 		select {
@@ -463,10 +498,13 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		return
 	}
 	s.marques = nouv
-	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s",
-		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation)
+	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s, notes_contacts %v, notes_services %v",
+		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation, nouv.NotesContacts, nouv.NotesServices)
 	if nouv.PresenceEnLigne != cur.PresenceEnLigne {
 		s.presenceChangee(nouv.PresenceEnLigne)
+	}
+	if nouv.NotesContacts != cur.NotesContacts {
+		s.notesContactsChange(nouv.NotesContacts)
 	}
 	tous := trameMarques(nouv, nil, "")
 	for autre := range s.clients {
@@ -521,7 +559,8 @@ func (s *Serveur) desarchiverSiRecu(svc string, ligne []byte) {
 	cur := s.marques
 	nouv := Marques{Head: cur.Head, Favoris: cur.Favoris, Epingles: cur.Epingles, Privees: cur.Privees, Moods: cur.Moods, Emojis: cur.Emojis,
 		GarderArchives: cur.GarderArchives, CacherApresJours: cur.CacherApresJours, PresenceEnLigne: cur.PresenceEnLigne,
-		SonsConversation: cur.SonsConversation, ArchivesDepuis: cur.ArchivesDepuis}
+		SonsConversation: cur.SonsConversation, NotesContacts: cur.NotesContacts, NotesMusique: cur.NotesMusique, NotesMusiqueFormat: cur.NotesMusiqueFormat,
+		NotesServices: cur.NotesServices, ArchivesDepuis: cur.ArchivesDepuis}
 	for _, a := range cur.Archives {
 		if a != id {
 			nouv.Archives = append(nouv.Archives, a)
@@ -566,4 +605,55 @@ func lireJeuSons(brute json.RawMessage) (string, bool) {
 		return jeuSons(j), true
 	}
 	return "", false
+}
+
+const (
+	tailleAppareilMax = 128 // octets au plus pour notes_musique
+	servicesNotesMax  = 32  // noms au plus dans notes_services
+	tailleServiceMax  = 32  // octets au plus par nom de service
+)
+
+// bornerAppareil : le nom de l'appareil de notes_musique, valide et borné.
+func bornerAppareil(a string) string {
+	if !utf8.ValidString(a) {
+		return ""
+	}
+	for len(a) > tailleAppareilMax {
+		_, n := utf8.DecodeLastRuneInString(a)
+		a = a[:len(a)-n]
+	}
+	return a
+}
+
+// nettoyerServicesNotes : ["tout"] (le défaut), ou une liste propre de noms
+// de services. Vide, ou contenant « tout » : ["tout"].
+func nettoyerServicesNotes(l []string) []string {
+	r := make([]string, 0, len(l))
+	vus := map[string]bool{}
+	for _, svc := range l {
+		if svc == "tout" {
+			return []string{"tout"}
+		}
+		if svc == "" || len(svc) > tailleServiceMax || !utf8.ValidString(svc) || vus[svc] {
+			continue
+		}
+		vus[svc] = true
+		r = append(r, svc)
+		if len(r) >= servicesNotesMax {
+			break
+		}
+	}
+	if len(r) == 0 {
+		return []string{"tout"}
+	}
+	return r
+}
+
+// formatMusique : un format de note musicale connu, sinon "artiste".
+func formatMusique(f string) string {
+	switch f {
+	case "artiste", "genre", "titre":
+		return f
+	}
+	return "artiste"
 }

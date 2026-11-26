@@ -149,6 +149,11 @@ type Cmd struct {
 	Archived bool   `json:"archived"`
 	On       bool   `json:"on"`
 	ReplyTo  string `json:"reply_to"`
+	// note_set : la source (« main » ou « musique ») et l'id de la demande
+	// (notes.go). L'audience ne sert qu'à Instagram.
+	Audience int    `json:"audience"`
+	Source   string `json:"source"`
+	Req      string `json:"req"`
 	// create_group : les clés (u<n>) ou numéros des membres et le nom (facultatif).
 	Members []string `json:"members"`
 	Name    string   `json:"name"`
@@ -362,6 +367,10 @@ func main() {
 			go p.sendTyping(cmd)
 		case "presence":
 			p.setPresence(cmd.On)
+		case "note_set":
+			go p.notes.set(p.ctx, cmd.Text, cmd.Audience, cmd.Source, cmd.Req, p.estPret())
+		case "note_clear":
+			go p.notes.clear(p.ctx, cmd.Source, cmd.Req, p.estPret())
 		case "history_pin":
 			// Propre aux fils chiffrés de Messenger : rien à faire ici (et
 			// surtout pas de réponse, l'interface la prendrait pour Messenger).

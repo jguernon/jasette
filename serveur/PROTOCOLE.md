@@ -199,13 +199,14 @@ autre client.
 **Rejeu.** Juste après `{"auth":"ok"}`, le serveur envoie d'abord les
 marques (`{"marques":{…}}`, §5.5), puis, pour chaque service, le dernier
 état connu, dans cet ordre et s'ils existent : `hello`,
-`state`, `account`, `avatar_moi`, `api` (Telegram : application réglée ou
+`state`, `account`, `avatar_moi`, `note_moi` (§5.12), `api` (Telegram : application réglée ou
 non), `qr` (seulement en cours d'association),
 `pair_code` (WhatsApp, seulement en cours d'association par code),
 `login_step` (Telegram, seulement en attente du code ou du mot de passe),
 `history_pin` (seulement s'il attend un NIP : `{"needed":true}`), puis les
 dernières listes `conversations` gardées (boîte de réception, puis archives :
-§5.8), puis la présence en ligne (§5.10). Le `qr` et
+§5.8), puis la présence en ligne (§5.10) et les notes des contacts
+(`notes`, §5.12). Le `qr` et
 le `pair_code` (et le `login_step`) gardés sont oubliés dès `paired`, `state` `ready` ou
 `unpaired`, ou si le pont s'arrête ; un `pair_code` remplace le `qr` (le pont
 WhatsApp cesse alors de montrer des QR). Un client
@@ -389,7 +390,7 @@ modifiée de mautrix-discord) :
   (§5.8). Pas d'archives chez Discord (celles de Jasette, §5.5) ; 10 Mo au
   plus par fichier envoyé.
 
-### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation)
+### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
@@ -439,6 +440,24 @@ Et des réglages (facultatifs) :
   au premier plan, un son à l'envoi (ou celui de l'émoji rapide), à la
   réception d'un message (au plus un par 400 ms ; ni historique, ni
   synchro, ni réaction) et à l'apparition des « … » (§5.11).
+- `notes_contacts` (booléen, **vrai** par défaut) : « Afficher les notes de
+  mes contacts » (bulles du Head, §5.12). Le serveur le transmet au pont
+  Instagram (`JASETTE_NOTES`, commande `notes_contacts`) ; faux, le pont ne
+  lit plus le plateau des notes et le serveur ne relaie plus `notes`.
+- `notes_musique` (chaîne, **`""`** par défaut) : « Partager ce que
+  j'écoute sur Spotify » : le nom de **l'appareil** qui publie la musique
+  (§5.12), `""` = désactivé. Un seul appareil à la fois : l'activer sur un
+  autre appareil le lui donne. 128 octets au plus.
+- `notes_musique_format` (chaîne, **`"artiste"`** par défaut) : ce que dit
+  la note musicale : `"artiste"` (« 🎵 Écoute Daft Punk », « 🎙️ Écoute
+  Joe Rogan »), `"genre"` (« 🎵 Écoute du rock ! », « 🎙️ Écoute un
+  podcast ») ou `"titre"` (« 🎵 Titre — Artiste »).
+- `notes_services` (liste de chaînes, **`["tout"]`** par défaut) : les
+  services où « Quoi de neuf ? » publie (écran « Moi », Réglages > Quoi de
+  neuf, musique). `["tout"]` : tous les services compatibles connectés, y
+  compris ceux qu'on branchera plus tard ; sinon une liste précise de noms
+  de services (`instagram`, `messenger`, `whatsapp`, `telegram`, `bluesky`,
+  `discord`…).
 
 C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 
@@ -446,7 +465,7 @@ C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 changement, à **tous** les clients) :
 
 ```json
-{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","version":7}}
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"version":7}}
 ```
 
 `version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
@@ -455,7 +474,7 @@ encore rien reçu (listes vides).
 **Client → serveur** :
 
 ```json
-{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","version":7,"id":12}}
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"version":7,"id":12}}
 ```
 
 - `version` : la dernière version reçue du serveur (0 si aucune).
@@ -485,6 +504,16 @@ encore rien reçu (listes vides).
   `"bulle"`, `false` donne `"aucun"`. Toujours envoyé (une chaîne) ; absent
   de `marques.json` : `"bulle"`. Un client qui reçoit des marques sans ce
   champ (serveur d'avant) garde le sien.
+- `notes_contacts` : comme `presence_en_ligne` (absent veut dire vrai).
+- `notes_musique` : absent ou `null`, rien ne change ; une chaîne est prise
+  telle quelle (tronquée à 128 octets). Toujours envoyé ; absent de
+  `marques.json` : `""`.
+- `notes_musique_format` : absent ou `null`, rien ne change ; une valeur
+  inconnue devient `"artiste"`. Toujours envoyé.
+- `notes_services` : absent ou `null`, rien ne change ; une liste est prise
+  telle quelle (sans doublon ni nom vide, 32 noms de 32 octets au plus) ;
+  vide, ou contenant `"tout"` : `["tout"]`. Pas d'union : c'est un réglage.
+  Toujours envoyé ; absent de `marques.json` : `["tout"]`.
 
 Règles du serveur :
 
@@ -524,7 +553,9 @@ archives (ou ses privées) pour lui seul, sans les vider. De même pour
 `garder_archives` : un serveur d'avant ce réglage ne l'envoie pas, et le
 client garde le sien pour lui (il l'applique alors lui-même). Union de deux
 copies : `garder_archives` de celle qui passe d'abord. Idem pour
-`cacher_apres_jours`, `presence_en_ligne` et `sons_conversation`.
+`cacher_apres_jours`, `presence_en_ligne`, `sons_conversation`,
+`notes_contacts`, `notes_musique`, `notes_musique_format` et
+`notes_services`.
 
 **Règle des moods.**
 
@@ -919,6 +950,182 @@ fil, « écrit… » dans la liste et sous le nom dans l'en-tête) si la marque
 Jasette n'envoie jamais son propre « en train d'écrire » (la commande
 `typing` des ponts Signal et Telegram existe, l'interface ne s'en sert pas).
 
+### 5.12 « Quoi de neuf ? » : notes et statuts
+
+Une **note** (ou un statut) courte, publiée d'un geste sur plusieurs
+services : la note des messageries Instagram et Messenger, le texte
+« Infos » de WhatsApp, la bio de Telegram, la description du profil
+Bluesky, le statut personnalisé de Discord. Google Messages et X ne
+l'offrent pas ; Signal non plus pour l'instant (signalmeow ne sait pas
+écrire le profil).
+
+| Service | Pont | Ce qui change | Limite | Durée |
+|---|---|---|---|---|
+| `instagram` | `pont-ig` | note de la boîte de réception (`usePolarisCreateInboxTrayItemSubmitMutation`) | 60 caractères | 24 h (Instagram) |
+| `messenger` | `pont-meta` | note de Messenger (`useMWInboxTrayCreateNoteMutation`, privacy `FRIENDS`) | 60 caractères | 24 h (Facebook) |
+| `whatsapp` | `pont-wa` | « Infos » (`SetStatusMessage`, éphémère 24 h) | 139 caractères | 24 h |
+| `telegram` | `pont-telegram` | bio (`account.updateProfile about`) | 70 caractères | jusqu'à l'effacement |
+| `bluesky` | `pont-bluesky` | description du profil (`app.bsky.actor.profile`) | 256 caractères | jusqu'à l'effacement |
+| `discord` | `pont-discord` | statut personnalisé | 128 caractères | jusqu'à l'effacement |
+
+(caractères = points de code Unicode.) Pour les services où c'est une bio
+(WhatsApp, Telegram, Bluesky), le pont **garde l'ancienne valeur** avant la
+première note et la **remet** à l'effacement.
+
+**Commandes** (à chaque service choisi, une trame par service ; le client
+n'envoie qu'aux services compatibles **prêts**) :
+
+```json
+{"svc":"instagram","cmd":{"cmd":"note_set","text":"Au chalet ce weekend 🏔️","audience":0,"source":"main","req":"n17"}}
+{"svc":"instagram","cmd":{"cmd":"note_clear","req":"n18"}}
+{"svc":"instagram","cmd":{"cmd":"notes_list"}}
+{"svc":"instagram","cmd":{"cmd":"notes_contacts","on":true}}
+```
+
+- `text` : la note, 1 caractère au moins, la limite du service au plus
+  (au-delà : erreur, jamais de troncature silencieuse par le pont).
+- `audience` (Instagram seulement) : **0** abonnés que je suis en retour
+  (défaut), **1** amis proches. Messenger : toujours `FRIENDS`.
+- `source` : `"main"` (écrite à la main, défaut) ou `"musique"` (§ plus
+  bas). Une note `musique` **remplace** une note écrite à la main, que le
+  pont **met de côté** (texte et date, dans `notes-etat.json`).
+  `note_clear` avec `"source":"musique"` ne touche qu'à une note musicale :
+  si une note écrite à la main est de côté et a moins de 24 h, le pont la
+  **remet** (une seule publication : elle remplace la note musicale) ;
+  sinon il efface. Une note actuelle écrite à la main n'est jamais effacée
+  par la musique. Un `note_clear` ordinaire (`main`) efface tout, y compris
+  la note mise de côté.
+- `req` (facultatif) : renvoyé tel quel dans `note_result`.
+- **Une action, une publication par service.** Le pont n'essaie jamais deux
+  fois, ne boucle jamais ; il répond `ok` sans rien envoyer si le texte est
+  celui de la note actuelle (et `note_clear` sans note actuelle). Garde-fou
+  en plus : au plus **6** publications (création ou effacement) par heure
+  glissante pour Instagram et Messenger, 20 pour les autres ; au-delà,
+  erreur « trop de publications ».
+
+**Événements du pont** :
+
+```json
+{"ev":"note_moi","text":"Au chalet ce weekend 🏔️","time":1764160000000,"expires":1764246400000,"source":"main","audience":0}
+{"ev":"note_moi","text":"🎵 Écoute Daft Punk","time":1764163000000,"expires":1764249400000,"source":"musique","audience":0,"main_text":"Au chalet ce weekend 🏔️","main_time":1764160000000}
+{"ev":"note_result","op":"set","ok":true,"req":"n17"}
+{"ev":"note_result","op":"set","ok":false,"error":"La note Instagram n'a pas pu être publiée (requête périmée).","req":"n17"}
+{"ev":"notes","items":[{"conv":"340282366841710300949128","user":"1784…","username":"camille.t","text":"🎂 30 ans !","time":1764150000000}],"time":1764160000000}
+```
+
+- `note_moi` : **ma note actuelle** sur ce service (`text` vide : aucune ;
+  `expires` 0 : sans échéance). Émis dès que le pont est prêt (le pont la
+  garde dans `<données>/<service>/notes-etat.json`, 0600 ; une note échue
+  n'est plus annoncée), puis à chaque changement. `main_text` et
+  `main_time` (facultatifs) : la note écrite à la main mise de côté par la
+  musique. Le **serveur garde le
+  dernier** de chaque service et le **rejoue** (§5.2, après `avatar_moi`).
+- `note_result` : le résultat d'une commande (`op` : `set` ou `clear`),
+  `ok`, ou `error` : un texte clair, en français, pour l'utilisateur. Un
+  `doc_id` périmé ou une erreur GraphQL donnent une erreur, jamais un
+  plantage. Pas rejoué.
+- `notes` (Instagram) : les **notes des contacts**, une par auteur, liste
+  complète à chaque fois (remplace la précédente). `conv` : la conversation
+  individuelle de l'auteur si le pont la connaît (sinon absent) ; `user` :
+  son id Instagram ; `time` (ms) : sa date. Ma propre note n'y est pas.
+
+**Lecture des notes des contacts.** Seulement si la marque
+`notes_contacts` est vraie (transmise comme `presence_en_ligne` :
+`JASETTE_NOTES=1|0` au lancement, puis `notes_contacts`). Le pont lit alors
+le plateau (`IGDInboxTrayQuery`) dès qu'il est prêt, puis **au plus toutes
+les 15 minutes** ; `notes_list` rend la dernière lecture si elle a moins de
+15 minutes, sinon en refait une. Trois échecs de suite : pause d'une heure.
+Désactivé : aucune lecture, aucun événement ; le serveur oublie `notes` et ne
+le relaie plus.
+
+**Le serveur** relaie les commandes au pont du service, garde le dernier
+`note_moi` de chaque service et la dernière liste `notes` (rejoués), et
+relaie `note_result` à tous les clients.
+
+**Les `doc_id` de Meta** (Instagram, Messenger) : valeurs par défaut dans
+le code, remplaçables **sans recompiler** par
+`<données>/instagram/notes-docs.json` et `<données>/messenger/notes-docs.json`
+(lus à chaque requête), `{"nom de la requête":"doc_id"}` :
+
+```json
+{"IGDInboxTrayQuery":"29231580869776032",
+ "usePolarisCreateInboxTrayItemSubmitMutation":"28592645767037889",
+ "usePolarisDeleteInboxTrayItemSubmitMutation":"28419182984337833"}
+```
+
+```json
+{"MWInboxTrayNoteCreationDialogQuery":"30899655739648624",
+ "useMWInboxTrayCreateNoteMutation":"25742693715382390",
+ "MWInboxTrayNoteCreationDialogCreationStepContentMutation":"24060573783603122",
+ "useMWInboxTrayDeleteNoteMutation":"9532619970198958"}
+```
+
+Les requêtes passent par la voie **web** de la session du pont (Instagram :
+`POST https://www.instagram.com/api/graphql`, en-tête
+`X-Root-Field-Name` ; Messenger : `POST /api/graphql/` du domaine de la
+session, `www.facebook.com` pour une session Facebook), une seule fois,
+sans nouvel essai automatique. Messenger n'essaie la mutation de repli
+(`…CreationStepContentMutation`) que si Facebook dit ne pas connaître la
+première (document inconnu) : jamais deux créations.
+
+**Les clients.**
+
+- Écran « Moi » (bureau et Android) : la bulle « Quoi de neuf ? » montre
+  la note actuelle (la plus récente des `note_moi`), un champ, Publier et
+  Effacer, le nombre de caractères restants pour le service **le plus
+  limitant** parmi ceux choisis ; « Publier sur : Tout ▸ » (replié : une
+  case « Tout », puis une par service compatible connecté ; l'audience
+  Instagram) modifie la marque `notes_services`, comme le même sélecteur de
+  Réglages > Quoi de neuf. Après la publication, un ✓ ou l'erreur par
+  service (`note_result`).
+- Head : la note Instagram d'un contact, en petite bulle au-dessus de son
+  avatar (texte tronqué), si `notes_contacts`.
+- Sans serveur (ponts locaux), le client fait le travail du serveur :
+  variables `JASETTE_NOTES`, commande `notes_contacts`.
+
+**« Ce que j'écoute » (Spotify).** Aucune API Spotify : l'appareil lit son
+lecteur local (bureau Linux : MPRIS `org.mpris.MediaPlayer2.spotify`, titre,
+artiste et `PlaybackStatus` ; Android : `MediaSessionManager` du paquet
+`com.spotify.music`, avec l'accès aux notifications). Seul l'appareil
+nommé par `notes_musique` publie, aux services de `notes_services`, avec
+`"source":"musique"`, un texte tronqué (…) à la limite du service le plus
+limitant, selon `notes_musique_format` :
+
+- `artiste` : « 🎵 Écoute <artiste> » ; un balado : « 🎙️ Écoute
+  <émission> » (le nom de l'émission, pas de l'épisode) ;
+- `genre` : « 🎵 Écoute du rock ! » ; un balado : « 🎙️ Écoute un
+  podcast ». Genre inconnu : comme `artiste`. Le genre vient de
+  **MusicBrainz** (API publique sans clé, `GET
+  https://musicbrainz.org/ws/2/artist/?query=artist:"<nom>"&fmt=json` :
+  les `tags` du premier artiste, le plus voté ; traduit pour les genres
+  courants, sinon tel quel), **seulement** avec ce format, au plus une
+  requête par seconde, User-Agent `Jasette/0.1
+  (https://jonathanguernon.net/jasette)` sans aucune donnée personnelle, et
+  un cache local artiste → genre (jamais deux fois le même artiste) ;
+- `titre` : « 🎵 Titre — Artiste ».
+
+En anglais : « Listening to Daft Punk », « Listening to rock! »,
+« Listening to a podcast ». Un balado se reconnaît à `mpris:trackid`
+contenant `spotify:episode:` ou `/episode/` (une chanson :
+`spotify:track:`), l'émission étant dans `xesam:album` (sinon
+`xesam:artist`) ; sur Android, à l'id du média (`METADATA_KEY_MEDIA_ID`)
+contenant `episode`, l'émission dans l'album, sinon l'artiste (supposé, à
+vérifier au premier essai).
+
+L'artiste (ou le genre) retenu pour une période de 15 minutes est celui qui
+a **joué le plus longtemps** pendant cette période, pas seulement le
+dernier. Anti-rafale, sur l'appareil :
+
+- au plus **une** publication toutes les **15 minutes**, et seulement si le
+  texte a changé depuis la dernière publication musicale (ou si la note
+  actuelle n'est pas musicale) ;
+- **la musique passe par-dessus la note écrite à la main** pendant qu'elle
+  joue (le pont met celle-ci de côté) ; l'écran « Moi » le dit : « 🎵 La
+  musique remplace ta note pendant que tu écoutes » ;
+- une pause n'efface rien : après **20 minutes** sans lecture, une seule
+  fois, `note_clear` avec `"source":"musique"` ; le pont remet la note
+  écrite à la main si elle a moins de 24 h, sinon il efface.
+
 ## 6. Fichiers
 
 Les événements contiennent des chemins de fichiers **du serveur** :
@@ -1019,10 +1226,15 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"svc":…,"ev":{"ev":"messages",…,"cache":true}}` | copie du cache, avant la réponse du pont (§5.8) |
 | C→S | `{"rejouer":"<svc>"}` | redemander l'état d'un service |
 | ↔ | `{"ping":n}` / `{"pong":n}` | signes de vie |
-| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","version"[,"id","refus"]}}` | rejeu, changement |
-| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","version"[,"id"]}}` | changement local |
+| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","version"[,"id","refus"]}}` | rejeu, changement |
+| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","version"[,"id"]}}` | changement local |
 | S→C | `{"svc":…,"ev":{"ev":"presence","item":{"conv","user","online","last_active"}}}` | présence (§5.10), aussi au rejeu |
 | S→C | `{"svc":…,"ev":{"ev":"typing","conv","on"[,"name","audio"]}}` | « en train d'écrire » (§5.11) |
+| C→S | `{"svc":…,"cmd":{"cmd":"note_set","text","audience","source"[,"req"]}}` | publier ma note (§5.12) |
+| C→S | `{"svc":…,"cmd":{"cmd":"note_clear"[,"source","req"]}}` | effacer ma note (§5.12) |
+| S→C | `{"svc":…,"ev":{"ev":"note_moi","text","time","expires","source","audience"}}` | ma note actuelle (§5.12), aussi au rejeu |
+| S→C | `{"svc":…,"ev":{"ev":"note_result","op","ok"[,"error","req"]}}` | résultat d'une publication (§5.12) |
+| S→C | `{"svc":"instagram","ev":{"ev":"notes","items":[…],"time"}}` | notes des contacts (§5.12), aussi au rejeu |
 | C→S | `{"get":{"id","chemin","sha256"}}` | télécharger |
 | S→C | `{"fichier":{"id",…}}` | morceaux ou erreur |
 | C→S | `{"put":{"id","nom","donnees","fin"}}` | téléverser |

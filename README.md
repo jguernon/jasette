@@ -120,6 +120,18 @@ l'historique que par petites pages, ne marque lu et n'écrit qu'à ta demande,
 et le serveur Jasette n'en précharge presque rien. Le risque d'un
 avertissement ou d'une suspension du compte n'est pas nul : à tes risques.
 
+**« Quoi de neuf ? »** (écran « Moi ») publie une note ou un statut sur
+plusieurs services d'un geste : la note d'Instagram et de Messenger, le texte
+« Infos » de WhatsApp, la bio de Telegram, la description du profil Bluesky, le statut
+personnalisé de Discord.
+Les `doc_id` GraphQL de Meta ont des valeurs par défaut dans les ponts ; s'ils
+périment, on les corrige sans recompiler dans
+`<données>/instagram/notes-docs.json` et `<données>/messenger/notes-docs.json`
+(voir `serveur/PROTOCOLE.md`, §5.12). « Partager ce que j'écoute » lit le
+lecteur Spotify de l'appareil (MPRIS au bureau, notifications sur Android),
+sans API Spotify ; le format « Genre » demande le genre de l'artiste à
+MusicBrainz.
+
 ## Vie privée
 
 Jasette parle directement aux services, depuis tes appareils ou ton propre

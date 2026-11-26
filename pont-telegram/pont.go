@@ -71,6 +71,9 @@ type Pont struct {
 	// La présence des contacts (presence.go).
 	presenceOn bool
 	presence   map[string]presenceState
+
+	// « Quoi de neuf ? » (notes.go).
+	notes *notesPont
 }
 
 func newPont(ctx context.Context) *Pont {
@@ -85,6 +88,7 @@ func newPont(ctx context.Context) *Pont {
 		presenceOn: presenceEnv(),
 		presence:   map[string]presenceState{},
 	}
+	p.notes = nouvellesNotesTG(p)
 	go p.listLoop()
 	return p
 }
@@ -377,6 +381,7 @@ func (p *Pont) session(ctx context.Context, gen int, client *telegram.Client, ga
 			if ok {
 				emitState("ready")
 				p.emitList()
+				go p.notes.annoncer()
 				go p.afterReady(ctx)
 			}
 		},

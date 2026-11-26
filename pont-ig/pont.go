@@ -67,6 +67,14 @@ type Pont struct {
 	presenceOn  bool
 	presence    map[string]presenceState
 	presenceNow chan struct{}
+
+	// « Quoi de neuf ? » (notes.go) : ma note, et les notes des contacts.
+	notes         *notesPont
+	notesOn       bool
+	notesLues     time.Time
+	notesNow      chan struct{}
+	notesDerniere map[string]any
+	maNoteTray    string // l'id de ma note vue dans le plateau
 }
 
 func newPont(ctx context.Context) *Pont {
@@ -80,6 +88,8 @@ func newPont(ctx context.Context) *Pont {
 		presenceOn:  presenceEnv(),
 		presence:    map[string]presenceState{},
 		presenceNow: make(chan struct{}, 1),
+		notesOn:     notesEnv(),
+		notesNow:    make(chan struct{}, 1),
 		pending:     map[string]string{},
 		loaded:      map[string]int64{},
 		fetching:    map[string]bool{},
@@ -88,6 +98,11 @@ func newPont(ctx context.Context) *Pont {
 	mediadl.SetHTTP(exhttp.SensibleClientSettings)
 	go p.listLoop()
 	go p.presenceLoop()
+	p.notes = nouvellesNotes(opsNote{
+		nom: "Instagram", limite: 60, parHeure: 6, duree: 24 * time.Hour,
+		publier: p.publierNoteIG, effacer: p.effacerNoteIG,
+	})
+	go p.notesLoop()
 	return p
 }
 
@@ -448,6 +463,8 @@ func (p *Pont) onIGEvent(ctx context.Context, cli *instameow.Client, raw slidety
 		emitState("ready")
 		p.emitList()
 		p.setPresence(p.presenceWanted())
+		go p.notes.annoncer()
+		p.demanderNotes(false)
 		go p.threadBackfill(cli)
 		go p.myAvatarDownload()
 	case *slidetypes.Disconnected:

@@ -92,6 +92,9 @@ type Pont struct {
 	cursors   map[string]string // conv → curseur de la page plus ancienne
 	loaded    map[string]bool   // les fils ouverts dans l'interface
 	sent      map[string]bool   // mes messages déjà annoncés (l'écho de getLog est ignoré)
+
+	// « Quoi de neuf ? » (notes.go).
+	notes *notesPont
 }
 
 func newPont(ctx context.Context) *Pont {
@@ -105,6 +108,7 @@ func newPont(ctx context.Context) *Pont {
 		sent:     map[string]bool{},
 	}
 	p.a.lost = p.authLost
+	p.notes = nouvellesNotesBS(p)
 	return p
 }
 
@@ -165,6 +169,7 @@ func (p *Pont) begin(s *session) {
 	p.mu.Unlock()
 	emitState("ready")
 	p.emitList()
+	go p.notes.annoncer()
 	go p.avatars(nil)
 	go p.poll(g)
 }

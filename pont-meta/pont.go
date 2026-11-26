@@ -77,6 +77,9 @@ type Pont struct {
 	presenceOn   bool
 	presenceSeen bool
 	presence     map[int64]presenceRow
+
+	// « Quoi de neuf ? » (notes.go).
+	notes *notesPont
 }
 
 func newPont(ctx context.Context) *Pont {
@@ -96,6 +99,7 @@ func newPont(ctx context.Context) *Pont {
 		e2eeReady:  exsync.NewEvent(),
 	}
 	mediadl.SetHTTP(exhttp.SensibleClientSettings)
+	p.notes = nouvellesNotesFB(p)
 	go p.listLoop()
 	return p
 }
@@ -403,6 +407,7 @@ func (p *Pont) onMetaEvent(ctx context.Context, raw any) {
 		p.mu.Unlock()
 		emitState("ready")
 		p.emitList()
+		go p.notes.annoncer()
 		go p.connectE2EE()
 		go p.threadBackfill()
 		go p.myAvatarDownload()

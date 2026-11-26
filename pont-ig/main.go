@@ -121,6 +121,11 @@ type Cmd struct {
 	Emoji string `json:"emoji"`
 	// presence : le réglage « Afficher qui est en ligne » (presence.go).
 	On bool `json:"on"`
+	// note_set : l'audience (0 abonnés mutuels, 1 amis proches), la source
+	// (« main » ou « musique ») et l'id de la demande (notes.go).
+	Audience int    `json:"audience"`
+	Source   string `json:"source"`
+	Req      string `json:"req"`
 }
 
 var (
@@ -313,6 +318,14 @@ func main() {
 			// surtout pas de réponse, l'interface la prendrait pour Messenger).
 		case "presence":
 			p.setPresence(cmd.On)
+		case "note_set":
+			go p.notes.set(p.ctx, cmd.Text, cmd.Audience, cmd.Source, cmd.Req, p.estPret())
+		case "note_clear":
+			go p.notes.clear(p.ctx, cmd.Source, cmd.Req, p.estPret())
+		case "notes_list":
+			p.demanderNotes(true)
+		case "notes_contacts":
+			p.setNotesContacts(cmd.On)
 		case "unpair", "logout":
 			go p.unpair()
 		default:

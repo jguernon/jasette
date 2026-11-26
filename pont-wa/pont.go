@@ -59,6 +59,9 @@ type Pont struct {
 	// cette connexion.
 	presenceOn bool
 	subscribed map[string]bool
+
+	// « Quoi de neuf ? » (notes.go).
+	notes *notesPont
 }
 
 func newPont(ctx context.Context) *Pont {
@@ -82,6 +85,7 @@ func newPont(ctx context.Context) *Pont {
 		picIDs:     map[string]string{},
 		listCount:  50,
 	}
+	p.notes = nouvellesNotesWA(p)
 	go p.listLoop()
 	return p
 }
@@ -387,6 +391,7 @@ func (p *Pont) onEvent(cli *whatsmeow.Client, raw any) {
 		p.ready = true
 		p.mu.Unlock()
 		emitState("ready")
+		go p.notes.annoncer()
 		go p.afterConnect(cli)
 	case *events.Disconnected:
 		p.mu.Lock()

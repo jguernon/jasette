@@ -50,6 +50,10 @@ type Pont struct {
 	// Sous srv.mu : le dernier événement `presence` de chaque conversation
 	// (PROTOCOLE.md, §5.10), rejoué aux clients qui arrivent.
 	presence map[string][]byte
+
+	// Sous srv.mu : la dernière liste `notes` (notes des contacts, Instagram,
+	// PROTOCOLE.md §5.12), rejouée après la présence.
+	notes []byte
 }
 
 // demande : des clients attendent la réponse `messages` d'une conversation.
@@ -62,7 +66,8 @@ type demande struct {
 // « pair_code » : le code d'association à huit caractères de WhatsApp.
 // « login_step » : l'étape de la connexion de Telegram (code, mot de passe) ;
 // « api » : son application (api_id, api_hash) est-elle réglée.
-var sortesRejouees = []string{"hello", "state", "account", "avatar_moi", "api", "qr", "pair_code", "login_step", "history_pin"}
+// « note_moi » : ma note actuelle sur ce service (« Quoi de neuf ? », §5.12).
+var sortesRejouees = []string{"hello", "state", "account", "avatar_moi", "note_moi", "api", "qr", "pair_code", "login_step", "history_pin"}
 
 // Tous les services connus, dans l'ordre où on les présente aux clients.
 var ordreServices = []string{"google", "messenger", "instagram", "whatsapp", "signal", "x", "telegram", "bluesky", "discord"}
@@ -179,8 +184,9 @@ func (p *Pont) executer() error {
 	// reçoivent la commande `presence` à chaque changement.
 	p.srv.mu.Lock()
 	presence := p.srv.marques.PresenceEnLigne
+	notes := p.srv.marques.NotesContacts
 	p.srv.mu.Unlock()
-	cmd.Env = append(cmd.Env, envPresence(presence))
+	cmd.Env = append(cmd.Env, envPresence(presence), envNotes(notes))
 	entree, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -252,7 +258,7 @@ func (p *Pont) recu(ligne []byte) {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 	switch tete.Ev {
-	case "hello", "account", "avatar_moi", "qr", "api":
+	case "hello", "account", "avatar_moi", "qr", "api", "note_moi":
 		p.dernier[tete.Ev] = trame
 	case "login_step":
 		// Telegram : le code ou le mot de passe attendu remplace le QR.
@@ -321,6 +327,13 @@ func (p *Pont) recu(ligne []byte) {
 		if _, ok := p.presence[pr.Item.Conv]; ok || len(p.presence) < presenceMax {
 			p.presence[pr.Item.Conv] = trame
 		}
+	case "notes":
+		// Les notes des contacts : seulement si le réglage est activé (un pont
+		// d'avant la commande pourrait encore en envoyer).
+		if !srv.marques.NotesContacts {
+			return
+		}
+		p.notes = trame
 	case "conversation":
 		p.cache.majConv(ligne)
 	case "deleted":
@@ -411,6 +424,7 @@ func (p *Pont) signalerArret() {
 	p.pret = false
 	p.demandes = map[string]demande{}
 	p.presence = map[string][]byte{}
+	p.notes = nil
 	if p.precharge != "" {
 		p.finPrecharge()
 	}
@@ -433,6 +447,9 @@ func (p *Pont) rejeu() [][]byte {
 	// La présence, après les listes (le client connaît alors les conversations).
 	for _, t := range p.presence {
 		r = append(r, t)
+	}
+	if p.notes != nil {
+		r = append(r, p.notes)
 	}
 	return r
 }
