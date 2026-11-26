@@ -95,7 +95,8 @@ fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false
     fun photoDe(c: Conv) = ca.jasette.android.Contacts.photoPour(c, grande = taille >= 48.dp) ?: Depot.avatarDe(c)
         ?: (if (mosaiqueDe(c) == null) ca.jasette.android.CacheMarques.avatar(c.id) else null)
     val principale = if (propre) null else ca.jasette.android.principaleDe(conv)
-    val photo = principale?.let { photoDe(it) } ?: photoDe(conv)
+    // La photo choisie à la main (crayon de la fiche) passe avant tout.
+    val photo = (if (propre) null else ca.jasette.android.photoPerso(conv)) ?: principale?.let { photoDe(it) } ?: photoDe(conv)
     val mosaique = if (photo == null) mosaiqueDe(conv) else null
     Box(Modifier.size(taille)) {
         // Rond, carré (EGA), cadre vert brillant (Live) ou carré en creux (Sirène).

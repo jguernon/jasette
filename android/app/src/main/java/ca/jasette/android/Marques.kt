@@ -225,6 +225,26 @@ object Marques {
     var personnesRefus by mutableStateOf<List<Refus>>(emptyList())
         private set
 
+    /**
+     * Le nom et la photo choisis à la main (crayon de la fiche, marque
+     * `contacts_perso`), {id: ContactPerso} ; voir ContactsPerso.kt.
+     */
+    var contactsPerso by mutableStateOf<Map<String, ContactPerso>>(emptyMap())
+        private set
+
+    /** Appelé après chaque réception de marques (Contacts Google d'un autre appareil). */
+    var surContactsPerso: ((Map<String, ContactPerso>) -> Unit)? = null
+
+    /** Le nom et la photo d'une personne viennent de changer ici (et ses liens, au besoin). */
+    fun changerContactsPerso(c: Map<String, ContactPerso>, p: List<Personne> = personnes) {
+        val nc = ContactsPerso.nettoyer(c)
+        val np = Personnes.nettoyer(p)
+        if (nc == contactsPerso && np == personnes) return
+        contactsPerso = nc
+        personnes = np
+        changement()
+    }
+
     /** Les liens ou refus viennent de changer ici (fiche de la personne). */
     fun changerPersonnes(p: List<Personne>, r: List<Refus>) {
         val np = Personnes.nettoyer(p)
@@ -345,6 +365,9 @@ object Marques {
         personnesRefus = try {
             Personnes.lireRefus(JSONArray(p.getString("personnes_refus", "[]") ?: "[]"))
         } catch (_: Exception) { emptyList() }
+        contactsPerso = try {
+            ContactsPerso.lire(JSONObject(p.getString("contacts_perso", "{}") ?: "{}"))
+        } catch (_: Exception) { emptyMap() }
         archivesDepuis.clear()
         try {
             val o = JSONObject(p.getString("archives_depuis", "{}") ?: "{}")
@@ -417,6 +440,7 @@ object Marques {
             ?.putString("notes_services", JSONArray(notesServices).toString())
             ?.putString("personnes", Personnes.json(personnes).toString())
             ?.putString("personnes_refus", Personnes.jsonRefus(personnesRefus).toString())
+            ?.putString("contacts_perso", ContactsPerso.json(contactsPerso).toString())
             ?.putString("archives_depuis", JSONObject(archivesDepuis.toMap()).toString())
             ?.putLong("version", version)
             ?.putBoolean("a_envoyer", aEnvoyer)
@@ -555,11 +579,12 @@ object Marques {
         val notesServices: List<String> = listOf("tout"),
         val personnes: List<Personne> = emptyList(),
         val personnesRefus: List<Refus> = emptyList(),
+        val contactsPerso: Map<String, ContactPerso> = emptyMap(),
     ) {
         fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty() && privees.isEmpty() &&
             moods.isEmpty() && emojis.isEmpty() && !garderArchives && cacherApresJours == 0 && presenceEnLigne &&
             sons == "bulle" && notesContacts && notesMusique.isEmpty() && notesMusiqueFormat == "artiste" && notesServices == listOf("tout") &&
-            personnes.isEmpty() && personnesRefus.isEmpty()
+            personnes.isEmpty() && personnesRefus.isEmpty() && contactsPerso.isEmpty()
 
         /** Chaque liste de this, dans son ordre, puis les ids de [b] qui n'y sont pas. */
         fun union(b: Listes) = Listes(
@@ -585,6 +610,8 @@ object Marques {
             // Les personnes par id (les nôtres gagnent), une conversation à une seule ; l'union des refus.
             Personnes.unir(personnes, b.personnes),
             Personnes.nettoyerRefus(personnesRefus + b.personnesRefus),
+            // Comme les moods : les entrées de this gagnent.
+            ContactsPerso.nettoyer(b.contactsPerso + contactsPerso),
         )
 
         /** Les ids de this absents de [b], liste par liste. */
@@ -603,6 +630,7 @@ object Marques {
             notesServices,
             personnes.filter { it !in b.personnes },
             personnesRefus.filter { it !in b.personnesRefus },
+            contactsPerso.filter { (k, v) -> b.contactsPerso[k] != v },
         )
     }
 
@@ -611,7 +639,7 @@ object Marques {
             head.toList(), favoris.toList(), epingles.toList(), archives.toList(), privees.toList(), moods.toMap(), emojis.toMap(),
             garderArchives, cacherApresJours, presenceEnLigne, sonsConversation,
             notesContacts, notesMusique, notesMusiqueFormat, notesServices,
-            personnes, personnesRefus,
+            personnes, personnesRefus, contactsPerso,
         )
 
     private fun poser(l: Listes) {
@@ -642,6 +670,7 @@ object Marques {
         notesServices = l.notesServices
         personnes = l.personnes
         personnesRefus = l.personnesRefus
+        contactsPerso = l.contactsPerso
     }
 
     /** Envoie une trame au serveur ; faux si la connexion est coupée. Posé par [Depot] en mode client. */
@@ -690,6 +719,7 @@ object Marques {
             .put("notes_services", JSONArray(l.notesServices))
             .put("personnes", Personnes.json(l.personnes))
             .put("personnes_refus", Personnes.jsonRefus(l.personnesRefus))
+            .put("contacts_perso", ContactsPerso.json(l.contactsPerso))
             .put("version", version).put("id", prochain)
         if (!envoi(JSONObject().put("marques", corps))) {
             // La connexion tombe : le rejeu suivant tranchera.
@@ -738,6 +768,8 @@ object Marques {
             // Et pour les personnes (serveur d'avant la fiche de la personne) : les nôtres restent.
             m.optJSONArray("personnes")?.let { Personnes.lire(it) } ?: personnes,
             m.optJSONArray("personnes_refus")?.let { Personnes.lireRefus(it) } ?: personnesRefus,
+            // Et pour les contacts perso (serveur d'avant le crayon de la fiche) : les nôtres restent.
+            m.optJSONObject("contacts_perso")?.let { ContactsPerso.lire(it) } ?: contactsPerso,
         )
         val v = m.optLong("version", -1)
         if (v < 0) return
@@ -791,6 +823,7 @@ object Marques {
         }
         if (Triple(listes(), version, aEnvoyer) != avant || serveurMarques != serveurAvant) garder()
         if (listes() != avant.first) CacheMarques.synchroniser()
+        surContactsPerso?.invoke(contactsPerso)
         pousser()
     }
 }

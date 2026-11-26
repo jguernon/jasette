@@ -249,6 +249,18 @@ object Contacts {
         }
     }
 
+    /** Le carnet lu tout de suite (hors du fil principal) ; null sans la permission. */
+    fun lireMaintenant(ctx: Context): List<ContactTel>? = try {
+        lire(ctx)
+    } catch (_: Throwable) {
+        null
+    }
+
+    /** Le carnet a changé (Jasette vient d'y écrire) : relu tout de suite. */
+    fun relire() {
+        if (permis) recharger(0)
+    }
+
     /** Les chiffres seulement. */
     fun chiffres(s: String) = s.filter { it.isDigit() }
 

@@ -11,6 +11,9 @@
     <!-- Les contacts du téléphone (photos, « Nouveau message ») : demandée seulement
          quand l'utilisateur en a besoin, jamais au démarrage. Ils ne quittent pas le téléphone. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- « Enregistrer aussi dans les Contacts Google » (crayon de la fiche de la personne),
+         demandée seulement au moment d'enregistrer, avec une explication. -->
+    <uses-permission android:name="android.permission.WRITE_CONTACTS" />
     <!-- « Utiliser les SMS du téléphone » (PontSms.kt, mode autonome) : lire et envoyer
          les SMS et MMS de l'appareil. Demandées seulement au clic, après une explication.
          Google Play les réserve aux apps SMS par défaut : voir play/SMS.md. -->

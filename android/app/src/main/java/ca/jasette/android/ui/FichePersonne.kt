@@ -1,6 +1,27 @@
 package ca.jasette.android.ui
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import ca.jasette.android.CibleContact
+import ca.jasette.android.ContactsGoogle
+import ca.jasette.android.ContactsPerso
+import ca.jasette.android.recadrerPhotoPerso
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -92,8 +113,15 @@ private fun contactsTel(): List<Pair<String, String>> =
 fun groupePersonne(ancre: String): Groupe =
     regrouper(ancre, candidats(ancre), Marques.personnes, Marques.personnesRefus, contactsTel())
 
-/** Le nom de la personne : celui de la conversation principale, sinon celui de l'ancre. */
-private fun nomPersonne(g: Groupe): String {
+/** L'entrée `contacts_perso` de la fiche (l'une de ses conversations), et sa clé. */
+private fun persoFiche(ids: List<String>) = ids.firstNotNullOfOrNull { ContactsPerso.de(Marques.contactsPerso, Marques.personnes, it) }
+
+/** Le nom de la personne : celui choisi à la main, sinon celui de la conversation principale, sinon celui de l'ancre. */
+private fun nomPersonne(g: Groupe): String =
+    persoFiche(g.ids)?.second?.nom?.takeIf { it.isNotEmpty() } ?: nomServicePersonne(g)
+
+/** Le nom de la personne selon les services (sans le nom choisi à la main). */
+private fun nomServicePersonne(g: Groupe): String {
     val ids = g.ids
     val principal = Marques.personnes.firstOrNull { it.principal.isNotEmpty() && it.convs.any { c -> c in ids } }
         ?.principal?.takeIf { it in ids }
@@ -118,6 +146,7 @@ private fun restant(ms: Long): String {
 fun FichePersonne(ancre: String, fermer: () -> Unit) {
     val etat = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var lierOuvert by remember { mutableStateOf(false) }
+    var edition by remember { mutableStateOf(false) }
     val g = groupePersonne(ancre)
     val nom = nomPersonne(g)
     fun groupeIds() = groupePersonne(ancre).ids
@@ -137,6 +166,7 @@ fun FichePersonne(ancre: String, fermer: () -> Unit) {
             if (photo != null) {
                 Box(Modifier.size(taille)) {
                     Avatar(photo.copy(name = nom), taille, badge = false)
+                    if (!lierOuvert) Crayon(taille, Modifier.align(Alignment.BottomEnd)) { edition = true }
                     if (enLigne) {
                         val d = taille * 0.19f
                         val carre = P.ega || P.retro
@@ -242,6 +272,233 @@ fun FichePersonne(ancre: String, fermer: () -> Unit) {
                 }
             }
         }
+    }
+    if (edition) EditionPersonne(ancre) { edition = false }
+}
+
+/** Le crayon : un petit badge rond (carré en EGA et rétro) sur le bas du grand avatar. */
+@Composable
+private fun Crayon(taille: Dp, modifier: Modifier, toucher: () -> Unit) {
+    val d = taille * 0.25f
+    Box(
+        modifier.size(d).clip(formeRonde).background(P.menu).padding(3.dp).clip(formeRonde).background(P.accentPlein)
+            .clickable(onClick = toucher),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Filled.Edit, t("Changer le nom et la photo"), tint = P.surAccent, modifier = Modifier.size(d * 0.5f))
+    }
+}
+
+/**
+ * La fenêtre du crayon : l'aperçu, « Changer la photo » (sélecteur de photos
+ * du système), le champ Nom et, pour une personne qui a un numéro, la case
+ * « Enregistrer aussi dans les Contacts Google » (cochée si la permission y
+ * est déjà). Enregistrer : la marque `contacts_perso` (photo téléversée au
+ * serveur en mode client), puis, après confirmation, le carnet du téléphone.
+ */
+@Composable
+private fun EditionPersonne(ancre: String, fermer: () -> Unit) {
+    val ctx = LocalContext.current
+    val portee = rememberCoroutineScope()
+    val g = groupePersonne(ancre)
+    val ids = g.ids
+    val existante = persoFiche(ids)
+    var nom by remember { mutableStateOf(existante?.second?.nom ?: "") }
+    var photo by remember { mutableStateOf<String?>(null) }
+    var occupe by remember { mutableStateOf(false) }
+    val numeros = remember(ids) { ContactsGoogle.numeros(ids) { Depot.conv(it) } }
+    var google by remember { mutableStateOf(numeros.isNotEmpty() && ContactsGoogle.permis(ctx)) }
+    var explication by remember { mutableStateOf(false) }
+    var confirmer by remember { mutableStateOf<CibleContact?>(null) }
+    val nomService = nomServicePersonne(g)
+    fun dire(texte: String) = Toast.makeText(ctx, texte, Toast.LENGTH_LONG).show()
+
+    val choisirPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) portee.launch {
+            val f = withContext(Dispatchers.IO) { runCatching { recadrerPhotoPerso(ctx, uri) }.getOrNull() }
+            if (f != null) photo = f.path else dire(t("Image illisible"))
+        }
+    }
+
+    /** La marque, puis (si [cible]) le carnet du téléphone. */
+    fun enregistrer(cible: CibleContact?) {
+        occupe = true
+        val personnes = ContactsPerso.relierFiche(Marques.personnes, ids, Personnes.nouvelId())
+        val cle = ContactsPerso.cle(Marques.contactsPerso, personnes, ids)
+        val n = nom.trim()
+        val choisie = photo
+        portee.launch {
+            var finale: String? = null
+            if (choisie != null) {
+                finale = if (Depot.avecServeur) {
+                    withContext(Dispatchers.IO) { runCatching { Depot.televerserPhotoPerso(java.io.File(choisie)) }.getOrNull() }
+                        .also { if (it == null) dire(t("La photo n'a pas pu être envoyée au serveur Jasette")) }
+                } else choisie
+            }
+            val m = ContactsPerso.poser(Marques.contactsPerso, cle, n, finale, cible != null)
+            Marques.changerContactsPerso(m, personnes)
+            if (cible != null) {
+                val e = m[cle]
+                val fichier = choisie ?: e?.photo?.let { ContactsPerso.photoLocale(it) }
+                val ok = withContext(Dispatchers.IO) { ContactsGoogle.ecrire(ctx, cible, n, nomService, fichier) }
+                if (ok) {
+                    if (e != null) ContactsGoogle.noterAppliquee(ctx, cle, e)
+                    dire(t("Enregistré dans Jasette et dans les Contacts Google."))
+                } else {
+                    dire(t("Les Contacts Google n'ont pas pu être changés : enregistré dans Jasette seulement."))
+                }
+            }
+            occupe = false
+            fermer()
+        }
+    }
+
+    /** La permission est là : le contact visé, puis la confirmation. */
+    fun preparerGoogle() {
+        occupe = true
+        portee.launch {
+            val c = withContext(Dispatchers.IO) { ContactsGoogle.cibleDe(ctx, ids, nom.trim().ifEmpty { nomService }) }
+            occupe = false
+            when {
+                c is CibleContact.SansNumero -> {
+                    dire(t("Cette personne n'a pas de numéro de téléphone : enregistré dans Jasette seulement."))
+                    enregistrer(null)
+                }
+                c is CibleContact.Nouveau && c.compte == null -> {
+                    dire(t("Aucun compte Google sur ce téléphone : enregistré dans Jasette seulement."))
+                    enregistrer(null)
+                }
+                else -> confirmer = c
+            }
+        }
+    }
+
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
+        if (r.values.all { it }) {
+            preparerGoogle()
+        } else {
+            dire(t("Permission refusée : enregistré dans Jasette seulement."))
+            enregistrer(null)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!occupe) fermer() },
+        containerColor = P.menu,
+        shape = forme(24.dp),
+        title = { Text(t("Changer le nom et la photo"), color = P.texteFort) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val apercu = photo
+                    if (apercu != null) {
+                        ImageFichier(apercu, Modifier.cadreAvatar(84.dp).background(P.surface), cote = 256, pixels = if (P.retro) PIXELS_RETRO else 0)
+                    } else {
+                        val c = meilleurePhoto(g)
+                        if (c != null) Avatar(c.copy(name = nom.trim().ifEmpty { nomService }), 84.dp, badge = false)
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    PetitBouton(t("Changer la photo"), false) {
+                        choisirPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }
+                }
+                Text(t("Nom"), color = P.textePale, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Box(Modifier.fillMaxWidth().champRond().padding(horizontal = 12.dp, vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
+                    if (nom.isEmpty()) Text(nomService, color = P.textePale, fontSize = 15.sp, maxLines = 1)
+                    BasicTextField(
+                        nom, { nom = it }, singleLine = true,
+                        textStyle = TextStyle(color = P.texteFort, fontSize = 15.sp, fontFamily = P.police),
+                        cursorBrush = SolidColor(P.accent), modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (numeros.isNotEmpty()) {
+                    Row(Modifier.fillMaxWidth().clip(forme(12.dp)).clickable { google = !google }, verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            google, { google = it },
+                            colors = CheckboxDefaults.colors(checkedColor = P.accentPlein, checkmarkColor = P.surAccent, uncheckedColor = P.textePale),
+                        )
+                        Text(t("Enregistrer aussi dans les Contacts Google"), color = P.texte, fontSize = 14.sp)
+                    }
+                } else {
+                    Text(t("Sans numéro de téléphone, le nom et la photo restent dans Jasette."), color = P.textePale, fontSize = 12.sp)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(shape = formeBouton, enabled = !occupe, onClick = {
+                when {
+                    !google || numeros.isEmpty() -> enregistrer(null)
+                    ContactsGoogle.permis(ctx) -> preparerGoogle()
+                    else -> explication = true
+                }
+            }) { Text(t("Enregistrer"), color = P.accent) }
+        },
+        dismissButton = {
+            Row {
+                if (existante != null) {
+                    TextButton(shape = formeBouton, enabled = !occupe, onClick = {
+                        Marques.changerContactsPerso(ContactsPerso.retablir(Marques.contactsPerso, Marques.personnes, ids))
+                        fermer()
+                    }) { Text(t("Rétablir"), color = P.texte) }
+                }
+                TextButton(shape = formeBouton, enabled = !occupe, onClick = fermer) { Text(t("Annuler"), color = P.texte) }
+            }
+        },
+    )
+
+    if (explication) {
+        AlertDialog(
+            onDismissRequest = { explication = false },
+            containerColor = P.menu,
+            title = { Text(t("Accès aux contacts"), color = P.texteFort) },
+            text = {
+                Text(
+                    t("Pour enregistrer ce nom et cette photo dans vos Contacts Google, Jasette doit pouvoir lire et modifier les contacts du téléphone. Il ne change que ce contact-là, et le carnet se synchronise lui-même avec Google."),
+                    color = P.texte,
+                )
+            },
+            confirmButton = {
+                TextButton(shape = formeBouton, onClick = {
+                    explication = false
+                    permission.launch(ContactsGoogle.PERMISSIONS)
+                }) { Text(t("Continuer"), color = P.accent) }
+            },
+            dismissButton = {
+                TextButton(shape = formeBouton, onClick = {
+                    explication = false
+                    enregistrer(null)
+                }) { Text(t("Jasette seulement"), color = P.texte) }
+            },
+        )
+    }
+
+    val cible = confirmer
+    if (cible != null) {
+        val n = nom.trim().ifEmpty { nomService }
+        val texte = when (cible) {
+            is CibleContact.Existant -> t("Mettre à jour le contact « %s » (nom et photo) dans vos Contacts Google ?").replace("%s", cible.nom)
+            is CibleContact.Nouveau -> t("Créer le contact « %s » (%n) dans le compte Google %c ?").replace("%s", n).replace("%n", cible.numero)
+                .replace("%c", cible.compte ?: "")
+            CibleContact.SansNumero -> ""
+        }
+        AlertDialog(
+            onDismissRequest = { confirmer = null },
+            containerColor = P.menu,
+            title = { Text(t("Contacts Google"), color = P.texteFort) },
+            text = { Text(texte, color = P.texte) },
+            confirmButton = {
+                TextButton(shape = formeBouton, onClick = {
+                    confirmer = null
+                    enregistrer(cible)
+                }) { Text(t("Enregistrer"), color = P.accent) }
+            },
+            dismissButton = {
+                TextButton(shape = formeBouton, onClick = {
+                    confirmer = null
+                    enregistrer(null)
+                }) { Text(t("Jasette seulement"), color = P.texte) }
+            },
+        )
     }
 }
 

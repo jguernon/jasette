@@ -224,6 +224,8 @@ object Depot {
         enMarche = true
         Marques.surPresence = { oui -> principal.post { presenceReglee(oui) } }
         Marques.surNotesContacts = { oui -> principal.post { notesContactsReglees(oui) } }
+        // Une entrée « Contacts Google » venue du bureau : appliquée ici si la permission y est déjà.
+        Marques.surContactsPerso = { m -> ContactsGoogle.appliquerRecues(appli, m) }
         Sons.init(ctx)
         generation++
         val cfg = ConfigServeur.lire(appli)
@@ -240,8 +242,10 @@ object Depot {
             }
             connexion = cx
             Marques.brancher(cfg.empreinte) { cx.envoyerMarques(it) }
+            ContactsPerso.resoudre = { cx.photoLocale(it) }
         } else {
             Marques.brancher(null, null)
+            ContactsPerso.resoudre = null
         }
         CacheConvs.initialiser(appli)
         CacheConvs.servicesGardes().forEach { connus[it] = true }
@@ -371,6 +375,16 @@ object Depot {
 
     /** Mode client : depuis quand (ms) le serveur ne répond pas ; 0 s'il répond (ou sans serveur). */
     val serveurCoupeDepuis: Long get() = connexion?.coupeDepuis ?: 0
+
+    /** En mode client : le serveur Jasette garde les photos des contacts perso. */
+    val avecServeur: Boolean get() = connexion != null
+
+    /**
+     * Mode client : téléverse une photo de contact perso et rend son chemin sur
+     * le serveur (lève une exception en cas d'échec) ; null sans serveur.
+     * Bloquant : hors du fil principal.
+     */
+    fun televerserPhotoPerso(local: java.io.File): String? = connexion?.televerserPhoto(local)
 
     fun arreter() {
         CacheConvs.ecrireMaintenant()

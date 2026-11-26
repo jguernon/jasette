@@ -293,11 +293,20 @@ fun principaleDe(conv: Conv): Conv? {
     return principalDe(Marques.personnes, conv.id)?.let { Depot.conv(it) }?.takeIf { !it.group }
 }
 
+/** Le nom et la photo choisis à la main pour [conv] (crayon de la fiche ; jamais pour un groupe). */
+fun contactPerso(conv: Conv): ContactPerso? =
+    if (conv.group || conv.large) null else ContactsPerso.de(Marques.contactsPerso, Marques.personnes, conv.id)?.second
+
+/** La photo choisie à la main pour [conv] (un fichier lisible ici), s'il y en a une. */
+fun photoPerso(conv: Conv): String? = contactPerso(conv)?.photo?.let { ContactsPerso.photoLocale(it) }
+
 /**
- * Le nom montré partout pour [conv] : celui de la principale de sa personne,
- * sinon le sien (vide s'il n'en a pas). La recherche trouve aussi le nom d'origine.
+ * Le nom montré partout pour [conv] : celui choisi à la main (crayon de la
+ * fiche), sinon celui de la principale de sa personne, sinon le sien (vide
+ * s'il n'en a pas). La recherche trouve aussi le nom d'origine.
  */
-fun nomAffiche(conv: Conv): String = principaleDe(conv)?.name?.trim()?.takeIf { it.isNotEmpty() } ?: conv.name
+fun nomAffiche(conv: Conv): String =
+    contactPerso(conv)?.nom?.takeIf { it.isNotEmpty() } ?: principaleDe(conv)?.name?.trim()?.takeIf { it.isNotEmpty() } ?: conv.name
 
 /** « Utiliser ce nom et cette photo » : [x] devient le nom principal de la personne (créée au besoin). */
 fun choisirPrincipal(personnes: List<Personne>, groupe: List<String>, x: String, idNeuf: String): List<Personne> {

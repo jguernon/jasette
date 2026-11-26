@@ -362,6 +362,24 @@ class ConnexionServeur(
     @Volatile var services: List<String> = emptyList()
         private set
     private val vus = ConcurrentHashMap<String, Pair<File, Long>>()
+    /** Les photos des contacts perso : chemin du serveur → copie locale. */
+    private val photos = ConcurrentHashMap<String, String>()
+
+    /** La copie locale d'une photo de contact perso du serveur, si elle est là. */
+    fun photoLocale(distant: String): String? {
+        photos[distant]?.let { if (File(it).isFile) return it }
+        return File(cache, nomLocal(distant)).takeIf { it.isFile }?.path
+    }
+
+    /**
+     * Téléverse une photo de contact perso (`"garder":"contact"`, PROTOCOLE.md
+     * §6.2) ; rend son chemin sur le serveur. Bloquant : hors du fil principal.
+     */
+    fun televerserPhoto(local: File): String {
+        val distant = televerser(local, garder = "contact")
+        photos[distant] = local.path
+        return distant
+    }
     // Les écritures (commandes venues du fil principal) passent par un seul fil.
     private val ecrivain: ExecutorService = Executors.newSingleThreadExecutor { Thread(it, "serveur-ecriture") }
     // Les événements : réécriture des chemins (téléchargements) puis remise, dans l'ordre.
@@ -608,7 +626,18 @@ class ConnexionServeur(
             }
             v.has("marques") -> {
                 val m = v.optJSONObject("marques") ?: return
-                executer(traitement) { surMarques(m) }
+                executer(traitement) {
+                    // Les photos des contacts perso : copiées ici avant que les marques
+                    // passent (au rejeu aussi : un appareil qui arrive après les reçoit).
+                    val perso = m.optJSONObject("contacts_perso")
+                    if (perso != null) {
+                        for (k in perso.keys()) {
+                            val p = perso.optJSONObject(k)?.chaine("photo") ?: continue
+                            if (p.startsWith("/") && photoLocale(p) == null) telecharger(p)?.let { photos[p] = it.path }
+                        }
+                    }
+                    surMarques(m)
+                }
             }
             v.has("ping") -> {
                 val p = v.get("ping")
@@ -770,7 +799,7 @@ class ConnexionServeur(
     }
 
     /** Téléverse un fichier local ; rend son chemin sur le serveur. Bloquant. */
-    private fun televerser(local: File): String {
+    private fun televerser(local: File, garder: String? = null): String {
         val taille = local.length()
         val l = lienCourant() ?: throw IOException(t("serveur injoignable"))
         val (id, q) = attendre()
@@ -790,7 +819,10 @@ class ConnexionServeur(
                     val fin = n < morceau.size || envoye >= taille
                     val put = JSONObject().put("id", id)
                         .put("donnees", Base64.encodeToString(morceau, 0, n, Base64.NO_WRAP)).put("fin", fin)
-                    if (premier) put.put("nom", local.name)
+                    if (premier) {
+                        put.put("nom", local.name)
+                        if (garder != null) put.put("garder", garder)
+                    }
                     premier = false
                     l.ecrire(JSONObject().put("put", put).toString())
                     // Le serveur ne répond qu'à la fin, ou en cas d'erreur.

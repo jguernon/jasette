@@ -81,7 +81,7 @@ object ConvVoiture {
 
     /** L'avatar rond, comme dans les notifications : photo du contact, du service, ou mosaïque du groupe. */
     fun image(ctx: Context, c: Conv): Bitmap? {
-        val photo = Contacts.photoPour(c, grande = true) ?: Depot.avatarDe(c)
+        val photo = photoPerso(c) ?: Contacts.photoPour(c, grande = true) ?: Depot.avatarDe(c)
         val cle = "${c.id}|$photo"
         synchronized(images) { if (images.containsKey(cle)) return images[cle] }
         val b = avatarRond(ctx, photo) ?: if (c.group) mosaiqueRonde(ctx, Depot.mosaiques[c.id]) else null
