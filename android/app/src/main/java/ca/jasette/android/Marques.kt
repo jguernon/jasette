@@ -78,7 +78,7 @@ object Marques {
     private val archivesDepuis = HashMap<String, Long>()
 
     /** Chaque bulle montre son heure (et sa date si ce n'est pas aujourd'hui), comme `details_heures`. */
-    var heureChaqueMessage by mutableStateOf(false)
+    var heureChaqueMessage by mutableStateOf(true)
         private set
 
     fun choisirHeureChaqueMessage(oui: Boolean) {
@@ -154,7 +154,7 @@ object Marques {
         avatarSource = p.getString("avatar_source", "") ?: ""
         avatarFichier = p.getString("avatar_fichier", null)
         deuxVolets = p.getBoolean("deux_volets", true)
-        heureChaqueMessage = p.getBoolean("heure_chaque_message", false)
+        heureChaqueMessage = p.getBoolean("heure_chaque_message", true)
         headGrille = colonnes(p.getString("head_grille", "4") ?: "4").toString()
         tailleMessages = p.getFloat("taille_messages", 1f).coerceIn(0.85f, 1.6f)
         head.clear()
