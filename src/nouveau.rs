@@ -128,6 +128,37 @@ impl ChoixNouveau {
     }
 }
 
+/// La hauteur d'une puce (et le côté d'une puce de service non choisie).
+const HAUT_PUCE: f32 = 28.;
+const ECART_PUCES: f32 = 4.;
+const LOGO_PUCE: f32 = 18.;
+/// La place des puces : la liste (370 px) moins ses marges (2 × 14 px).
+const LARGEUR_PUCES: f32 = 342.;
+
+/// La largeur estimée d'un texte de puce (13 px ; la police EGA est plus large).
+fn largeur_texte(texte: &str) -> f32 {
+    texte.chars().count() as f32 * if th().ega { 8. } else { 7. }
+}
+
+/// Le nombre de lignes des puces de service (elles passent à la ligne) :
+/// « Tout » avec son texte, les services en icônes rondes, le service
+/// choisi avec son nom. Sert à la hauteur de l'en-tête.
+fn lignes_puces(filtre: Option<Service>, services: &[Service], largeur: f32) -> usize {
+    let tout = 20. + largeur_texte(t("Tout"));
+    let mut lignes = 1;
+    let mut x = tout;
+    for s in services {
+        let l = if filtre == Some(*s) { 20. + LOGO_PUCE + 6. + largeur_texte(s.court()) } else { HAUT_PUCE };
+        if x + ECART_PUCES + l > largeur {
+            lignes += 1;
+            x = l;
+        } else {
+            x += ECART_PUCES + l;
+        }
+    }
+    lignes
+}
+
 /// Une puce : service (avec son logo), « Tout » ou personne choisie.
 fn puce(id: impl Into<gpui::ElementId>, actif: bool, permise: bool) -> gpui::Stateful<Div> {
     div()
@@ -137,7 +168,7 @@ fn puce(id: impl Into<gpui::ElementId>, actif: bool, permise: bool) -> gpui::Sta
         .flex_row()
         .items_center()
         .gap(px(6.))
-        .h(px(30.))
+        .h(px(HAUT_PUCE))
         .px(px(10.))
         .rounded(rayon(999.))
         .border_1()
@@ -218,15 +249,19 @@ impl Jasette {
         let choix = &self.choix_nouveau;
         let mut col = div().flex().flex_col().px(px(14.));
         let mut haut = 0.;
-        // Les puces de service : Tout, puis chaque service connecté.
+        // Les puces de service : Tout, puis chaque service connecté, en
+        // icônes rondes ; la puce choisie montre aussi son nom. Elles passent
+        // à la ligne plutôt que de défiler (panneau étroit, beaucoup de services).
+        let services: Vec<Service> = tous_services().filter(|s| self.service_connecte(*s)).collect();
+        let lignes = lignes_puces(choix.filtre, &services, LARGEUR_PUCES);
         let mut rangee = div()
             .id("nv-services")
             .flex()
             .flex_row()
+            .flex_wrap()
             .items_center()
-            .gap(px(6.))
+            .gap(px(ECART_PUCES))
             .pb(px(8.))
-            .overflow_x_scroll()
             .child(
                 puce("nv-tout", choix.filtre.is_none(), choix.puce_permise(None)).child(t("Tout")).on_click(cx.listener(
                     |this, _, _, cx| {
@@ -237,11 +272,20 @@ impl Jasette {
                     },
                 )),
             );
-        for s in tous_services().filter(|s| self.service_connecte(*s)) {
+        for s in services {
+            let choisie = choix.filtre == Some(s);
+            let nom = s.court();
             rangee = rangee.child(
-                puce(SharedString::from(format!("nv-{}", s.cle())), choix.filtre == Some(s), choix.puce_permise(Some(s)))
-                    .child(logo(s, 18.))
-                    .child(s.court())
+                puce(SharedString::from(format!("nv-{}", s.cle())), choisie, choix.puce_permise(Some(s)))
+                    .child(logo(s, LOGO_PUCE))
+                    // Les autres : l'icône seule, ronde, le nom dans l'infobulle.
+                    .when(choisie, |d| d.child(nom))
+                    .when(!choisie, |d| {
+                        d.w(px(HAUT_PUCE))
+                            .px(px(0.))
+                            .justify_center()
+                            .tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(nom).build(w, cx))
+                    })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if this.choix_nouveau.choisir_filtre(Some(s)) {
                             this.chercher_nouveau();
@@ -251,7 +295,7 @@ impl Jasette {
             );
         }
         col = col.child(rangee);
-        haut += 38.;
+        haut += 8. + lignes as f32 * HAUT_PUCE + (lignes - 1) as f32 * ECART_PUCES;
         // Une courte explication quand des puces sont désactivées.
         let explication = choix.verrou().is_some().then(|| t("Un groupe reste sur un seul service").to_string());
         // « Créer un groupe » : une rangée qui bascule le mode groupe.
@@ -585,6 +629,18 @@ impl Jasette {
 #[cfg(test)]
 mod essais {
     use super::*;
+
+    #[test]
+    fn puces_compactes() {
+        // Les neuf services en icônes, « Tout » choisi : une seule ligne.
+        let tous: Vec<Service> = tous_services().collect();
+        assert_eq!(tous.len(), 9);
+        assert_eq!(lignes_puces(None, &tous, LARGEUR_PUCES), 1);
+        // Un service choisi montre son nom : la rangée passe à la ligne, sans défiler.
+        assert_eq!(lignes_puces(Some(Service::GoogleMessages), &tous, LARGEUR_PUCES), 2);
+        // Sept services, Signal choisi : tout tient.
+        assert_eq!(lignes_puces(Some(Service::Signal), &tous[..7], LARGEUR_PUCES), 1);
+    }
 
     #[test]
     fn puces_et_groupe() {
