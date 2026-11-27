@@ -1,4 +1,4 @@
 {
-  "fr": "Stories : un cercle Instagram autour des contacts qui ont une story, partout (liste, Head, favoris, recherche, fiche) ; un toucher l'ouvre dans Instagram, et le cercle disparaît une fois vue (option dans Réglages > Comptes). Les expéditeurs automatiques (codes, promotions, avis) prennent l'icône de leur groupe comme avatar.",
-  "en": "Stories: an Instagram ring around contacts who have a story, everywhere (list, Head, favorites, search, profile); a tap opens it in Instagram, and the ring goes away once seen (option in Settings > Accounts). Automatic senders (codes, promotions, updates) get their group's icon as avatar."
+  "fr": "Deux nouveaux groupes automatiques : Rendez-vous (confirmations, rappels) et Argent (virements Interac, dépôts, retraits, achats, solde, paie). Nouveau « Classer… » au clic droit (appui long sur Android) pour choisir le groupe d'une conversation dans une fenêtre. Les notifications d'un numéro inconnu montrent le bonhomme au lieu d'un point.",
+  "en": "Two new automatic groups: Appointments (confirmations, reminders) and Money (Interac transfers, deposits, withdrawals, purchases, balance, pay). New “Classify…” on right-click (long-press on Android) to pick a conversation's group in a window. Notifications from an unknown number show the person icon instead of a dot."
 }
