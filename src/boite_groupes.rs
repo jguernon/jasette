@@ -253,7 +253,7 @@ impl Jasette {
             .flex()
             .items_center()
             .justify_center()
-            .child(avec_repli_emoji(div().text_size(px(taille * 0.62)).line_height(px(taille))).child(g.emoji()))
+            .child(avec_repli_emoji(div().text_size(px(taille * echelle_emoji(g))).line_height(px(taille))).child(g.emoji()))
     }
 
     /// La rangée d'un groupe dans la boîte.
@@ -550,5 +550,15 @@ impl Jasette {
             .child(div().px(px(4.)).text_size(px(12.)).text_color(th().texte_pale).child(t(
                 "Jasette range les expéditeurs automatiques dans une seule rangée, sur cet appareil, sans rien envoyer ailleurs. Les contacts, les favoris, les épinglées, les groupes et les conversations où vous avez écrit ne sont jamais regroupés.",
             )))
+    }
+}
+
+/// La taille d'un emoji de groupe, en part de l'avatar. Les glyphes de Noto
+/// Color Emoji n'ont pas les mêmes marges : le cadenas 🔐 remplit presque tout
+/// son carré, le colis et les étiquettes beaucoup moins. On les égalise à l'œil.
+fn echelle_emoji(g: Groupe) -> f32 {
+    match g {
+        Groupe::Codes => 0.52,
+        Groupe::Promos | Groupe::Avis => 0.62,
     }
 }

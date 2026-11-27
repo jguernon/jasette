@@ -53,7 +53,7 @@ fun AvatarGroupe(g: GroupeAuto, taille: Dp) {
         contentAlignment = Alignment.Center,
     ) {
         // L'emoji occupe ~60 % du rond.
-        val px = with(LocalDensity.current) { (taille * 0.6f).toSp() }
+        val px = with(LocalDensity.current) { (taille * echelleEmoji(g)).toSp() }
         Text(g.emoji, fontSize = px, lineHeight = px)
     }
 }
@@ -167,4 +167,14 @@ fun EnteteGroupe(g: GroupeAuto, membres: List<Conv>, fermer: () -> Unit) {
             Text(t("Tout marquer comme lu"), color = if (nonLues.isNotEmpty()) P.accent else P.textePale)
         }
     }
+}
+
+/**
+ * La taille d'un emoji de groupe, en part de l'avatar. Les glyphes de la police
+ * d'emoji n'ont pas les mêmes marges : le cadenas 🔐 remplit presque tout son
+ * carré, le colis et les étiquettes beaucoup moins. On les égalise à l'œil.
+ */
+private fun echelleEmoji(g: GroupeAuto): Float = when (g) {
+    GroupeAuto.CODES -> 0.5f
+    else -> 0.6f
 }
