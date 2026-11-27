@@ -306,9 +306,10 @@ func TestGroupesInboxIgnoree(t *testing.T) {
 func TestGroupesAuto(t *testing.T) {
 	s, c := serveurEssai(t)
 
-	s.recevoirMarques(c, json.RawMessage(`{"groupes_auto":{"12345":"codes","s:1":"pub","":"avis","x:2":""},"version":0}`))
+	s.recevoirMarques(c, json.RawMessage(`{"groupes_auto":{"12345":"codes","s:1":"pub","":"avis","x:2":"","w:5":"rdv","b:6":"argent"},"version":0}`))
 	tr := lireTrame(t, c)
-	if tr.Marques.Version != 1 || len(tr.Marques.GroupesAuto) != 1 || tr.Marques.GroupesAuto["12345"] != "codes" {
+	if tr.Marques.Version != 1 || len(tr.Marques.GroupesAuto) != 3 || tr.Marques.GroupesAuto["12345"] != "codes" ||
+		tr.Marques.GroupesAuto["w:5"] != "rdv" || tr.Marques.GroupesAuto["b:6"] != "argent" {
 		t.Fatalf("après pose : %+v", tr.Marques)
 	}
 

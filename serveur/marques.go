@@ -56,8 +56,8 @@ type Marques struct {
 	// d'un appui par le bouton à droite de la saisie. Absent : aucun.
 	Emojis map[string]string `json:"emojis"`
 	// GroupesAuto : la correction à la main du regroupement automatique de
-	// la boîte (« Ce n'est pas une promo », « Mettre dans Codes »…), {id:
-	// "codes"|"promos"|"avis"|"aucun"}. Elle gagne toujours sur la détection,
+	// la boîte (« Ce n'est pas une promo », « Classer… »), {id:
+	// "codes"|"promos"|"rdv"|"argent"|"avis"|"aucun"}. Elle gagne toujours sur la détection,
 	// faite par chaque client. Absent (ancien fichier) : vide.
 	GroupesAuto map[string]string `json:"groupes_auto"`
 	// GarderArchives : « Garder les conversations archivées hors de la boîte
@@ -248,7 +248,11 @@ func nettoyerGroupesAuto(m map[string]string) map[string]string {
 }
 
 func groupeAutoConnu(g string) bool {
-	return g == "codes" || g == "promos" || g == "avis" || g == "aucun"
+	switch g {
+	case "codes", "promos", "rdv", "argent", "avis", "aucun":
+		return true
+	}
+	return false
 }
 
 // unirGroupesAuto : de même pour les corrections du regroupement automatique.

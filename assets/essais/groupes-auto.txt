@@ -2,9 +2,9 @@
 # android/…/GroupesAuto.kt) : les deux côtés lisent ce fichier.
 # Champs séparés par des tabulations ; « \n » dans un texte : un saut de ligne.
 #
-# M <sorte attendue : code|promo|avis|autre> <texte du message>
+# M <sorte attendue : code|promo|rdv|argent|avis|autre> <texte du message>
 # X <expéditeur attendu : court|alpha|ordinaire> <nom> <numéro>
-# G <groupe attendu : codes|promos|avis|aucun> <sms|autre> <court|alpha|ordinaire> <drapeaux : - ou exclue,ecrit> <sortes, du plus vieux au plus récent : c p a x>
+# G <groupe attendu : codes|promos|rdv|argent|avis|aucun> <sms|autre> <court|alpha|ordinaire> <drapeaux : - ou exclue,ecrit> <sortes, du plus vieux au plus récent : c p r $ a x>
 # F <groupe final attendu> <correction à la main : - ou sa valeur> <groupe détecté>
 
 # Les messages : codes.
@@ -23,16 +23,45 @@ M	promo	Économisez 20$ sur votre prochaine visite! Offre valide jusqu’à dima
 M	promo	Deals of the week are here! Free shipping on orders over $50. Text STOP to opt out
 M	promo	Nos soldes d'hiver commencent : jusqu'à 40 % sur les manteaux
 
+# Les messages : rendez-vous.
+M	rdv	Rappel : rendez-vous chez le dentiste demain à 10 h. Répondez STOP pour ne plus recevoir de rappels.
+M	rdv	Reminder: your appointment is tomorrow at 9:30 AM
+M	rdv	Rappel : rendez-vous demain à 14 h
+M	rdv	Your appointment with Dr. Tremblay is confirmed for Tuesday, March 3 at 2:15 PM. Reply C to confirm.
+M	rdv	Clinique vétérinaire Saint-Jean : votre rendez-vous pour Mimi est le 12 mars à 9 h. Répondez OUI pour confirmer.
+M	rdv	Garage Lapointe : votre RDV pour le changement de pneus est confirmé le 4 novembre à 8 h.
+M	rdv	Votre réservation pour 4 personnes au Toqué est confirmée pour samedi 19 h.
+M	rdv	Salon Coiffure Zoé : rappel de votre rendez-vous avec Julie jeudi à 15 h 30.
+M	rdv	Your booking at Spa Nordik is confirmed. See you Saturday!
+
+# Les messages : argent.
+M	argent	Desjardins : un dépôt de 1 250,00 $ a été fait dans votre compte.
+M	argent	Alerte : achat de 42,50 $ avec votre carte se terminant par 1234.
+M	argent	Le solde de votre compte est de 312,45 $
+M	argent	Vous avez reçu un virement Interac de Marie Tremblay : 50,00 $. Le dépôt a été fait automatiquement.
+M	argent	INTERAC e-Transfer: John Smith sent you $120.00 (CAD) and the money has been automatically deposited.
+M	argent	Dépôt de 1 234,56 $ dans votre compte chèques.
+M	argent	BMO : retrait de 200,00 $ au guichet le 14 nov.
+M	argent	TD Alert: A purchase of $87.43 was made on your credit card ending in 4421.
+M	argent	Banque Nationale : alerte de solde bas. Le solde de votre compte se terminant par 0291 est de 48,12 $.
+M	argent	Your pay of $2,184.33 has been deposited. Payroll from ACME Inc.
+M	argent	You've received $20.00 USD from Bob Martin. paypal.com
+M	argent	Wealthsimple : votre virement de 500 $ a été reçu.
+
 # Les messages : avis.
 M	avis	Votre colis est en route. Suivi : https://www.postescanada.ca/track
 M	avis	Your package was delivered at 2:14 PM.
-M	avis	Rappel : rendez-vous chez le dentiste demain à 10 h. Répondez STOP pour ne plus recevoir de rappels.
-M	avis	Desjardins : un dépôt de 1 250,00 $ a été fait dans votre compte.
 M	avis	Votre facture Hydro-Québec de 84,12 $ est disponible. Échéance : 15 décembre.
-M	avis	Alerte : achat de 42,50 $ avec votre carte se terminant par 1234.
 M	avis	Your order #4821 has shipped
-M	avis	Reminder: your appointment is tomorrow at 9:30 AM
-M	avis	Le solde de votre compte est de 312,45 $
+M	avis	Rappel : votre facture Vidéotron de 95,20 $ est disponible. Relevé en ligne.
+M	avis	Alerte météo : avertissement de pluie verglaçante pour Montréal.
+
+# Les banques qui font de la pub restent des promos ; leurs codes, des codes.
+M	promo	Desjardins : obtenez 5 % de remise en argent sur l'épicerie avec Odyssée. Offre d'une durée limitée.
+M	promo	RBC: Get a $300 bonus when you open a new account. Offer ends Jan 31. Reply STOP to opt out
+M	promo	Tangerine : obtenez 5 % d'intérêt promotionnel! Répondez ARRET pour vous désabonner.
+M	code	RBC : votre code de vérification est 482913. Ne le communiquez à personne.
+M	code	TD: Your one-time passcode is 739204. Never share it. We will never ask for it.
 
 # Les messages : rien de tout ça.
 M	autre	Salut! On se voit ce soir?
@@ -41,6 +70,8 @@ M	autre	Free tonight? Want to grab a bite
 M	autre	Je suis en promo cette semaine lol
 M	autre	Tu as vu le 50% du match?
 M	autre	
+M	autre	Je te dois encore 20 $ pour la pizza
+M	autre	On se rejoint au resto à 19 h?
 
 # Les expéditeurs.
 X	court	Google	72345
@@ -83,6 +114,22 @@ G	avis	autre	ordinaire	-	aaa
 G	codes	sms	alpha	-	aac
 G	avis	sms	ordinaire	-	aaxx
 G	aucun	sms	ordinaire	-	aaxxx
+G	argent	sms	alpha	-	$$
+G	argent	sms	alpha	-	$a$a
+G	argent	sms	alpha	-	$ra
+G	rdv	sms	court	-	rr
+G	rdv	sms	court	-	rrx
+G	rdv	sms	alpha	-	rar
+G	avis	sms	alpha	-	aar
+G	promos	sms	alpha	-	ppp$
+G	argent	sms	alpha	-	pp$$
+G	codes	sms	alpha	-	$$c
+G	codes	sms	alpha	-	cc$$
+G	aucun	sms	ordinaire	-	$
+G	aucun	autre	ordinaire	-	$$
+G	argent	autre	ordinaire	-	$$$
+G	aucun	sms	ordinaire	ecrit	$$$
+G	aucun	sms	alpha	exclue	rr
 
 # La correction à la main gagne toujours.
 F	promos	promos	aucun
@@ -91,3 +138,6 @@ F	codes	-	codes
 F	aucun	-	aucun
 F	avis	inconnu	avis
 F	avis	avis	promos
+F	argent	argent	avis
+F	rdv	rdv	aucun
+F	aucun	aucun	argent

@@ -1701,14 +1701,18 @@ struct Reglages {
     #[serde(default)]
     emojis: std::collections::BTreeMap<String, String>,
     /// La correction à la main du regroupement automatique (id → "codes",
-    /// "promos", "avis" ou "aucun", src/groupes_auto.rs) : gardée ici, et
+    /// "promos", "rdv", "argent", "avis" ou "aucun", src/groupes_auto.rs) : gardée ici, et
     /// partagée par le serveur Jasette s'il y en a un (marque `groupes_auto`).
     #[serde(default)]
     groupes_auto: std::collections::BTreeMap<String, String>,
     /// « Regrouper automatiquement » : les groupes actifs sur cet appareil
-    /// (clés "codes", "promos", "avis"). Aucun par défaut.
+    /// (clés "codes", "promos", "rdv", "argent", "avis"). Aucun par défaut.
     #[serde(default)]
     groupes_actifs: Vec<String>,
+    /// Rendez-vous et Argent sont sortis d'Avis (2026-11) : un appareil où
+    /// Avis était coché les reçoit cochés une fois (`maj_groupes_scindes`).
+    #[serde(default)]
+    groupes_scindes: bool,
     /// « Garder les conversations archivées hors de la boîte de réception » :
     /// un message reçu ne désarchive plus. Gardé ici, et partagé par le
     /// serveur Jasette s'il y en a un (marque `garder_archives`). Faux par défaut.
@@ -1941,6 +1945,7 @@ impl Default for Reglages {
             emojis: Default::default(),
             groupes_auto: Default::default(),
             groupes_actifs: Vec::new(),
+            groupes_scindes: true,
             garder_archives: false,
             cacher_apres_jours: 0,
             presence_en_ligne: true,
@@ -2018,8 +2023,25 @@ impl Reglages {
             Err(_) => Self::lire_fichier(&bak).unwrap_or_default(),
         };
         r.maj_archives_depuis();
+        r.maj_groupes_scindes();
         r.marques_base = Some(r.bloc());
         r
+    }
+
+    /// Rendez-vous et Argent viennent d'Avis : là où Avis était coché, ils
+    /// le sont aussi (une seule fois ; décochés ensuite, ils le restent).
+    fn maj_groupes_scindes(&mut self) {
+        if self.groupes_scindes {
+            return;
+        }
+        if self.groupes_actifs.iter().any(|k| k == "avis") {
+            for k in ["rdv", "argent"] {
+                if !self.groupes_actifs.iter().any(|x| x == k) {
+                    self.groupes_actifs.push(k.to_string());
+                }
+            }
+        }
+        self.groupes_scindes = true;
     }
 
     /// Un reglages.json abîmé : ses champs lisibles, le reste pris dans la copie .bak.
@@ -2454,6 +2476,8 @@ struct Jasette {
     cache_groupes: boite_groupes::CacheDetection,
     groupe_ouvert: Option<groupes_auto::Groupe>,
     menu_groupe: Option<boite_groupes::MenuGroupe>,
+    /// La modale « Classer… » du clic droit : l'id de la conversation.
+    modale_classer: Option<String>,
     /// La rangée Codes est en haut (dernier dessin), et quand on l'a revue.
     codes_en_haut: std::cell::Cell<bool>,
     codes_verifies: Instant,
@@ -3535,6 +3559,7 @@ impl Jasette {
             cache_groupes: Default::default(),
             groupe_ouvert: None,
             menu_groupe: None,
+            modale_classer: None,
             codes_en_haut: Default::default(),
             codes_verifies: Instant::now(),
             reorganiser: false,
@@ -12713,7 +12738,10 @@ impl Jasette {
                         cx.notify();
                     }
                 } else if k.key == "escape" {
-                    if this.fiche.as_ref().is_some_and(|f| f.lier) {
+                    if this.modale_classer.take().is_some() {
+                        cx.stop_propagation();
+                        cx.notify();
+                    } else if this.fiche.as_ref().is_some_and(|f| f.lier) {
                         if let Some(f) = this.fiche.as_mut() {
                             f.lier = false;
                         }
@@ -12821,6 +12849,8 @@ impl Jasette {
         .children(self.feuille_mood(cx))
         // Le « ••• » du rail : tous les services.
         .children(self.modale_services(cx))
+        // « Classer… » du clic droit sur une conversation (src/boite_groupes.rs).
+        .children(self.modale_classer_vue(cx))
         // La fiche de la personne (src/personne.rs).
         .children(self.fiche_vue(cx))
         .when_some(self.apercu.clone(), |d, chemin| {
@@ -13997,7 +14027,18 @@ fn t(fr: &'static str) -> &'static str {
             "Jasette puts automated senders into a single row, on this device, without sending anything anywhere. Contacts, favorites, pinned conversations, groups and conversations you wrote in are never grouped."
         }
         "Codes de vérification" => "Verification codes",
-        "livraisons, rendez-vous, banque, factures" => "deliveries, appointments, bank, bills",
+        "livraisons, factures, alertes" => "deliveries, bills, alerts",
+        "confirmations, rappels" => "confirmations, reminders",
+        "virements, dépôts, achats, solde, paie" => "transfers, deposits, purchases, balance, pay",
+        "Rendez-vous" => "Appointments",
+        "Argent" => "Money",
+        "Ce n'est pas un rendez-vous" => "Not an appointment",
+        "Ce n'est pas de l'argent" => "Not about money",
+        "Classer…" => "Classify…",
+        "Reclasser…" => "Reclassify…",
+        "Classer" => "Classify",
+        "Reclasser" => "Reclassify",
+        "Ne pas regrouper" => "Don't group",
         "Codes" => "Codes",
         "Promotions" => "Promotions",
         "Avis" => "Notices",
@@ -14007,9 +14048,6 @@ fn t(fr: &'static str) -> &'static str {
         "Ce n'est pas un code" => "Not a code",
         "Ce n'est pas une promo" => "Not a promotion",
         "Ce n'est pas un avis" => "Not a notice",
-        "Mettre dans Codes" => "Move to Codes",
-        "Mettre dans Promotions" => "Move to Promotions",
-        "Mettre dans Avis" => "Move to Notices",
         "Les services décochés sont cachés de la boîte de réception, des Head, des favoris et des archives. Rien n'est oublié : recochez-les pour les retrouver. Le clic droit sur l'icône d'un service fait la même chose." => "Unchecked services are hidden from the inbox, the Head, favorites and archives. Nothing is forgotten: check them again to bring them back. Right-clicking a service's icon does the same.",
         "Noms, aperçus, heures et titres des Head un peu plus gros." => "Slightly larger names, previews, times and Head titles.",
         "Texte des messages :" => "Message text:",

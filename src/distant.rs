@@ -1338,7 +1338,7 @@ pub struct Marques {
     /// L'emoji rapide de chaque conversation (id → emoji), PROTOCOLE.md §5.5.
     pub emojis: BTreeMap<String, String>,
     /// La correction à la main du regroupement automatique (id → "codes",
-    /// "promos", "avis" ou "aucun"), PROTOCOLE.md §5.5 (src/groupes_auto.rs).
+    /// "promos", "rdv", "argent", "avis" ou "aucun"), PROTOCOLE.md §5.5 (src/groupes_auto.rs).
     pub groupes_auto: BTreeMap<String, String>,
     /// « Garder les conversations archivées hors de la boîte de réception » :
     /// un message reçu ne désarchive plus (PROTOCOLE.md §5.5). Faux par défaut.
@@ -1657,7 +1657,7 @@ impl NouvelleMarques {
                 // Seules les valeurs connues restent, comme au serveur.
                 groupes_auto: objet("groupes_auto", 16)
                     .into_iter()
-                    .filter(|(_, g)| matches!(g.as_str(), "codes" | "promos" | "avis" | "aucun"))
+                    .filter(|(_, g)| matches!(g.as_str(), "codes" | "promos" | "rdv" | "argent" | "avis" | "aucun"))
                     .collect(),
                 garder_archives: v.get("garder_archives").and_then(Value::as_bool).unwrap_or(false),
                 // Négatif ou démesuré : 0 (tout afficher), comme le serveur.
@@ -2370,16 +2370,17 @@ mod essais {
     fn marques_groupes_auto() {
         // Reçues : seules les valeurs connues restent.
         let n = NouvelleMarques::lire(&json!({"head": [], "favoris": [], "epingles": [], "archives": [], "privees": [],
-            "groupes_auto": {"12345": "codes", "t:7": "aucun", "m:1": "pub", "x:2": ""}, "version": 3}));
+            "groupes_auto": {"12345": "codes", "t:7": "aucun", "m:1": "pub", "x:2": "", "w:3": "rdv", "s:4": "argent"}, "version": 3}));
         let mut s = SuiviMarques::default();
         let mut c = CopieMarques::default();
         s.recu(n.unwrap(), &mut c);
-        assert_eq!(c.listes.groupes_auto.len(), 2);
+        assert_eq!(c.listes.groupes_auto.len(), 4);
+        assert_eq!(c.listes.groupes_auto.get("s:4").map(String::as_str), Some("argent"));
         assert_eq!(c.listes.groupes_auto.get("t:7").map(String::as_str), Some("aucun"));
         // Une correction part avec les autres marques.
         c.listes.groupes_auto.insert("12345".into(), "aucun".into());
         let t = s.changement(&mut c).expect("envoi");
-        assert_eq!(t["marques"]["groupes_auto"], json!({"12345": "aucun", "t:7": "aucun"}));
+        assert_eq!(t["marques"]["groupes_auto"], json!({"12345": "aucun", "t:7": "aucun", "w:3": "rdv", "s:4": "argent"}));
         // Un serveur d'avant `groupes_auto` : les nôtres restent.
         let mut s = SuiviMarques::default();
         let mut c = CopieMarques { version: 4, ..Default::default() };

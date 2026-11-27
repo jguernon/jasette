@@ -1,20 +1,26 @@
 //! Le regroupement automatique de la boîte de réception (Réglages >
 //! « Regrouper automatiquement », désactivé par défaut) : les expéditeurs de
-//! codes de vérification (🔐 Codes), de publicités (🏷️ Promotions) et d'avis
-//! (📦 Avis : livraisons, rendez-vous, banque, factures, alertes) deviennent
-//! chacun une seule rangée repliable de la boîte.
+//! codes de vérification (🔐 Codes), de publicités (🏷️ Promotions), de
+//! rendez-vous (📅 Rendez-vous : confirmations et rappels), d'argent
+//! (💵 Argent : virements, dépôts, retraits, achats, solde, paie) et d'avis
+//! (📦 Avis : livraisons, factures, alertes) deviennent chacun une seule
+//! rangée repliable de la boîte.
 //!
 //! Tout se décide ici, localement, sans IA ni service externe, par
 //! EXPÉDITEUR (conversation) et pas message par message :
 //!
 //! 1. chaque message reçu reçoit une sorte (`sorte_message`) : un code de
-//!    vérification (src/codes.rs), une promo, un avis, ou rien ;
+//!    vérification (src/codes.rs), une promo, un rendez-vous, de l'argent,
+//!    un avis, ou rien ;
 //! 2. l'expéditeur est-il un numéro court, un nom alphanumérique
 //!    (« Desjardins ») ou un expéditeur ordinaire (`sorte_expediteur`) ;
 //! 3. `classer` décide du groupe d'après les derniers messages reçus : il en
 //!    faut au moins deux qui concordent (trois hors SMS pour un expéditeur
 //!    ordinaire), et qu'ils soient au moins la moitié ; un seul code suffit
-//!    d'un numéro court ou d'un nom alphanumérique.
+//!    d'un numéro court ou d'un nom alphanumérique. Rendez-vous, Argent et
+//!    Avis comptent ensemble contre les promos (une banque qui envoie dépôts
+//!    et relevés reste regroupée) ; puis le plus nombreux des trois l'emporte,
+//!    à égalité Argent, puis Rendez-vous, puis Avis.
 //!
 //! Jamais classés (l'appelant le dit par `exclue`) : un contact (contacts du
 //! téléphone, fiche de la personne, nom choisi à la main), un favori, le Head,
@@ -34,17 +40,21 @@ use crate::codes::code_verification;
 pub enum Groupe {
     Codes,
     Promos,
+    Rdv,
+    Argent,
     Avis,
 }
 
 impl Groupe {
-    pub const TOUS: [Groupe; 3] = [Groupe::Codes, Groupe::Promos, Groupe::Avis];
+    pub const TOUS: [Groupe; 5] = [Groupe::Codes, Groupe::Promos, Groupe::Rdv, Groupe::Argent, Groupe::Avis];
 
     /// Sa valeur dans la marque `groupes_auto`.
     pub fn cle(self) -> &'static str {
         match self {
             Groupe::Codes => "codes",
             Groupe::Promos => "promos",
+            Groupe::Rdv => "rdv",
+            Groupe::Argent => "argent",
             Groupe::Avis => "avis",
         }
     }
@@ -54,6 +64,8 @@ impl Groupe {
         match self {
             Groupe::Codes => "key-round",
             Groupe::Promos => "tag",
+            Groupe::Rdv => "calendar-clock",
+            Groupe::Argent => "banknote",
             Groupe::Avis => "package",
         }
     }
@@ -63,6 +75,10 @@ impl Groupe {
         match self {
             Groupe::Codes => 0x8b5cf6,
             Groupe::Promos => 0xec4899,
+            // Bleu ciel (EGA : cyan) et vert (EGA : vert ; le vert plus clair
+            // 0x22c55e tomberait sur le cyan EGA, comme Rendez-vous).
+            Groupe::Rdv => 0x0ea5e9,
+            Groupe::Argent => 0x16a34a,
             Groupe::Avis => 0xf59e0b,
         }
     }
@@ -74,6 +90,8 @@ pub fn lire_correction(v: &str) -> Option<Option<Groupe>> {
     match v {
         "codes" => Some(Some(Groupe::Codes)),
         "promos" => Some(Some(Groupe::Promos)),
+        "rdv" => Some(Some(Groupe::Rdv)),
+        "argent" => Some(Some(Groupe::Argent)),
         "avis" => Some(Some(Groupe::Avis)),
         "aucun" => Some(None),
         _ => None,
@@ -94,6 +112,8 @@ pub fn groupe_final(correction: Option<&str>, detecte: Option<Groupe>) -> Option
 pub enum Sorte {
     Code,
     Promo,
+    Rdv,
+    Argent,
     Avis,
     Autre,
 }
@@ -116,10 +136,10 @@ const PROMO_FORTS: [&str; 16] = [
 ];
 
 /// Les mots faibles d'une promo (1 point chacun).
-const PROMO_FAIBLES: [&str; 20] = [
+const PROMO_FAIBLES: [&str; 27] = [
     "promo", "promotion", "promotions", "offre", "offres", "offer", "offers", "deal", "deals", "sale", "gratuit",
     "gratuite", "free", "exclusif", "exclusive", "limited time", "durée limitée", "aujourd'hui seulement", "today only",
-    "magasinez",
+    "magasinez", "obtenez", "remise", "cashback", "cash back", "remise en argent", "prime", "bonus",
 ];
 
 /// Se désabonner : 1 point chacun (un rappel de rendez-vous en parle aussi).
@@ -135,13 +155,28 @@ const LIENS_COURTS: [&str; 16] = [
     "shorturl.at/", "tiny.cc/", "lnkd.in/", "qrco.de/", "bit.do/", "s.id/",
 ];
 
-/// Les mots d'un avis (1 point chacun).
-const AVIS: [&str; 44] = [
+/// Les mots d'un rendez-vous (1 point chacun).
+const RDV: [&str; 27] = [
+    "rendez-vous", "rdv", "appointment", "appointments", "appt", "réservation", "reservation", "booking", "booked",
+    "réservé", "réservée", "consultation", "clinique", "clinic", "dentiste", "dentist", "hygiéniste", "médecin",
+    "docteur", "doctor", "dr", "dre", "vétérinaire", "veterinary", "coiffeur", "coiffeuse", "physiothérapie",
+];
+
+/// Les mots d'argent (1 point chacun) : virements, dépôts, achats, solde, paie.
+const ARGENT: [&str; 48] = [
+    "virement", "virements", "interac", "e-transfer", "etransfer", "e-transfert", "dépôt", "dépôts", "deposit",
+    "deposited", "retrait", "withdrawal", "prélèvement", "transaction", "transactions", "achat", "achats", "purchase",
+    "solde", "balance", "paiement", "payment", "paie", "payroll", "paycheque", "paycheck", "salaire", "remboursement",
+    "remboursé", "refund", "refunded", "crédité", "créditée", "credited", "débité", "débitée", "debited", "fonds",
+    "funds", "paypal", "argent", "money", "carte de crédit", "credit card", "carte de débit", "debit card",
+    "se terminant par", "ending in",
+];
+
+/// Les mots d'un avis (1 point chacun) : livraisons, factures, alertes.
+const AVIS: [&str; 27] = [
     "colis", "package", "parcel", "livraison", "livré", "livrée", "delivered", "delivery", "expédié", "expédiée",
-    "shipped", "suivi", "tracking", "rendez-vous", "rdv", "appointment", "rappel", "reminder", "facture", "invoice",
-    "bill", "solde", "balance", "paiement", "payment", "dépôt", "deposit", "transaction", "retrait", "withdrawal",
-    "prélèvement", "virement", "alerte", "alert", "commande", "order", "réservation", "reservation", "booking",
-    "ramassage", "pickup", "échéance", "relevé", "statement",
+    "shipped", "suivi", "tracking", "rappel", "reminder", "facture", "invoice", "bill", "alerte", "alert", "commande",
+    "order", "ramassage", "pickup", "échéance", "relevé", "statement",
 ];
 
 /// Un mot (ou une expression) entier dans `t` : ni lettre ni chiffre juste
@@ -172,9 +207,11 @@ fn pourcentage(t: &[char]) -> bool {
 
 /// La sorte d'un message reçu. Un code de vérification d'abord ; sinon les
 /// points de promo (forts 2, faibles 1, pourcentage 1, lien raccourci 1,
-/// « STOP » en majuscules 1, se désabonner 1) contre ceux d'avis (1 par mot) :
-/// promo s'il y en a au moins 2 et plus que d'avis ; avis s'il y a au moins
-/// un mot d'avis ; sinon rien.
+/// « STOP » en majuscules 1, se désabonner 1) contre ceux des avis au sens
+/// large (rendez-vous, argent et avis, 1 par mot) : promo s'il y en a au
+/// moins 2 et plus que de ceux-là ; sinon, s'il y a au moins un mot, le plus
+/// nombreux des trois (à égalité : argent, puis rendez-vous, puis avis) ;
+/// sinon rien.
 pub fn sorte_message(texte: &str) -> Sorte {
     if code_verification(texte).is_some() {
         return Sorte::Code;
@@ -188,13 +225,19 @@ pub fn sorte_message(texte: &str) -> Sorte {
     promo += usize::from(STOP.iter().any(|m| mot(&original, m)));
     promo += usize::from(pourcentage(&t));
     promo += usize::from(LIENS_COURTS.iter().any(|m| mot(&t, m)));
+    let rdv = RDV.iter().filter(|m| mot(&t, m)).count();
+    let argent = ARGENT.iter().filter(|m| mot(&t, m)).count();
     let avis = AVIS.iter().filter(|m| mot(&t, m)).count();
-    if promo >= 2 && promo > avis {
+    if promo >= 2 && promo > rdv + argent + avis {
         Sorte::Promo
-    } else if avis >= 1 {
-        Sorte::Avis
-    } else {
+    } else if rdv + argent + avis == 0 {
         Sorte::Autre
+    } else if argent >= rdv && argent >= avis {
+        Sorte::Argent
+    } else if rdv >= avis {
+        Sorte::Rdv
+    } else {
+        Sorte::Avis
     }
 }
 
@@ -253,9 +296,20 @@ pub fn classer(e: &Entree) -> Option<Groupe> {
         return Some(Groupe::Codes);
     }
     let seuil = if commercial || e.sms { 2 } else { 3 };
-    let (avis, promos) = (compte(Sorte::Avis), compte(Sorte::Promo));
-    // À égalité, Avis (le plus utile des deux).
-    let (g, c) = if promos > avis { (Groupe::Promos, promos) } else { (Groupe::Avis, avis) };
+    let (rdv, argent, avis, promos) = (compte(Sorte::Rdv), compte(Sorte::Argent), compte(Sorte::Avis), compte(Sorte::Promo));
+    // Rendez-vous, Argent et Avis ensemble contre les promos ; à égalité, eux
+    // (les plus utiles). Puis le plus nombreux des trois : Argent, puis
+    // Rendez-vous, puis Avis à égalité.
+    let tous = rdv + argent + avis;
+    let (g, c) = if promos > tous {
+        (Groupe::Promos, promos)
+    } else if argent >= rdv && argent >= avis {
+        (Groupe::Argent, tous)
+    } else if rdv >= avis {
+        (Groupe::Rdv, tous)
+    } else {
+        (Groupe::Avis, tous)
+    };
     (c >= seuil && c * 2 >= n).then_some(g)
 }
 
@@ -283,6 +337,8 @@ mod essais {
             'c' => Sorte::Code,
             'p' => Sorte::Promo,
             'a' => Sorte::Avis,
+            'r' => Sorte::Rdv,
+            '$' => Sorte::Argent,
             _ => Sorte::Autre,
         }
     }
@@ -298,6 +354,8 @@ mod essais {
                         "code" => Sorte::Code,
                         "promo" => Sorte::Promo,
                         "avis" => Sorte::Avis,
+                        "rdv" => Sorte::Rdv,
+                        "argent" => Sorte::Argent,
                         _ => Sorte::Autre,
                     };
                     assert_eq!(sorte_message(&c[2]), attendu, "message : {}", c[2]);

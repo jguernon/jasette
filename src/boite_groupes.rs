@@ -1,9 +1,9 @@
 //! Le regroupement automatique dans la boîte de réception, côté interface du
 //! bureau : quelles conversations vont dans quel groupe (la détection est
-//! dans src/groupes_auto.rs), les rangées Codes, Promotions et Avis,
-//! la vue d'un groupe ouvert, le menu du clic droit (« Ce n'est pas une
-//! promo », « Mettre dans Codes »…) et la section « Regrouper
-//! automatiquement » des réglages.
+//! dans src/groupes_auto.rs), les rangées Codes, Promotions, Rendez-vous,
+//! Argent et Avis, la vue d'un groupe ouvert, le menu du clic droit (« Ce
+//! n'est pas une promo », « Classer… »), la modale « Classer » et la section
+//! « Regrouper automatiquement » des réglages.
 
 use super::*;
 use crate::groupes_auto::{self as ga, Groupe};
@@ -44,7 +44,32 @@ fn titre(g: Groupe) -> &'static str {
     match g {
         Groupe::Codes => t("Codes"),
         Groupe::Promos => t("Promotions"),
+        Groupe::Rdv => t("Rendez-vous"),
+        Groupe::Argent => t("Argent"),
         Groupe::Avis => t("Avis"),
+    }
+}
+
+/// Le nom d'un groupe dans les réglages et la modale « Classer », et sa
+/// précision (entre parenthèses, plus petite).
+pub(crate) fn libelle(g: Groupe) -> (&'static str, Option<&'static str>) {
+    match g {
+        Groupe::Codes => (t("Codes de vérification"), None),
+        Groupe::Promos => (t("Promotions"), None),
+        Groupe::Rdv => (t("Rendez-vous"), Some(t("confirmations, rappels"))),
+        Groupe::Argent => (t("Argent"), Some(t("virements, dépôts, achats, solde, paie"))),
+        Groupe::Avis => (t("Avis"), Some(t("livraisons, factures, alertes"))),
+    }
+}
+
+/// « Ce n'est pas un code » : sortir la conversation de son groupe.
+fn pas_un(g: Groupe) -> &'static str {
+    match g {
+        Groupe::Codes => t("Ce n'est pas un code"),
+        Groupe::Promos => t("Ce n'est pas une promo"),
+        Groupe::Rdv => t("Ce n'est pas un rendez-vous"),
+        Groupe::Argent => t("Ce n'est pas de l'argent"),
+        Groupe::Avis => t("Ce n'est pas un avis"),
     }
 }
 
@@ -348,7 +373,7 @@ impl Jasette {
                 None => format!("{}{deux_points}{}", r.dernier_nom, r.dernier_apercu),
             },
             Groupe::Promos => r.noms.join(", "),
-            Groupe::Avis => format!("{}{deux_points}{}", r.dernier_nom, r.dernier_apercu),
+            Groupe::Rdv | Groupe::Argent | Groupe::Avis => format!("{}{deux_points}{}", r.dernier_nom, r.dernier_apercu),
         };
         let copie = (g == Groupe::Codes).then(|| r.code.clone()).flatten().map(|(code, _, _)| {
             let cle = format!("groupe-codes-{code}");
@@ -500,34 +525,13 @@ impl Jasette {
     }
 
     /// Le menu du clic droit sur une conversation : « Ce n'est pas … » et
-    /// « Mettre dans … », regroupement activé ou non (l'avatar montre le
-    /// groupe dans tous les cas).
+    /// « Classer… » (« Reclasser… » si elle est dans un groupe), qui ouvre
+    /// la modale `modale_classer`. Regroupement activé ou non (l'avatar
+    /// montre le groupe dans tous les cas).
     pub(crate) fn menu_groupe_vue(&self, cx: &mut Context<Self>) -> Option<gpui::Deferred> {
         let m = self.menu_groupe.clone()?;
         let conv = self.conv(&m.id)?;
         let actuel = self.groupe_detecte(conv);
-        let mut choix: Vec<(&'static str, &'static str)> = Vec::new();
-        match actuel {
-            Some(Groupe::Codes) => choix.push(("aucun", t("Ce n'est pas un code"))),
-            Some(Groupe::Promos) => choix.push(("aucun", t("Ce n'est pas une promo"))),
-            Some(Groupe::Avis) => choix.push(("aucun", t("Ce n'est pas un avis"))),
-            None => {}
-        }
-        for g in Groupe::TOUS {
-            if Some(g) != actuel {
-                choix.push((
-                    g.cle(),
-                    match g {
-                        Groupe::Codes => t("Mettre dans Codes"),
-                        Groupe::Promos => t("Mettre dans Promotions"),
-                        Groupe::Avis => t("Mettre dans Avis"),
-                    },
-                ));
-            }
-        }
-        if choix.is_empty() {
-            return None;
-        }
         let mut menu = verre(0.96, 14.)
             .id("menu-groupe")
             .w(px(260.))
@@ -538,38 +542,151 @@ impl Jasette {
                 this.menu_groupe = None;
                 cx.notify();
             }));
-        for (valeur, texte) in choix {
+        let ligne = |id: &'static str, symbole: AnyElement, texte: &'static str| {
+            div()
+                .id(id)
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(10.))
+                .px(px(12.))
+                .py(px(9.))
+                .rounded(rayon(10.))
+                .text_size(px(14.))
+                .text_color(th().texte_fort)
+                .cursor_pointer()
+                .hover(|s| s.bg(th().survol))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(div().size(px(22.)).flex_none().flex().items_center().justify_center().child(symbole))
+                .child(texte)
+        };
+        if let Some(g) = actuel {
             let id = m.id.clone();
-            let ic = ga::lire_correction(valeur).flatten();
-            menu = menu.child(
+            menu = menu.child(ligne("menu-groupe-aucun", icone("undo-2", 16., th().texte_pale).into_any_element(), pas_un(g)).on_click(
+                cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.corriger_groupe(&id, "aucun");
+                    this.menu_groupe = None;
+                    cx.notify();
+                }),
+            ));
+        }
+        let id = m.id.clone();
+        let texte = if actuel.is_some() { t("Reclasser…") } else { t("Classer…") };
+        menu = menu.child(ligne("menu-groupe-classer", icone("folder-input", 16., th().texte).into_any_element(), texte).on_click(
+            cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.menu_groupe = None;
+                this.modale_classer = Some(id.clone());
+                cx.notify();
+            }),
+        ));
+        Some(gpui::deferred(gpui::anchored().position(m.pos).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(1))
+    }
+
+    /// La modale « Classer » : les cinq groupes (le groupe actuel coché) et
+    /// « Aucun groupe » ; un clic corrige à la main (marque `groupes_auto`)
+    /// et ferme. Échap ou un clic dehors : fermée sans rien changer.
+    pub(crate) fn modale_classer_vue(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let id = self.modale_classer.clone()?;
+        let conv = self.conv(&id)?;
+        let actuel = self.groupe_detecte(conv);
+        let nom = self.nom_affiche(conv);
+        let mut liste = div().flex().flex_col().gap(px(2.));
+        let choix: Vec<Option<Groupe>> = Groupe::TOUS.into_iter().map(Some).chain([None]).collect();
+        for g in choix {
+            let (texte, precision) = match g {
+                Some(g) => libelle(g),
+                None => (t("Ne pas regrouper"), actuel.map(pas_un)),
+            };
+            let coche = g.is_some() && g == actuel;
+            let valeur = g.map_or("aucun", Groupe::cle);
+            let id = id.clone();
+            liste = liste.child(
                 div()
-                    .id(SharedString::from(format!("menu-groupe-{valeur}")))
+                    .id(SharedString::from(format!("classer-{valeur}")))
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap(px(10.))
-                    .px(px(12.))
-                    .py(px(9.))
-                    .rounded(rayon(10.))
-                    .text_size(px(14.))
-                    .text_color(th().texte_fort)
+                    .gap(px(12.))
+                    .px(px(10.))
+                    .py(px(8.))
+                    .rounded(rayon(12.))
                     .cursor_pointer()
-                    .hover(|s| s.bg(th().survol))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .when(coche, |d| d.bg(th().choisi))
+                    .when(!coche, |d| d.hover(|s| s.bg(th().survol)))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         cx.stop_propagation();
                         this.corriger_groupe(&id, valeur);
-                        this.menu_groupe = None;
+                        this.modale_classer = None;
                         cx.notify();
                     }))
-                    .child(match ic {
-                        Some(g) => Self::avatar_groupe(g, 22.),
-                        None => div().size(px(22.)).flex_none().flex().items_center().justify_center().child(icone("undo-2", 16., th().texte_pale)),
+                    .child(match g {
+                        Some(g) => Self::avatar_groupe(g, 34.),
+                        None => div()
+                            .size(px(34.))
+                            .flex_none()
+                            .rounded(rayon(999.))
+                            .border_1()
+                            .border_color(th().trait_fin)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(icone("undo-2", 17., th().texte_pale)),
                     })
-                    .child(texte),
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .child(div().text_size(px(14.5)).font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(texte))
+                            .children(precision.map(|p| div().truncate().text_size(px(12.5)).text_color(th().texte_pale).child(p))),
+                    )
+                    .when(coche, |d| d.child(icone("check", 18., th().accent))),
             );
         }
-        Some(gpui::deferred(gpui::anchored().position(m.pos).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(1))
+        Some(
+            div()
+                .id("modale-classer")
+                .absolute()
+                .inset_0()
+                .occlude()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(hsla(0., 0., 0., 0.35))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.modale_classer = None;
+                    cx.notify();
+                }))
+                .child(
+                    groupe()
+                        .id("modale-classer-carte")
+                        .when(!th().sombre && !th().ega, |d| d.bg(blanc(0.97)))
+                        .w(px(380.))
+                        .px(px(14.))
+                        .py(px(14.))
+                        .gap(px(8.))
+                        .on_click(|_, _, cx| cx.stop_propagation())
+                        .child(
+                            div()
+                                .px(px(10.))
+                                .flex()
+                                .flex_col()
+                                .child(
+                                    div()
+                                        .text_size(px(16.))
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(th().texte_fort)
+                                        .child(if actuel.is_some() { t("Reclasser") } else { t("Classer") }),
+                                )
+                                .child(div().truncate().text_size(px(12.5)).text_color(th().texte_pale).child(nom)),
+                        )
+                        .child(liste),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Réglages : « Regrouper automatiquement », une case par groupe, sur cet appareil.
@@ -581,11 +698,7 @@ impl Jasette {
             }
             let actif = self.groupe_actif(g);
             // Le nom, puis la précision entre parenthèses, plus petite.
-            let (texte, precision) = match g {
-                Groupe::Codes => (t("Codes de vérification"), None),
-                Groupe::Promos => (t("Promotions"), None),
-                Groupe::Avis => (t("Avis"), Some(t("livraisons, rendez-vous, banque, factures"))),
-            };
+            let (texte, precision) = libelle(g);
             lignes = lignes.child(
                 div()
                     .id(SharedString::from(format!("regrouper-{}", g.cle())))
@@ -662,6 +775,8 @@ mod tests {
         assert_eq!(fond_rvb(Groupe::Codes, false), 0x8b5cf6);
         assert_eq!(fond_rvb(Groupe::Codes, true), 0xaa00aa);
         assert_eq!(fond_rvb(Groupe::Avis, true), 0xaa5500);
+        assert_eq!(fond_rvb(Groupe::Rdv, true), 0x00aaaa);
+        assert_eq!(fond_rvb(Groupe::Argent, true), 0x00aa00);
         assert!([0xaa0000, 0xaa00aa].contains(&fond_rvb(Groupe::Promos, true)));
     }
 

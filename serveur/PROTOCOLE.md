@@ -624,7 +624,7 @@ S'y ajoutent trois objets (facultatifs) :
 - `emojis` : l'**emoji rapide** de chaque conversation, `{id: "👍"}` (voir
   « Règle des emojis rapides » plus bas) ;
 - `groupes_auto` : la **correction à la main du regroupement automatique**
-  de la boîte, `{id: "codes"|"promos"|"avis"|"aucun"}` (voir « Règle du
+  de la boîte, `{id: "codes"|"promos"|"rdv"|"argent"|"avis"|"aucun"}` (voir « Règle du
   regroupement automatique » plus bas).
 
 Et deux listes pour la **fiche de la personne** (voir « Règle des
@@ -733,7 +733,7 @@ encore rien reçu (listes vides).
   graphème : 👍, ❤️, 👨‍👩‍👧…) ; plus long, l'entrée est retirée.
   Même règle pour `groupes_auto` (absent, `null` ou mal formé : rien ne
   change ; présent, c'est l'objet complet), mais seules les valeurs
-  `"codes"`, `"promos"`, `"avis"` et `"aucun"` restent : toute autre entrée
+  `"codes"`, `"promos"`, `"rdv"`, `"argent"`, `"avis"` et `"aucun"` restent : toute autre entrée
   est retirée. Toujours envoyé (objet, jamais `null`) ; absent de
   `marques.json` : `{}`.
 - `garder_archives` : absent, rien ne change (un client d'avant ce réglage
@@ -999,24 +999,34 @@ ce champ : le client garde les siens pour lui).
 
 **Règle du regroupement automatique.**
 
-- Réglages → « Regrouper automatiquement » : trois cases, **décochées par
+- Réglages → « Regrouper automatiquement » : cinq cases, **décochées par
   défaut** et propres à chaque appareil (jamais dans les marques) : 🔐 Codes
-  (codes de vérification), 🏷️ Promotions, 📦 Avis (livraisons, rendez-vous,
-  banque, factures, alertes). Chaque groupe coché devient **une seule
+  (codes de vérification), 🏷️ Promotions, 📅 Rendez-vous (confirmations,
+  rappels), 💵 Argent (virements, dépôts, achats, solde, paie), 📦 Avis
+  (livraisons, factures, alertes). Chaque groupe coché devient **une seule
   rangée** de la boîte de réception, qui s'ouvre sur ses conversations.
+  Rendez-vous et Argent sont sortis d'Avis (2026-11) : sur un appareil où
+  Avis était coché, ils arrivent cochés, une seule fois.
 - La **détection** est faite par chaque client, localement, sans IA ni
   service externe, par expéditeur (bureau : src/groupes_auto.rs ; Android :
   GroupesAuto.kt ; mêmes essais : assets/essais/groupes-auto.txt). Jamais
   classés : contacts, favoris, Head, épinglées, groupes, grands espaces,
   privées, et les conversations où j'ai écrit.
 - La **correction à la main** (menu d'une conversation : « Ce n'est pas une
-  promo », « Mettre dans Codes »…) est la marque `groupes_auto`, partagée
-  entre les appareils ; elle gagne toujours sur la détection. `"aucun"` :
+  promo », « Classer… ») est la marque `groupes_auto`, partagée
+  entre les appareils ; elle gagne toujours sur la détection. Valeurs :
+  `"codes"`, `"promos"`, `"rdv"`, `"argent"`, `"avis"` ; `"aucun"` :
   jamais regroupée. Le serveur ne fait que la garder, la nettoyer et l'unir
   comme `emojis` ; une valeur inconnue est retirée. Un client qui reçoit des
   marques sans ce champ (serveur d'avant) garde les siennes.
+- **Rétrocompatibilité de `"rdv"` et `"argent"`** (ajoutées en 2026-11) : un
+  client d'avant ne plante pas, il ignore ces valeurs (Android : la
+  détection reprend ; bureau : écartées à la lecture). Mais un serveur
+  d'avant les retire, et un client d'avant qui renvoie l'objet complet les
+  perd : mettre à jour le serveur et les clients ensemble.
 - Les Promotions ne notifient pas et ne comptent pas dans les non-lus (ni
-  dans Android Auto) ; les Codes et les Avis notifient comme avant.
+  dans Android Auto) ; les Codes, Rendez-vous, Argent et Avis notifient
+  comme avant.
 
 **Règle des archives.**
 
