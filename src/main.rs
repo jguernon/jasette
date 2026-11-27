@@ -30,6 +30,7 @@ mod presence;
 mod ecrit;
 mod sons;
 mod notes;
+mod stories;
 mod pop;
 mod musique;
 mod groupes;
@@ -1116,6 +1117,7 @@ fn touche_cache(v: &Value) -> bool {
 fn lancer_pont(r: &Reglages, svc: Service) -> Result<Pont, String> {
     pont::regler_presence(r.presence_en_ligne);
     pont::regler_notes(r.notes_contacts);
+    pont::regler_stories(r.stories);
     match serveur_actif(r) {
         Some(cfg) => Ok(Pont::distant(cfg, svc.cle())),
         None if svc == Service::GoogleMessages => Pont::lancer(),
@@ -1754,6 +1756,13 @@ struct Reglages {
     /// Le nom et la photo choisis à la main dans la fiche (marque `contacts_perso`).
     #[serde(default)]
     contacts_perso: std::collections::BTreeMap<String, pont::ContactPerso>,
+    /// « Afficher les stories Facebook et Instagram » (marque `stories`, faux
+    /// par défaut, src/stories.rs).
+    #[serde(default)]
+    stories: bool,
+    /// Les stories ouvertes depuis Jasette (marque `stories_ouvertes`).
+    #[serde(default)]
+    stories_ouvertes: std::collections::BTreeMap<String, i64>,
     /// L'audience des notes Instagram : 0 abonnés mutuels, 1 amis proches.
     /// Propre à cet appareil.
     #[serde(default)]
@@ -1939,6 +1948,8 @@ impl Default for Reglages {
             personnes: Vec::new(),
             personnes_refus: Vec::new(),
             contacts_perso: Default::default(),
+            stories: false,
+            stories_ouvertes: Default::default(),
             notes_audience: 0,
             head_grille: String::new(),
             marques_cache: HashMap::new(),
@@ -2066,6 +2077,8 @@ impl Reglages {
                     personnes: self.personnes.clone(),
                     personnes_refus: self.personnes_refus.clone(),
                     contacts_perso: self.contacts_perso.clone(),
+                    stories: self.stories,
+                    stories_ouvertes: self.stories_ouvertes.clone(),
                 },
                 version: self.marques_version,
                 a_envoyer: self.marques_a_envoyer,
@@ -2095,6 +2108,8 @@ impl Reglages {
         self.personnes = b.copie.listes.personnes;
         self.personnes_refus = b.copie.listes.personnes_refus;
         self.contacts_perso = b.copie.listes.contacts_perso;
+        self.stories = b.copie.listes.stories;
+        self.stories_ouvertes = b.copie.listes.stories_ouvertes;
         self.marques_version = b.copie.version;
         self.marques_a_envoyer = b.copie.a_envoyer;
         self.marques_serveur = b.serveur;
@@ -2347,6 +2362,8 @@ struct Jasette {
     /// « Quoi de neuf ? » : le champ de la note, et tout le reste (src/notes.rs).
     note_saisie: Entity<InputState>,
     notes: notes::Notes,
+    /// Les stories des contacts (src/stories.rs).
+    stories: stories::Stories,
     convs: Vec<Conv>,
     archives: Vec<Conv>,
     archives_chargees: bool,
@@ -3264,6 +3281,8 @@ impl Jasette {
                         change |= this.ecrits_perimes();
                         // « Quoi de neuf ? » : notes des contacts, musique (toutes les 5 s au plus).
                         change |= this.notes_tic();
+                        // Les stories échues s'en vont (toutes les 30 s).
+                        change |= this.stories_tic();
                         let finie = this.lecture.as_mut().is_some_and(|l| !matches!(l.enfant.try_wait(), Ok(None)));
                         if finie {
                             this.lecture = None;
@@ -3447,6 +3466,7 @@ impl Jasette {
             nip,
             note_saisie,
             notes: Default::default(),
+            stories: Default::default(),
             plus_anciens: cache.fils.iter().map(|(k, f)| (k.clone(), f.more)).collect(),
             messages: cache.fils.into_iter().map(|(k, f)| (k, f.items)).collect(),
             services_connus: cache.convs.iter().chain(&cache.archives).map(|c| service_de(&c.id)).collect(),
@@ -3885,6 +3905,7 @@ impl Jasette {
             "note_moi" => self.note_moi_recue(svc, &v),
             "note_result" => self.note_resultat_recu(svc, &v),
             "notes" if svc == Service::Instagram => self.notes_contacts_recues(&v),
+            "stories" if matches!(svc, Service::Instagram | Service::Messenger) => self.stories_recues(svc, &v),
             "hello" | "e2ee" => {}
             // Un pont d'avant la recherche globale : il ne la connaît pas, ce n'est pas une panne.
             "error" if v.get("text").and_then(Value::as_str).is_some_and(|t| t.contains("search_messages")) => {}
@@ -6928,6 +6949,7 @@ impl Jasette {
         if b != avant {
             let presence = b.copie.listes.presence_cachee != avant.copie.listes.presence_cachee;
             let notes = b.copie.listes.notes_contacts_cachees != avant.copie.listes.notes_contacts_cachees;
+            let stories = b.copie.listes.stories != avant.copie.listes.stories;
             self.reglages.poser_bloc(b);
             self.reglages.garder();
             self.photos_perso_a_faire = true;
@@ -6937,6 +6959,9 @@ impl Jasette {
             }
             if notes {
                 self.notes_reglees();
+            }
+            if stories {
+                self.stories_reglees();
             }
             // Rendue privée sur un autre appareil : elle quitte l'écran ici aussi.
             self.cacher_privees_ouvertes();
@@ -7016,7 +7041,9 @@ impl Jasette {
                     .child(
                         div()
                             .relative()
-                            .child(self.avatar_affiche(conv, mesures.avatar))
+                            // Cerclé si le contact a une story : cliquer le cercle l'ouvre
+                            // (le nom, dessous, ouvre la conversation).
+                            .child(self.avatar_story_cliquable(format!("story-head-{}", conv.id), conv, self.avatar_affiche(conv, mesures.avatar), cx))
                             .when(self.en_ligne(conv), |d| {
                                 d.child(presence::point_presence(mesures.avatar, if choisie { th().choisi } else { th().liste }))
                             })
@@ -7214,7 +7241,7 @@ impl Jasette {
                             .relative()
                             .flex_none()
                             .py(px(10.))
-                            .child(div().relative().child(self.avatar_liste(conv, 50.)).when(self.en_ligne(conv), |d| {
+                            .child(div().relative().child(self.avatar_liste_story(format!("story-rangee-{}", conv.id), conv, 50., cx)).when(self.en_ligne(conv), |d| {
                                 d.child(presence::point_presence(50., if choisie { th().choisi } else { th().liste }))
                             }))
                             .when(badge, |d| {
@@ -7390,7 +7417,7 @@ impl Jasette {
             let conv = self.conv(&r.conv);
             let nom = conv.map(|c| self.nom_affiche(c)).unwrap_or_else(|| t("Sans nom").to_string());
             let photo = match conv {
-                Some(c) => self.avatar_liste(c, 40.),
+                Some(c) => self.avatar_liste_story(format!("story-trouve-{i}"), c, 40., cx),
                 None => avatar(&nom, "", false, None, 40.),
             };
             // Qui l'a écrit, devant l'extrait (dans un groupe, ou moi).
@@ -10878,6 +10905,7 @@ impl Jasette {
                 })
                 .child(self.boite_services(cx))
                 .child(self.regrouper_reglages(cx))
+                .child(self.stories_reglages(cx))
                 .into_any_element();
         }
         let associe = self.etat.associe();
@@ -10978,6 +11006,7 @@ impl Jasette {
             )
             .child(self.boite_services(cx))
             .child(self.regrouper_reglages(cx))
+                .child(self.stories_reglages(cx))
             .into_any_element()
     }
 

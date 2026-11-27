@@ -453,7 +453,14 @@ impl Jasette {
         if q.is_empty() {
             return (boite, 0);
         }
-        let ligne = |id: SharedString, nom: String, detail: String, service: Service, photo: Option<&PathBuf>, coche: Option<bool>| {
+        // `photo_el` : l'avatar déjà fait (cerclé d'une story, src/stories.rs), sinon la photo.
+        let ligne = |id: SharedString,
+                     nom: String,
+                     detail: String,
+                     service: Service,
+                     photo: Option<&PathBuf>,
+                     coche: Option<bool>,
+                     photo_el: Option<AnyElement>| {
             div()
                 .id(id)
                 .flex()
@@ -469,7 +476,7 @@ impl Jasette {
                 .child(
                     div()
                         .relative()
-                        .child(avatar(&nom, "", false, photo, 36.))
+                        .child(photo_el.unwrap_or_else(|| avatar(&nom, "", false, photo, 36.)))
                         .child(div().absolute().right(px(-3.)).bottom(px(-3.)).child(logo(service, 15.))),
                 )
                 .child(
@@ -514,8 +521,14 @@ impl Jasette {
             for c in existantes {
                 let id = c.id.clone();
                 let s = service_de(&c.id);
+                let nom = self.nom_affiche(c);
+                // Cerclé si le contact a une story : cliquer le cercle l'ouvre.
+                let photo_el = self.story_de(c).is_some().then(|| {
+                    let a = self.avatar_story(c, 36., |t| avatar(&nom, "", false, self.photo_conv(c), t));
+                    self.avatar_story_cliquable(format!("story-sugg-{}", c.id), c, a, cx)
+                });
                 boite = boite.child(
-                    ligne(SharedString::from(format!("sugg-{}", c.id)), self.nom_affiche(c), s.nom().into(), s, self.photo_conv(c), None)
+                    ligne(SharedString::from(format!("sugg-{}", c.id)), nom, s.nom().into(), s, self.photo_conv(c), None, photo_el)
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.fermer_nouveau(window, cx);
                             this.vue = Vue::Tout;
@@ -558,7 +571,7 @@ impl Jasette {
             let coche = groupe.then(|| choix.est_choisi(id));
             let (cle, nom_c) = (id.clone(), nom.clone());
             boite = boite.child(
-                ligne(SharedString::from(format!("sugg-{id}")), nom.clone(), detail, svc, photo, coche).on_click(cx.listener(
+                ligne(SharedString::from(format!("sugg-{id}")), nom.clone(), detail, svc, photo, coche, None).on_click(cx.listener(
                     move |this, _, window, cx| {
                         if this.choix_nouveau.groupe {
                             Self::choisir_membre(this, &cle, &nom_c, window, cx);
@@ -588,7 +601,7 @@ impl Jasette {
                 let cle = format!("{}{numero}", svc.prefixe());
                 let coche = groupe.then(|| choix.est_choisi(&cle));
                 let detail = if groupe { svc.court().to_string() } else { texte.to_string() };
-                boite = boite.child(ligne(id.into(), numero.clone(), detail, svc, None, coche).on_click(cx.listener(
+                boite = boite.child(ligne(id.into(), numero.clone(), detail, svc, None, coche, None).on_click(cx.listener(
                     move |this, _, window, cx| {
                         if this.choix_nouveau.groupe {
                             Self::choisir_membre(this, &cle, &numero, window, cx);

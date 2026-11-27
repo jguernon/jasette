@@ -1377,6 +1377,35 @@ pub struct Marques {
     pub personnes_refus: Vec<(String, String)>,
     /// Le nom et la photo choisis à la main (marque `contacts_perso`).
     pub contacts_perso: BTreeMap<String, ContactPerso>,
+    /// « Afficher les stories Facebook et Instagram » (marque `stories`,
+    /// faux par défaut, PROTOCOLE.md §5.15).
+    pub stories: bool,
+    /// Les stories ouvertes depuis Jasette (marque `stories_ouvertes`) : id
+    /// de conversation → heure (ms) de la story la plus récente ouverte.
+    /// Toujours unie (l'heure la plus grande) et purgée après 48 h.
+    pub stories_ouvertes: BTreeMap<String, i64>,
+}
+
+/// Une story dure 24 h : au-delà de 48 h, une entrée de `stories_ouvertes`
+/// ne sert plus (le serveur la purge aussi).
+pub const STORIES_OUVERTES_DUREE_MS: i64 = 48 * 3600 * 1000;
+
+fn maintenant_ms_distant() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+}
+
+/// Sans entrée échue ni vide ; l'heure la plus grande de chaque côté.
+pub fn unir_stories_ouvertes(a: &BTreeMap<String, i64>, b: &BTreeMap<String, i64>) -> BTreeMap<String, i64> {
+    let limite = maintenant_ms_distant() - STORIES_OUVERTES_DUREE_MS;
+    let mut r: BTreeMap<String, i64> = BTreeMap::new();
+    for (k, t) in a.iter().chain(b.iter()) {
+        if k.is_empty() || *t <= limite {
+            continue;
+        }
+        let e = r.entry(k.clone()).or_insert(*t);
+        *e = (*e).max(*t);
+    }
+    r
 }
 
 /// La marque `notes_musique_format` rangée comme dans `Marques` (vide : "artiste").
@@ -1454,6 +1483,8 @@ impl Marques {
             && self.personnes.is_empty()
             && self.personnes_refus.is_empty()
             && self.contacts_perso.is_empty()
+            && !self.stories
+            && self.stories_ouvertes.is_empty()
     }
 
     /// Chaque liste de `dabord`, dans son ordre, puis les ids de `ensuite` qui n'y sont pas.
@@ -1499,6 +1530,9 @@ impl Marques {
             personnes_refus: nettoyer_refus(dabord.personnes_refus.iter().chain(ensuite.personnes_refus.iter()).cloned().collect()),
             // Comme les moods : les entrées de `dabord` gagnent.
             contacts_perso: ensuite.contacts_perso.iter().chain(dabord.contacts_perso.iter()).map(|(k, v)| (k.clone(), v.clone())).collect(),
+            stories: dabord.stories,
+            // L'heure la plus grande de chaque côté : rien ne se perd.
+            stories_ouvertes: unir_stories_ouvertes(&dabord.stories_ouvertes, &ensuite.stories_ouvertes),
         }
     }
 
@@ -1537,6 +1571,13 @@ impl Marques {
                 .filter(|(k, v)| autre.contacts_perso.get(*k) != Some(*v))
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
+            stories: self.stories,
+            stories_ouvertes: self
+                .stories_ouvertes
+                .iter()
+                .filter(|(k, t)| autre.stories_ouvertes.get(*k).is_none_or(|a| a < *t))
+                .map(|(k, t)| (k.clone(), *t))
+                .collect(),
         }
     }
 }
@@ -1559,6 +1600,7 @@ pub enum NouvelleMarques {
     /// `avec_personnes` : de même pour un serveur d'avant `personnes`.
     /// `avec_contacts_perso` : de même pour un serveur d'avant `contacts_perso`.
     /// `avec_ordre` : de même pour un serveur d'avant `ordre_services`.
+    /// `avec_stories` : de même pour un serveur d'avant `stories`.
     Recues {
         marques: Marques,
         version: u64,
@@ -1577,6 +1619,7 @@ pub enum NouvelleMarques {
         avec_personnes: bool,
         avec_contacts_perso: bool,
         avec_ordre: bool,
+        avec_stories: bool,
     },
     /// La connexion est tombée : rien n'est plus en vol.
     Coupure,
@@ -1640,6 +1683,20 @@ impl NouvelleMarques {
                 personnes: lire_personnes(v.get("personnes")),
                 personnes_refus: lire_refus(v.get("personnes_refus")),
                 contacts_perso: lire_contacts_perso(v.get("contacts_perso")),
+                // Absent : faux.
+                stories: v.get("stories").and_then(Value::as_bool).unwrap_or(false),
+                stories_ouvertes: unir_stories_ouvertes(
+                    &v.get("stories_ouvertes")
+                        .and_then(Value::as_object)
+                        .map(|o| {
+                            o.iter()
+                                .filter(|(k, _)| k.len() <= 512)
+                                .filter_map(|(k, t)| Some((k.clone(), t.as_i64()?)))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    &BTreeMap::new(),
+                ),
             },
             version: v.get("version")?.as_u64()?,
             id: v.get("id").and_then(Value::as_u64),
@@ -1657,6 +1714,7 @@ impl NouvelleMarques {
             avec_personnes: v.get("personnes").is_some_and(Value::is_array),
             avec_contacts_perso: v.get("contacts_perso").is_some_and(Value::is_object),
             avec_ordre: v.get("ordre_services").is_some_and(Value::is_array),
+            avec_stories: v.get("stories").is_some_and(Value::is_boolean),
         })
     }
 }
@@ -1771,6 +1829,8 @@ impl SuiviMarques {
             "personnes": personnes_json(&c.listes.personnes),
             "personnes_refus": refus_json(&c.listes.personnes_refus),
             "contacts_perso": c.listes.contacts_perso,
+            "stories": c.listes.stories,
+            "stories_ouvertes": c.listes.stories_ouvertes,
             "version": c.version,
             "id": id,
         }}))
@@ -1802,6 +1862,7 @@ impl SuiviMarques {
                 avec_personnes,
                 avec_contacts_perso,
                 avec_ordre,
+                avec_stories,
             } => {
                 // Un serveur d'avant `archives` : nos archives restent les nôtres, jamais vidées.
                 let mut marques = marques;
@@ -1859,6 +1920,11 @@ impl SuiviMarques {
                 // Et pour `ordre_services` (serveur d'avant l'ordre partagé) : le nôtre reste.
                 if !avec_ordre {
                     marques.ordre_services = c.listes.ordre_services.clone();
+                }
+                // Et pour les stories (serveur d'avant §5.15) : les nôtres restent.
+                if !avec_stories {
+                    marques.stories = c.listes.stories;
+                    marques.stories_ouvertes = c.listes.stories_ouvertes.clone();
                 }
                 (marques, version, id, refus)
             }
@@ -2160,6 +2226,7 @@ mod essais {
             avec_personnes: true,
             avec_contacts_perso: true,
             avec_ordre: true,
+            avec_stories: true,
         }
     }
 
@@ -2626,6 +2693,7 @@ mod essais {
             avec_personnes: true,
             avec_contacts_perso: true,
             avec_ordre: true,
+            avec_stories: true,
         };
         let t = s.recu(r, &mut c).expect("renvoi");
         assert_eq!(t["marques"]["favoris"], json!(["z", "a", "y", "x"]));
@@ -2633,6 +2701,37 @@ mod essais {
         // Une coupure : plus rien en vol, on attend le rejeu.
         s.recu(NouvelleMarques::Coupure, &mut c);
         assert!(s.changement(&mut c).is_none());
+    }
+
+    /// Les stories : lues, envoyées, et `stories_ouvertes` uni (l'heure la
+    /// plus grande) et purgé après 48 h ; un serveur d'avant : les nôtres restent.
+    #[test]
+    fn marques_stories() {
+        let maint = maintenant_ms_distant();
+        let v = json!({"head": [], "favoris": [], "epingles": [], "version": 3, "stories": true,
+            "stories_ouvertes": {"i:1": maint, "i:2": maint - STORIES_OUVERTES_DUREE_MS - 1, "": maint}});
+        let Some(NouvelleMarques::Recues { marques, avec_stories: true, .. }) = NouvelleMarques::lire(&v) else { panic!("non lue") };
+        assert!(marques.stories);
+        assert_eq!(marques.stories_ouvertes.len(), 1);
+        let a = BTreeMap::from([("i:1".to_string(), maint - 10), ("m:3".to_string(), maint)]);
+        let b = BTreeMap::from([("i:1".to_string(), maint)]);
+        let u = unir_stories_ouvertes(&a, &b);
+        assert_eq!(u.get("i:1"), Some(&maint));
+        assert_eq!(u.len(), 2);
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { listes: Marques { stories: true, stories_ouvertes: b.clone(), ..m(&[], &["a"], &[]) }, version: 0, a_envoyer: false };
+        // Le serveur n'a encore rien (version 0) : il prend les nôtres.
+        let t = s.recu(recues(Marques::default(), 0, None), &mut c).expect("trame");
+        assert_eq!(t["marques"]["stories"], json!(true));
+        assert_eq!(t["marques"]["stories_ouvertes"]["i:1"], json!(maint));
+        // Un serveur d'avant les stories : les nôtres restent.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { listes: Marques { stories: true, stories_ouvertes: b.clone(), ..m(&[], &["a"], &[]) }, version: 2, a_envoyer: false };
+        let vieux = json!({"head": [], "favoris": ["a"], "epingles": [], "version": 2});
+        let Some(n) = NouvelleMarques::lire(&vieux) else { panic!("non lue") };
+        s.recu(n, &mut c);
+        assert!(c.listes.stories);
+        assert_eq!(c.listes.stories_ouvertes, b);
     }
 
     fn ordre(l: &[&str]) -> Vec<String> {

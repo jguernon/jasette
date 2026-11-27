@@ -523,8 +523,10 @@ impl Jasette {
     }
 
     /// L'avatar montré partout pour une conversation (voir `photo_conv`).
+    /// Cerclé si le contact a une story (src/stories.rs).
     pub(crate) fn avatar_affiche(&self, conv: &Conv, taille: f32) -> AnyElement {
-        self.avatar_conv(conv, &self.nom_affiche(conv), taille)
+        let nom = self.nom_affiche(conv);
+        self.avatar_story(conv, taille, |t| self.avatar_conv(conv, &nom, t))
     }
 
     /// Les conversations à deux connues (chargées, archivées ou en cache),
@@ -1004,9 +1006,22 @@ impl Jasette {
         // Pendant « Lier une autre conversation… », l'avatar se fait plus petit.
         let grand_t = if f.lier { 72. } else { GRAND };
         let crayon = (!f.lier).then(|| self.crayon_avatar(grand_t, fond_feuille, cx));
+        // La story d'un des comptes de la personne (src/stories.rs) : un cercle
+        // autour du grand avatar (le crayon garde son geste) et « Voir la story ».
+        let story = groupe
+            .membres
+            .iter()
+            .filter_map(|(id, _)| self.conv(id))
+            .filter_map(|c| self.story_de(c))
+            .min_by_key(|(_, s)| s.sorte != stories::SorteStory::Instagram)
+            .map(|(id, s)| (id.to_string(), s.sorte));
+        let grand_avatar = match &story {
+            Some((_, sorte)) => stories::anneau_story(*sorte, grand_t, |t| avatar(&nom, &ancre.color, false, photo.as_ref(), t)),
+            None => avatar(&nom, &ancre.color, false, photo.as_ref(), grand_t),
+        };
         let grand = div()
             .relative()
-            .child(avatar(&nom, &ancre.color, false, photo.as_ref(), grand_t))
+            .child(grand_avatar)
             .children(crayon)
             .when(en_ligne, |d| {
                 // Le point vert, à la taille du grand avatar (carré en EGA, Live et Sirène).
@@ -1036,6 +1051,18 @@ impl Jasette {
                 .text_center()
                 .child(texte_emoji(nom.clone(), th().texte_fort, Some(FontWeight::BOLD))),
         );
+        if let Some((id_story, sorte)) = story.filter(|_| !f.lier) {
+            let titre = match sorte {
+                stories::SorteStory::Instagram => notes::tr("Voir la story Instagram", "View Instagram story"),
+                stories::SorteStory::Facebook => notes::tr("Voir la story Facebook", "View Facebook story"),
+            };
+            haut = haut.child(div().pt(px(6.)).child(Self::bouton_fiche("fiche-story", titre, true).on_click(cx.listener(
+                move |this, _, _, cx| {
+                    this.ouvrir_story(&id_story);
+                    cx.notify();
+                },
+            ))));
+        }
         let nom_plie = mots(&nom);
         let mut autres_noms: Vec<(Service, String)> = Vec::new();
         for (id, _) in &groupe.membres {
@@ -1137,7 +1164,10 @@ impl Jasette {
                     .relative()
                     .flex_none()
                     // Chaque ligne de la fiche garde le nom et la photo propres à son service.
-                    .child(avatar(&nom, &conv.color, false, self.photo_propre(conv), 40.))
+                    .child(match self.story_de(conv).filter(|(id, _)| *id == conv.id) {
+                        Some((_, s)) => stories::anneau_story(s.sorte, 40., |t| avatar(&nom, &conv.color, false, self.photo_propre(conv), t)),
+                        None => avatar(&nom, &conv.color, false, self.photo_propre(conv), 40.),
+                    })
                     .when(self.en_ligne(conv), |d| d.child(presence::point_presence(40., fond)))
                     .child(div().absolute().right(px(-3.)).bottom(px(-2.)).child(logo(svc, 16.))),
             )
