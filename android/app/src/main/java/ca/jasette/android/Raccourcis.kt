@@ -196,11 +196,25 @@ object Raccourcis {
             textAlign = Paint.Align.CENTER
             isFakeBoldText = true
         }
-        val ecrit = lettres.ifEmpty { "•" }
-        toile.drawText(ecrit, cote / 2f, cote / 2f - (texte.descent() + texte.ascent()) / 2f, texte)
+        if (lettres.isNotEmpty()) {
+            toile.drawText(lettres, cote / 2f, cote / 2f - (texte.descent() + texte.ascent()) / 2f, texte)
+        } else {
+            // Un numéro (ou un groupe sans image) : le bonhomme blanc, comme dans la liste (Icons.Filled.Person / Group).
+            val trace = androidx.core.graphics.PathParser.createPathFromPathData(if (groupe) TRACE_GROUPE else TRACE_PERSONNE)
+            val echelle = cote * 0.5f / 24f
+            toile.save()
+            toile.translate(cote * 0.25f, cote * 0.25f)
+            toile.scale(echelle, echelle)
+            toile.drawPath(trace, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt() })
+            toile.restore()
+        }
         return bmp
     }
 }
+
+// Les tracés Material (24×24) de Icons.Filled.Person et Icons.Filled.Group.
+private const val TRACE_PERSONNE = "M12,12c2.21,0 4,-1.79 4,-4s-1.79,-4 -4,-4 -4,1.79 -4,4 1.79,4 4,4zM12,14c-2.67,0 -8,1.34 -8,4v2h16v-2c0,-2.66 -5.33,-4 -8,-4z"
+private const val TRACE_GROUPE = "M16,11c1.66,0 2.99,-1.34 2.99,-3S17.66,5 16,5c-1.66,0 -3,1.34 -3,3s1.34,3 3,3zM8,11c1.66,0 2.99,-1.34 2.99,-3S9.66,5 8,5C6.34,5 5,6.34 5,8s1.34,3 3,3zM8,13c-2.33,0 -7,1.17 -7,3.5L1,19h14v-2.5c0,-2.33 -4.67,-3.5 -7,-3.5zM16,13c-0.29,0 -0.62,0.02 -0.97,0.05 1.16,0.84 1.97,1.97 1.97,3.45L17,19h6v-2.5c0,-2.33 -4.67,-3.5 -7,-3.5z"
 
 /** Les avatars des groupes automatiques déjà dessinés, par (groupe, EGA). */
 private val imagesGroupes = HashMap<Pair<GroupeAuto, Boolean>, Bitmap>()
