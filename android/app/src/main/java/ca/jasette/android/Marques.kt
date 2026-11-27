@@ -16,7 +16,7 @@ import org.json.JSONObject
 /** Un emoji rapide fait au plus 32 octets (un graphème, PROTOCOLE.md §5.5). */
 const val EMOJI_RAPIDE_MAX = 32
 
-/** Une valeur de `groupes_auto` ("codes", "promos", "avis", "aucun") : 16 octets au plus. */
+/** Une valeur de `groupes_auto` ("codes", "promos", "rdv", "argent", "avis", "aucun") : 16 octets au plus. */
 const val GROUPE_AUTO_MAX = 16
 
 /**
@@ -94,7 +94,7 @@ object Marques {
     val emojis: SnapshotStateMap<String, String> = mutableStateMapOf()
     /**
      * Le regroupement automatique corrigé à la main (GroupesAuto.kt) : id
-     * préfixé → "codes", "promos", "avis" ou "aucun". Gagne toujours sur la
+     * préfixé → "codes", "promos", "rdv", "argent", "avis" ou "aucun". Gagne toujours sur la
      * détection ; partagé comme les emojis rapides (champ `groupes_auto`, §5.5).
      */
     val groupesAuto: SnapshotStateMap<String, String> = mutableStateMapOf()
@@ -563,10 +563,10 @@ object Marques {
         changement()
     }
 
-    /** La correction à la main du regroupement automatique de [id] ("codes", "promos", "avis", "aucun"), ou null. */
+    /** La correction à la main du regroupement automatique de [id] ("codes", "promos", "rdv", "argent", "avis", "aucun"), ou null. */
     fun groupeAuto(id: String): String? = groupesAuto[id]
 
-    /** Corrige à la main le groupe de [id] : « Mettre dans … » ou "aucun" (« Ce n'est pas … »). */
+    /** Corrige à la main le groupe de [id] : « Classer… » ou "aucun" (« Ce n'est pas … »). */
     fun corrigerGroupe(id: String, valeur: String) {
         if (lireCorrection(valeur) == null || groupesAuto[id] == valeur) return
         groupesAuto[id] = valeur

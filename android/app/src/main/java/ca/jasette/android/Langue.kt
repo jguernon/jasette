@@ -743,7 +743,18 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Jasette range les expéditeurs automatiques dans une seule rangée, sur cet appareil, sans rien envoyer ailleurs. Les contacts, les favoris, les épinglées, les groupes et les conversations où vous avez écrit ne sont jamais regroupés." to
         "Jasette puts automated senders into a single row, on this device, without sending anything anywhere. Contacts, favorites, pinned conversations, groups and conversations you wrote in are never grouped.",
     "Codes de vérification" to "Verification codes",
-    "livraisons, rendez-vous, banque, factures" to "deliveries, appointments, bank, bills",
+    "livraisons, factures, alertes" to "deliveries, bills, alerts",
+    "confirmations, rappels" to "confirmations, reminders",
+    "virements, dépôts, achats, solde, paie" to "transfers, deposits, purchases, balance, pay",
+    "Rendez-vous" to "Appointments",
+    "Argent" to "Money",
+    "Ce n'est pas un rendez-vous" to "Not an appointment",
+    "Ce n'est pas de l'argent" to "Not about money",
+    "Classer…" to "Classify…",
+    "Reclasser…" to "Reclassify…",
+    "Classer" to "Classify",
+    "Reclasser" to "Reclassify",
+    "Ne pas regrouper" to "Don't group",
     "Codes" to "Codes",
     "Promotions" to "Promotions",
     "Avis" to "Notices",
@@ -753,9 +764,6 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Ce n'est pas un code" to "Not a code",
     "Ce n'est pas une promo" to "Not a promotion",
     "Ce n'est pas un avis" to "Not a notice",
-    "Mettre dans Codes" to "Move to Codes",
-    "Mettre dans Promotions" to "Move to Promotions",
-    "Mettre dans Avis" to "Move to Notices",
 )
 
 

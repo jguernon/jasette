@@ -466,8 +466,8 @@ private fun ServicesDansLaBoite() {
 }
 
 /**
- * Réglages → Comptes → « Regrouper automatiquement » : trois cases (Codes,
- * Promotions, Avis), décochées par défaut, propres à l'appareil
+ * Réglages → Comptes → « Regrouper automatiquement » : cinq cases (Codes,
+ * Promotions, Rendez-vous, Argent, Avis), décochées par défaut, propres à l'appareil
  * ([ca.jasette.android.RegroupementAuto]).
  */
 @Composable
@@ -476,11 +476,9 @@ private fun RegrouperAutomatiquement() {
     Spacer(Modifier.height(4.dp))
     Titre(t("Regrouper automatiquement"))
     Groupe {
-        for ((g, texte, precision) in listOf(
-            Triple(ca.jasette.android.GroupeAuto.CODES, t("Codes de vérification"), null),
-            Triple(ca.jasette.android.GroupeAuto.PROMOS, t("Promotions"), null),
-            Triple(ca.jasette.android.GroupeAuto.AVIS, t("Avis"), t("livraisons, rendez-vous, banque, factures")),
-        )) {
+        for (g in ca.jasette.android.GroupeAuto.entries) {
+            val texte = t(g.nomLong)
+            val precision = g.precision?.let { t(it) }
             val coche = ca.jasette.android.RegroupementAuto.actif(g)
             Row(
                 Modifier.fillMaxWidth().clickable { ca.jasette.android.RegroupementAuto.choisir(ctx, g, !coche) }

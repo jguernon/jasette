@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -640,6 +641,7 @@ fun MenuConversation(
 ) {
     var confirmer by remember { mutableStateOf(false) }
     var feuilleMood by remember { mutableStateOf(false) }
+    var classer by remember { mutableStateOf(false) }
     // Une conversation absente (affichée depuis le cache des marques) : seules ses
     // marques se changent ; archiver ou supprimer attend que son service la charge.
     val chargee = Depot.conv(c.id) != null
@@ -702,38 +704,19 @@ fun MenuConversation(
         // aussi sans regroupement : l'avatar montre le groupe dans tous les cas.
         if (!ca.jasette.android.RegroupementAuto.horsClassement(c)) {
             val actuel = ca.jasette.android.RegroupementAuto.groupe(c)
-            @Composable
-            fun ItemGroupe(texte: String, g: ca.jasette.android.GroupeAuto?, valeur: String) {
+            HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = P.traitFin)
+            if (actuel != null) {
                 DropdownMenuItem(
-                    text = { Text(texte, color = P.texteFort) },
-                    leadingIcon = {
-                        if (g != null) AvatarGroupe(g, 24.dp)
-                        else Icon(Icons.Filled.Clear, null, tint = P.textePale, modifier = Modifier.size(20.dp))
-                    },
+                    text = { Text(t(actuel.pasUn), color = P.texteFort) },
+                    leadingIcon = { Icon(Icons.Filled.Clear, null, tint = P.textePale, modifier = Modifier.size(20.dp)) },
                     onClick = {
                         fermer()
-                        Marques.corrigerGroupe(c.id, valeur)
+                        Marques.corrigerGroupe(c.id, "aucun")
                     },
                 )
             }
-            HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = P.traitFin)
-            if (actuel != null) {
-                val pas = when (actuel) {
-                    ca.jasette.android.GroupeAuto.CODES -> t("Ce n'est pas un code")
-                    ca.jasette.android.GroupeAuto.PROMOS -> t("Ce n'est pas une promo")
-                    ca.jasette.android.GroupeAuto.AVIS -> t("Ce n'est pas un avis")
-                }
-                ItemGroupe(pas, null, "aucun")
-            }
-            for (g in ca.jasette.android.GroupeAuto.entries) {
-                if (g == actuel) continue
-                val texte = when (g) {
-                    ca.jasette.android.GroupeAuto.CODES -> t("Mettre dans Codes")
-                    ca.jasette.android.GroupeAuto.PROMOS -> t("Mettre dans Promotions")
-                    ca.jasette.android.GroupeAuto.AVIS -> t("Mettre dans Avis")
-                }
-                ItemGroupe(texte, g, g.cle)
-            }
+            // « Classer… » : la fenêtre des cinq groupes (FenetreClasser, GroupesAutoUi.kt).
+            Item(if (actuel != null) t("Reclasser…") else t("Classer…"), Icons.AutoMirrored.Filled.List) { classer = true }
         }
         HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = P.traitFin)
         Item(t("Supprimer"), Icons.Filled.Delete, couleur = P.danger, actif = supprimable) { confirmer = true }
@@ -742,6 +725,7 @@ fun MenuConversation(
     }
 
     if (feuilleMood) FeuilleMood(c.id, nomAffiche(c)) { feuilleMood = false }
+    if (classer) FenetreClasser(c) { classer = false }
 
     if (confirmer) {
         AlertDialog(

@@ -7,13 +7,14 @@ import androidx.compose.runtime.setValue
 
 /**
  * Le regroupement automatique de la boîte de réception, côté app : les
- * réglages (Réglages > « Regrouper automatiquement », trois cases décochées
+ * réglages (Réglages > « Regrouper automatiquement », cinq cases décochées
  * par défaut, PAR APPAREIL comme « Dans la boîte de réception »), ce que la
  * détection (GroupesAuto.kt) sait de chaque conversation, et la boîte
  * réorganisée en rangées ([repartir]).
  *
  * Promotions (case cochée) : aucune notification, pas dans les non-lus ni
- * dans Android Auto. Codes et Avis gardent leurs notifications.
+ * dans Android Auto. Codes, Rendez-vous, Argent et Avis gardent leurs
+ * notifications.
  */
 object RegroupementAuto {
     private const val PREFS = "affichage"
@@ -21,6 +22,10 @@ object RegroupementAuto {
     var codes by mutableStateOf(false)
         private set
     var promos by mutableStateOf(false)
+        private set
+    var rdv by mutableStateOf(false)
+        private set
+    var argent by mutableStateOf(false)
         private set
     var avis by mutableStateOf(false)
         private set
@@ -30,21 +35,29 @@ object RegroupementAuto {
         codes = p.getBoolean("groupe_codes", false)
         promos = p.getBoolean("groupe_promos", false)
         avis = p.getBoolean("groupe_avis", false)
+        // Rendez-vous et Argent sont sortis d'Avis (2026-11) : jamais choisis
+        // sur cet appareil, ils suivent la case Avis.
+        rdv = p.getBoolean("groupe_rdv", avis)
+        argent = p.getBoolean("groupe_argent", avis)
     }
 
     fun actif(g: GroupeAuto): Boolean = when (g) {
         GroupeAuto.CODES -> codes
         GroupeAuto.PROMOS -> promos
+        GroupeAuto.RDV -> rdv
+        GroupeAuto.ARGENT -> argent
         GroupeAuto.AVIS -> avis
     }
 
     /** Au moins une case cochée. */
-    val unActif: Boolean get() = codes || promos || avis
+    val unActif: Boolean get() = codes || promos || rdv || argent || avis
 
     fun choisir(ctx: Context, g: GroupeAuto, oui: Boolean) {
         when (g) {
             GroupeAuto.CODES -> codes = oui
             GroupeAuto.PROMOS -> promos = oui
+            GroupeAuto.RDV -> rdv = oui
+            GroupeAuto.ARGENT -> argent = oui
             GroupeAuto.AVIS -> avis = oui
         }
         ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()

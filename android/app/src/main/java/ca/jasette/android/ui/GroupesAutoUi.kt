@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -39,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ca.jasette.android.Conv
 import ca.jasette.android.Depot
+import ca.jasette.android.Marques
 import ca.jasette.android.GroupeAuto
 import ca.jasette.android.dernierCode
 import ca.jasette.android.nomAffiche
@@ -48,6 +50,8 @@ import ca.jasette.android.t
 fun iconeGroupe(g: GroupeAuto): androidx.compose.ui.graphics.vector.ImageVector = when (g) {
     GroupeAuto.CODES -> Icones.cle
     GroupeAuto.PROMOS -> Icones.etiquette
+    GroupeAuto.RDV -> Icones.calendrier
+    GroupeAuto.ARGENT -> Icones.billets
     GroupeAuto.AVIS -> Icones.colis
 }
 
@@ -81,7 +85,7 @@ fun apercuGroupe(g: GroupeAuto, membres: List<Conv>): String {
         GroupeAuto.CODES -> dernierCode(membres)?.let { (c, code) -> "${nomAffiche(c)}${t(" : ")}$code" }
             ?: "${nomAffiche(recent)}${t(" : ")}${recent.preview}"
         GroupeAuto.PROMOS -> membres.sortedByDescending { it.time }.joinToString(", ") { nomAffiche(it) }
-        GroupeAuto.AVIS -> "${nomAffiche(recent)}${t(" : ")}${ca.jasette.android.traduirePont(recent.preview)}"
+        GroupeAuto.RDV, GroupeAuto.ARGENT, GroupeAuto.AVIS -> "${nomAffiche(recent)}${t(" : ")}${ca.jasette.android.traduirePont(recent.preview)}"
     }.replace('\n', ' ')
 }
 
@@ -173,4 +177,56 @@ fun EnteteGroupe(g: GroupeAuto, membres: List<Conv>, fermer: () -> Unit) {
             Text(t("Tout marquer comme lu"), color = if (nonLues.isNotEmpty()) P.accent else P.textePale)
         }
     }
+}
+
+/**
+ * « Classer… » (menu d'appui long d'une conversation) : les cinq groupes, le
+ * groupe actuel coché, et « Ne pas regrouper ». Un appui corrige à la main
+ * (marque partagée `groupes_auto`, comme « Ce n'est pas … ») et ferme.
+ */
+@Composable
+fun FenetreClasser(c: Conv, fermer: () -> Unit) {
+    val actuel = ca.jasette.android.RegroupementAuto.groupe(c)
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = fermer,
+        containerColor = P.menu,
+        title = {
+            Column {
+                Text(if (actuel != null) t("Reclasser") else t("Classer"), color = P.texteFort, fontWeight = FontWeight.Bold)
+                Text(nomAffiche(c), color = P.textePale, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                for (g in GroupeAuto.entries + listOf<GroupeAuto?>(null)) {
+                    val coche = g != null && g == actuel
+                    val texte = if (g != null) t(g.nomLong) else t("Ne pas regrouper")
+                    val precision = if (g != null) g.precision?.let { t(it) } else actuel?.let { t(it.pasUn) }
+                    Row(
+                        Modifier.fillMaxWidth().clip(forme(12.dp))
+                            .then(if (coche) Modifier.background(P.choisi) else Modifier)
+                            .clickable {
+                                Marques.corrigerGroupe(c.id, g?.cle ?: "aucun")
+                                fermer()
+                            }
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (g != null) AvatarGroupe(g, 34.dp)
+                        else Box(
+                            Modifier.size(34.dp).clip(formeRonde).border(1.dp, P.traitFin, formeRonde),
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(Icons.Filled.Clear, null, tint = P.textePale, modifier = Modifier.size(18.dp)) }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(texte, color = P.texteFort, fontWeight = FontWeight.SemiBold)
+                            if (precision != null) Text(precision, color = P.textePale, fontSize = 12.sp)
+                        }
+                        if (coche) Icon(Icons.Filled.Check, null, tint = P.accent, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(shape = formeBouton, onClick = fermer) { Text(t("Annuler"), color = P.texte) } },
+    )
 }

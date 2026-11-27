@@ -26,6 +26,8 @@ class GroupesAutoTest {
         'c' -> SorteMessage.CODE
         'p' -> SorteMessage.PROMO
         'a' -> SorteMessage.AVIS
+        'r' -> SorteMessage.RDV
+        '$' -> SorteMessage.ARGENT
         else -> SorteMessage.AUTRE
     }
 
@@ -47,6 +49,8 @@ class GroupesAutoTest {
                         "code" -> SorteMessage.CODE
                         "promo" -> SorteMessage.PROMO
                         "avis" -> SorteMessage.AVIS
+                        "rdv" -> SorteMessage.RDV
+                        "argent" -> SorteMessage.ARGENT
                         else -> SorteMessage.AUTRE
                     }
                     assertEquals("message : ${c[2]}", attendu, sorteMessage(c[2]))

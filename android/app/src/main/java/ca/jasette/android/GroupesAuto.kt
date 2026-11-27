@@ -2,9 +2,11 @@ package ca.jasette.android
 
 // Le regroupement automatique de la boîte de réception (Réglages >
 // « Regrouper automatiquement », désactivé par défaut) : les expéditeurs de
-// codes de vérification (🔐 Codes), de publicités (🏷️ Promotions) et d'avis
-// (📦 Avis : livraisons, rendez-vous, banque, factures, alertes) deviennent
-// chacun une seule rangée repliable de la boîte.
+// codes de vérification (🔐 Codes), de publicités (🏷️ Promotions), de
+// rendez-vous (📅 Rendez-vous : confirmations et rappels), d'argent
+// (💵 Argent : virements, dépôts, retraits, achats, solde, paie) et d'avis
+// (📦 Avis : livraisons, factures, alertes) deviennent chacun une seule
+// rangée repliable de la boîte.
 //
 // La même logique, pas à pas, que src/groupes_auto.rs (bureau) ; les deux
 // côtés lisent les mêmes essais : assets/essais/groupes-auto.txt
@@ -12,12 +14,15 @@ package ca.jasette.android
 //
 // Tout se décide localement, sans IA ni service externe, par EXPÉDITEUR :
 // 1. chaque message reçu reçoit une sorte ([sorteMessage]) : un code de
-//    vérification (Codes.kt), une promo, un avis, ou rien ;
+//    vérification (Codes.kt), une promo, un rendez-vous, de l'argent, un
+//    avis, ou rien ;
 // 2. l'expéditeur est un numéro court, un nom alphanumérique ou un expéditeur
 //    ordinaire ([sorteExpediteur]) ;
 // 3. [classer] décide d'après les derniers messages reçus : au moins deux qui
 //    concordent (trois hors SMS pour un expéditeur ordinaire), au moins la
-//    moitié ; un seul code suffit d'un numéro court ou d'un nom.
+//    moitié ; un seul code suffit d'un numéro court ou d'un nom. Rendez-vous,
+//    Argent et Avis comptent ensemble contre les promos, puis le plus nombreux
+//    des trois l'emporte (à égalité : Argent, puis Rendez-vous, puis Avis).
 // Jamais classés (l'appelant le dit par `exclue`) : contact, favori, Head,
 // épinglée, groupe, grand espace, privée ; ni une conversation où j'ai écrit.
 // La correction à la main (marque `groupes_auto`) gagne toujours ([groupeFinal]).
@@ -27,13 +32,37 @@ package ca.jasette.android
 enum class GroupeAuto(val cle: String, val fond: Long, val fondEga: Long) {
     CODES("codes", 0x8b5cf6, 0xaa00aa),
     PROMOS("promos", 0xec4899, 0xaa00aa),
+    RDV("rdv", 0x0ea5e9, 0x00aaaa),
+    ARGENT("argent", 0x16a34a, 0x00aa00),
     AVIS("avis", 0xf59e0b, 0xaa5500);
 
     /** Le titre de sa rangée (à traduire par t()). */
     val titre: String get() = when (this) {
         CODES -> "Codes"
         PROMOS -> "Promotions"
+        RDV -> "Rendez-vous"
+        ARGENT -> "Argent"
         AVIS -> "Avis"
+    }
+
+    /** Son nom dans les Réglages et la fenêtre « Classer » (à traduire par t()). */
+    val nomLong: String get() = if (this == CODES) "Codes de vérification" else titre
+
+    /** Sa précision, en petit (à traduire par t()), ou null. */
+    val precision: String? get() = when (this) {
+        CODES, PROMOS -> null
+        RDV -> "confirmations, rappels"
+        ARGENT -> "virements, dépôts, achats, solde, paie"
+        AVIS -> "livraisons, factures, alertes"
+    }
+
+    /** « Ce n'est pas un code » : la sortir de son groupe (à traduire par t()). */
+    val pasUn: String get() = when (this) {
+        CODES -> "Ce n'est pas un code"
+        PROMOS -> "Ce n'est pas une promo"
+        RDV -> "Ce n'est pas un rendez-vous"
+        ARGENT -> "Ce n'est pas de l'argent"
+        AVIS -> "Ce n'est pas un avis"
     }
 }
 
@@ -46,6 +75,8 @@ data class Correction(val groupe: GroupeAuto?)
 fun lireCorrection(v: String?): Correction? = when (v) {
     "codes" -> Correction(GroupeAuto.CODES)
     "promos" -> Correction(GroupeAuto.PROMOS)
+    "rdv" -> Correction(GroupeAuto.RDV)
+    "argent" -> Correction(GroupeAuto.ARGENT)
     "avis" -> Correction(GroupeAuto.AVIS)
     "aucun" -> Correction(null)
     else -> null
@@ -58,7 +89,7 @@ fun groupeFinal(correction: String?, detecte: GroupeAuto?): GroupeAuto? {
 }
 
 /** La sorte d'un message reçu. */
-enum class SorteMessage { CODE, PROMO, AVIS, AUTRE }
+enum class SorteMessage { CODE, PROMO, RDV, ARGENT, AVIS, AUTRE }
 
 /** La sorte d'un expéditeur. */
 enum class SorteExpediteur {
@@ -78,7 +109,7 @@ private val PROMO_FORTS = listOf(
 private val PROMO_FAIBLES = listOf(
     "promo", "promotion", "promotions", "offre", "offres", "offer", "offers", "deal", "deals", "sale", "gratuit",
     "gratuite", "free", "exclusif", "exclusive", "limited time", "durée limitée", "aujourd'hui seulement", "today only",
-    "magasinez",
+    "magasinez", "obtenez", "remise", "cashback", "cash back", "remise en argent", "prime", "bonus",
 )
 
 private val DESABONNER =
@@ -91,12 +122,25 @@ private val LIENS_COURTS = listOf(
     "shorturl.at/", "tiny.cc/", "lnkd.in/", "qrco.de/", "bit.do/", "s.id/",
 )
 
+private val RDV = listOf(
+    "rendez-vous", "rdv", "appointment", "appointments", "appt", "réservation", "reservation", "booking", "booked",
+    "réservé", "réservée", "consultation", "clinique", "clinic", "dentiste", "dentist", "hygiéniste", "médecin",
+    "docteur", "doctor", "dr", "dre", "vétérinaire", "veterinary", "coiffeur", "coiffeuse", "physiothérapie",
+)
+
+private val ARGENT = listOf(
+    "virement", "virements", "interac", "e-transfer", "etransfer", "e-transfert", "dépôt", "dépôts", "deposit",
+    "deposited", "retrait", "withdrawal", "prélèvement", "transaction", "transactions", "achat", "achats", "purchase",
+    "solde", "balance", "paiement", "payment", "paie", "payroll", "paycheque", "paycheck", "salaire", "remboursement",
+    "remboursé", "refund", "refunded", "crédité", "créditée", "credited", "débité", "débitée", "debited", "fonds",
+    "funds", "paypal", "argent", "money", "carte de crédit", "credit card", "carte de débit", "debit card",
+    "se terminant par", "ending in",
+)
+
 private val AVIS = listOf(
     "colis", "package", "parcel", "livraison", "livré", "livrée", "delivered", "delivery", "expédié", "expédiée",
-    "shipped", "suivi", "tracking", "rendez-vous", "rdv", "appointment", "rappel", "reminder", "facture", "invoice",
-    "bill", "solde", "balance", "paiement", "payment", "dépôt", "deposit", "transaction", "retrait", "withdrawal",
-    "prélèvement", "virement", "alerte", "alert", "commande", "order", "réservation", "reservation", "booking",
-    "ramassage", "pickup", "échéance", "relevé", "statement",
+    "shipped", "suivi", "tracking", "rappel", "reminder", "facture", "invoice", "bill", "alerte", "alert", "commande",
+    "order", "ramassage", "pickup", "échéance", "relevé", "statement",
 )
 
 /** Un mot (ou une expression) entier dans [t] ; un bout qui est un signe n'exige pas de limite de ce côté. */
@@ -132,11 +176,15 @@ fun sorteMessage(texte: String): SorteMessage {
     if (STOP.any { mot(original, it) }) promo += 1
     if (pourcentage(t)) promo += 1
     if (LIENS_COURTS.any { mot(t, it) }) promo += 1
+    val rdv = RDV.count { mot(t, it) }
+    val argent = ARGENT.count { mot(t, it) }
     val avis = AVIS.count { mot(t, it) }
     return when {
-        promo >= 2 && promo > avis -> SorteMessage.PROMO
-        avis >= 1 -> SorteMessage.AVIS
-        else -> SorteMessage.AUTRE
+        promo >= 2 && promo > rdv + argent + avis -> SorteMessage.PROMO
+        rdv + argent + avis == 0 -> SorteMessage.AUTRE
+        argent >= rdv && argent >= avis -> SorteMessage.ARGENT
+        rdv >= avis -> SorteMessage.RDV
+        else -> SorteMessage.AVIS
     }
 }
 
@@ -177,10 +225,19 @@ fun classer(e: EntreeGroupe): GroupeAuto? {
     val codes = compte(SorteMessage.CODE)
     if (codes >= 2 && codes * 2 >= n) return GroupeAuto.CODES
     val seuil = if (commercial || e.sms) 2 else 3
+    val rdv = compte(SorteMessage.RDV)
+    val argent = compte(SorteMessage.ARGENT)
     val avis = compte(SorteMessage.AVIS)
     val promos = compte(SorteMessage.PROMO)
-    // À égalité, Avis (le plus utile des deux).
-    val (g, c) = if (promos > avis) GroupeAuto.PROMOS to promos else GroupeAuto.AVIS to avis
+    // Rendez-vous, Argent et Avis ensemble contre les promos ; à égalité, eux.
+    // Puis le plus nombreux des trois : Argent, puis Rendez-vous, puis Avis.
+    val tous = rdv + argent + avis
+    val (g, c) = when {
+        promos > tous -> GroupeAuto.PROMOS to promos
+        argent >= rdv && argent >= avis -> GroupeAuto.ARGENT to tous
+        rdv >= avis -> GroupeAuto.RDV to tous
+        else -> GroupeAuto.AVIS to tous
+    }
     return if (c >= seuil && c * 2 >= n) g else null
 }
 

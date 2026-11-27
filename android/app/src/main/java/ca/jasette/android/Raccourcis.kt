@@ -233,6 +233,8 @@ fun imageGroupe(g: GroupeAuto, ega: Boolean, cote: Int = 256): Bitmap = synchron
         val chemin = when (g) {
             GroupeAuto.CODES -> ca.jasette.android.ui.Icones.CHEMIN_CLE
             GroupeAuto.PROMOS -> ca.jasette.android.ui.Icones.CHEMIN_ETIQUETTE
+            GroupeAuto.RDV -> ca.jasette.android.ui.Icones.CHEMIN_CALENDRIER
+            GroupeAuto.ARGENT -> ca.jasette.android.ui.Icones.CHEMIN_BILLETS
             GroupeAuto.AVIS -> ca.jasette.android.ui.Icones.CHEMIN_COLIS
         }
         // L'icône (24 × 24) à 52 % du rond, centrée.
