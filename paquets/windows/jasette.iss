@@ -18,7 +18,7 @@
 AppId={{6E3B1C52-8F0A-4D4B-9C61-2A7F5E0D9B13}
 AppName=Jasette
 AppVersion={#Version}
-AppVerName=Jasette {#Version}
+AppVerName=Jasette {#Version} alpha
 VersionInfoVersion={#Version}.{#Numero}
 AppPublisher=Jonathan Guernon
 AppPublisherURL=https://jonathanguernon.net/jasette/

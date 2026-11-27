@@ -29,7 +29,9 @@ fn main() {
         .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
         .unwrap_or(0);
     let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
-    let nom = if build > 0 { format!("{version} ({build})") } else { version };
+    // Windows (la cible) : « alpha » dans le nom tant que la version n'est pas éprouvée.
+    let alpha = if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") { " alpha" } else { "" };
+    let nom = if build > 0 { format!("{version}{alpha} ({build})") } else { format!("{version}{alpha}") };
     println!("cargo:rustc-env=JASETTE_BUILD={build}");
     println!("cargo:rustc-env=JASETTE_CODE={}", 10_000 + build);
     println!("cargo:rustc-env=JASETTE_NOM={nom}");

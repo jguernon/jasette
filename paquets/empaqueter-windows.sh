@@ -47,7 +47,7 @@ VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$PROJET/Cargo.toml" | head -1)"
 # Le même numéro que build.rs (10 000 + le nombre de commits).
 NUMERO="$(git -C "$PROJET" rev-list --count HEAD)"
 CODE=$((10000 + NUMERO))
-NOM_VERSION="$VERSION ($NUMERO)"
+NOM_VERSION="$VERSION alpha ($NUMERO)"
 echo "== Jasette $NOM_VERSION — Windows x86_64"
 
 mkdir -p "$BIN" "$SORTIE" "$C/gotmp" "$C/xwin-bin"
