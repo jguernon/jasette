@@ -378,6 +378,38 @@ private fun SectionComptes(connecter: (Service, String) -> Unit) {
     Depot.erreur?.let { Text(it, color = P.danger, fontSize = 14.sp) }
     ServicesDansLaBoite()
     RegrouperAutomatiquement()
+    ChoixStories()
+}
+
+/**
+ * Réglages → Comptes : « Afficher les stories Facebook et Instagram » (décoché
+ * par défaut ; marque `stories`, partagée par le serveur Jasette s'il y en a
+ * un, PROTOCOLE.md §5.15). Décoché, aucune requête de stories. Dessous, ce qui
+ * manque à un service (`indispo`), s'il y a lieu.
+ */
+@Composable
+private fun ChoixStories() {
+    val oui = ca.jasette.android.Marques.stories
+    Groupe {
+        Row(
+            Modifier.fillMaxWidth().clickable { ca.jasette.android.Marques.choisirStories(!oui) }
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(t("Afficher les stories Facebook et Instagram"), color = P.texteFort, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text(
+                    t("Un cercle autour de l'avatar d'un contact qui a une story ; le toucher l'ouvre dans l'app ou le navigateur."),
+                    color = P.textePale, fontSize = 13.sp,
+                )
+                if (oui) for ((s, raison) in ca.jasette.android.Stories.indispo) {
+                    Text("${s.titre} : ${t(raison)}", color = P.averti, fontSize = 13.sp)
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Interrupteur(oui) { ca.jasette.android.Marques.choisirStories(it) }
+        }
+    }
 }
 
 /**

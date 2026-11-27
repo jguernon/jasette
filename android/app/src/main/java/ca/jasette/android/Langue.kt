@@ -113,6 +113,15 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Amis proches" to "Close friends",
     "Changer d'avatar" to "Change avatar",
     "Afficher les notes de mes contacts" to "Show my contacts' notes",
+    // Les stories des contacts (Stories.kt, §5.15).
+    "Afficher les stories Facebook et Instagram" to "Show Facebook and Instagram stories",
+    "Un cercle autour de l'avatar d'un contact qui a une story ; le toucher l'ouvre dans l'app ou le navigateur." to
+        "A ring around the avatar of a contact who has a story; tap it to open it in the app or the browser.",
+    "Voir la story" to "View story",
+    "Voir la story Instagram" to "View Instagram story",
+    "Voir la story Facebook" to "View Facebook story",
+    "Pour les stories Facebook, reconnecte Messenger « Avec Facebook »." to "For Facebook stories, reconnect Messenger “With Facebook”.",
+    "Les stories Facebook ne sont pas encore réglées sur le serveur (stories-docs.json)." to "Facebook stories aren't set up on the server yet (stories-docs.json).",
     "Les notes Instagram, en petite bulle au-dessus des avatars du Head." to "Instagram notes, in a small bubble above the avatars of the Head.",
     "Partager ce que j'écoute sur Spotify" to "Share what I'm listening to on Spotify",
     "Activé sur" to "On for",

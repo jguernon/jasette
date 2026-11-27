@@ -228,6 +228,8 @@ object Depot {
         enMarche = true
         Marques.surPresence = { oui -> principal.post { presenceReglee(oui) } }
         Marques.surNotesContacts = { oui -> principal.post { notesContactsReglees(oui) } }
+        Marques.surStories = { oui -> principal.post { storiesReglees(oui) } }
+        Stories.demarrer()
         // Une entrée « Contacts Google » venue du bureau : appliquée ici si la permission y est déjà.
         Marques.surContactsPerso = { m -> ContactsGoogle.appliquerRecues(appli, m) }
         Sons.init(ctx)
@@ -449,6 +451,7 @@ object Depot {
         ecrits.clear()
         attention.clear()
         Notes.vider()
+        Stories.vider()
         emoji = null
         besoinNip = false
         erreurNip = null
@@ -471,6 +474,8 @@ object Depot {
             "JASETTE_PRESENCE" to if (Marques.presenceEnLigne) "1" else "0",
             // « Afficher les notes de mes contacts » (§5.12) ; ensuite, la commande `notes_contacts`.
             "JASETTE_NOTES" to if (Marques.notesContacts) "1" else "0",
+            // « Afficher les stories Facebook et Instagram » (§5.15) ; ensuite, la commande `stories`.
+            "JASETTE_STORIES" to if (Marques.stories) "1" else "0",
         )
     }
 
@@ -483,6 +488,19 @@ object Depot {
         Notes.contactsRegles(oui)
         if (connexion != null) return
         (ponts[Service.INSTAGRAM] as? PontLocal)?.envoyer(JSONObject().put("cmd", "notes_contacts").put("on", oui))
+    }
+
+    /**
+     * Le réglage « Afficher les stories Facebook et Instagram » vient de
+     * changer : les ponts Instagram et Messenger locaux reçoivent `stories` (en
+     * mode client, le serveur prévient les siens) ; désactivé, tout est oublié.
+     */
+    private fun storiesReglees(oui: Boolean) {
+        Stories.regle(oui)
+        if (connexion != null) return
+        for (s in listOf(Service.INSTAGRAM, Service.MESSENGER)) {
+            (ponts[s] as? PontLocal)?.envoyer(JSONObject().put("cmd", "stories").put("on", oui))
+        }
     }
 
     /** Les services dont le pont suit la présence. */
@@ -853,6 +871,7 @@ object Depot {
                 if (apres == Etat.NON_ASSOCIE) {
                     oublier(service)
                     Notes.oublier(service)
+                    Stories.oublier(service)
                 }
                 if (apres == Etat.PRET && avant != Etat.PRET && service == Service.INSTAGRAM) Notes.demanderListe(force = true)
                 // Le pont n'écoute plus : sa présence ne vaut plus rien.
@@ -914,6 +933,8 @@ object Depot {
             "presence" -> recevoirPresence(v)
             // « Quoi de neuf ? » (§5.12) : ma note, le résultat d'une publication, les notes des contacts.
             "note_moi", "note_result", "notes" -> Notes.recevoir(v, service)
+            // Les stories des contacts (§5.15) : le cercle autour des avatars.
+            "stories" -> Stories.recevoir(v, service)
             "hello", "e2ee" -> {}
             "error" -> {
                 val texte = v.chaine("text")

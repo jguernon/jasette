@@ -4,6 +4,7 @@ import ca.jasette.android.t
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
@@ -89,11 +90,31 @@ private fun initiales(nom: String): String? {
  * [groupeAuto] : un expéditeur automatique (RegroupementAuto.groupe) montre l'icône de son
  * groupe à la place de sa photo ; le logo du service et le point « en ligne » restent.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun Avatar(
     conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false, presence: Boolean = false, fondPoint: Color = P.fond,
     propre: Boolean = false, groupeAuto: ca.jasette.android.GroupeAuto? = null,
+    /** Le cercle « story active » (§5.15) autour de l'avatar d'un contact. */
+    story: Boolean = false,
+    /** Toucher le cercle ouvre la story (sinon le cercle se montre seulement). */
+    ouvrirStory: Boolean = false,
+    /** L'appui long de la rangée, gardé sur l'avatar quand il ouvre la story. */
+    appuiLong: (() -> Unit)? = null,
+    /** Les conversations de la personne où chercher la story (fiche) ; null : celles de [conv]. */
+    storyIds: List<String>? = null,
 ) {
+    // La story à cercler : jamais pour l'icône d'un groupe automatique ni pour un groupe.
+    val laStory = when {
+        !story || groupeAuto != null || conv.group -> null
+        storyIds != null -> ca.jasette.android.Stories.premiere(storyIds)
+        else -> ca.jasette.android.Stories.pour(conv, propre)
+    }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    // Avec un cercle : la photo rapetisse au-dedans (anneau, puis un petit espace), la taille dehors ne change pas.
+    val anneau = (taille * 0.05f).coerceIn(1.5.dp, 3.5.dp)
+    val espace = (taille * 0.04f).coerceIn(1.5.dp, 3.dp)
+    val dedans = if (laStory != null) taille - (anneau + espace) * 2 else taille
     // La photo de la principale de sa personne (fiche), sinon la sienne ; [propre] : la sienne seulement.
     // Un groupe sans image propre : la mosaïque de ses membres (`avatars_groupe`), avant
     // la photo gardée pour une conversation marquée (une version d'avant y mettait un membre).
@@ -104,14 +125,26 @@ fun Avatar(
     // La photo choisie à la main (crayon de la fiche) passe avant tout.
     val photo = (if (propre) null else ca.jasette.android.photoPerso(conv)) ?: principale?.let { photoDe(it) } ?: photoDe(conv)
     val mosaique = if (photo == null) mosaiqueDe(conv) else null
-    Box(Modifier.size(taille)) {
+    Box(
+        Modifier.size(taille).let { m ->
+            // Sans ondulation : elle serait carrée (le badge et le point débordent du rond).
+            if (laStory == null || !ouvrirStory) m else m.combinedClickable(
+                interactionSource = null,
+                indication = null,
+                onClick = { ca.jasette.android.Stories.ouvrir(ctx, laStory) },
+                onLongClick = appuiLong,
+                onClickLabel = t("Voir la story"),
+            )
+        },
+    ) {
+        if (laStory != null) CercleStory(laStory.service == "instagram", taille, anneau)
         // Rond, carré (EGA), cadre vert brillant (Live) ou carré en creux (Sirène).
-        val rond = Modifier.cadreAvatar(taille)
+        val rond = Modifier.cadreAvatar(dedans)
         if (groupeAuto != null) {
             AvatarGroupe(groupeAuto, taille)
         } else if (mosaique != null) {
             Mosaique(mosaique, taille, grise)
-        } else if (photo != null) {
+        } else if (photo != null) Box(Modifier.align(Alignment.Center)) {
             ImageFichier(
                 photo, rond.background(P.surface).then(if (grise) Modifier.alpha(0.7f) else Modifier), cote = 256,
                 filtre = if (grise) filtreGris else null,
@@ -119,12 +152,12 @@ fun Avatar(
             )
         } else {
             val base = if (grise) GRIS_ABSENT else couleurHex(conv.color) ?: P.avatarDefaut
-            Box(rond.background(fondAvatar(base)), contentAlignment = Alignment.Center) {
+            Box(rond.align(Alignment.Center).background(fondAvatar(base)), contentAlignment = Alignment.Center) {
                 val i = if (conv.group) null else initiales(if (propre) conv.name else ca.jasette.android.nomAffiche(conv))
                 if (i != null) {
-                    Text(i, color = Color.White, fontSize = (taille.value * 0.38f).sp, fontWeight = FontWeight.SemiBold)
+                    Text(i, color = Color.White, fontSize = (dedans.value * 0.38f).sp, fontWeight = FontWeight.SemiBold)
                 } else {
-                    Icon(Icons.Filled.Person, null, tint = Color.White, modifier = Modifier.size(taille * 0.5f))
+                    Icon(Icons.Filled.Person, null, tint = Color.White, modifier = Modifier.size(dedans * 0.5f))
                 }
             }
         }
@@ -141,6 +174,37 @@ fun Avatar(
             )
         }
     }
+}
+
+/** La forme du cercle « story » : celle du cadre de l'avatar du thème (rond, carré EGA, Live, Sirène). */
+fun formeCercleStory(taille: Dp): androidx.compose.ui.graphics.Shape = when {
+    P.live -> androidx.compose.foundation.shape.RoundedCornerShape(taille * 0.16f)
+    P.sirene -> androidx.compose.ui.graphics.RectangleShape
+    else -> formeRonde
+}
+
+/** Le dégradé Instagram (jaune, orange, rose, violet, bleu), du coin bas-gauche au coin haut-droit. */
+private val DEGRADE_INSTAGRAM = listOf(Color(0xfffeda75), Color(0xfffa7e1e), Color(0xffd62976), Color(0xff962fbf), Color(0xff4f5bd5))
+/** Le dégradé bleu de Facebook. */
+private val DEGRADE_FACEBOOK = listOf(Color(0xff1877f2), Color(0xff00c6ff))
+
+/**
+ * L'anneau « story active » (§5.15), d'épaisseur [anneau], tout autour de
+ * [taille]. Dégradé Instagram ou bleu Facebook ; EGA : plein (magenta vif
+ * ou bleu clair EGA) ; Live et Sirène : plein, simple.
+ */
+@Composable
+fun CercleStory(instagram: Boolean, taille: Dp, anneau: Dp) {
+    val brosse: androidx.compose.ui.graphics.Brush = when {
+        P.ega -> SolidColor(if (instagram) Color(0xffff55ff) else Color(0xff5555ff))
+        P.retro -> SolidColor(if (instagram) Color(0xffd62976) else Color(0xff1877f2))
+        else -> androidx.compose.ui.graphics.Brush.linearGradient(
+            if (instagram) DEGRADE_INSTAGRAM else DEGRADE_FACEBOOK,
+            start = androidx.compose.ui.geometry.Offset(0f, Float.POSITIVE_INFINITY),
+            end = androidx.compose.ui.geometry.Offset(Float.POSITIVE_INFINITY, 0f),
+        )
+    }
+    Box(Modifier.size(taille).border(anneau, brosse, formeCercleStory(taille)))
 }
 
 /**

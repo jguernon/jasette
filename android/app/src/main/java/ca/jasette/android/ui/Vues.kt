@@ -495,7 +495,9 @@ private fun CaseHead(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box {
-                Avatar(c, avatar, grise = absente.grise(), presence = true)
+                // Toucher le cercle d'une story l'ouvre (§5.15) ; le reste de la case ouvre la conversation,
+                // et l'appui long garde son menu, même sur l'avatar.
+                Avatar(c, avatar, grise = absente.grise(), presence = true, story = true, ouvrirStory = true, appuiLong = { menu = true })
                 if (c.unread) {
                     Box(
                         Modifier.align(Alignment.TopEnd).size(point).clip(formeRonde).background(P.fond)
@@ -561,6 +563,9 @@ fun Rangee(
             Avatar(
                 c, 52.dp, badge = badge || absente != null, grise = absente.grise(), presence = true,
                 groupeAuto = ca.jasette.android.RegroupementAuto.groupe(c),
+                // Le cercle d'une story (§5.15) : le toucher l'ouvre (pas en mode Réorganiser) ;
+                // le reste de la rangée ouvre la conversation, l'appui long garde son menu.
+                story = true, ouvrirStory = !reorganiser, appuiLong = { menu = true },
             )
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {

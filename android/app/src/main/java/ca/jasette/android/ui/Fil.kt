@@ -264,7 +264,8 @@ fun Fil(
                         Modifier.let { if (aFiche) it.clickable { fiche = true } else it },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (entete != null) Avatar(entete, 36.dp, grise = absente.grise(), presence = true, fondPoint = if (P.ega) P.barre else P.fil)
+                        // Le cercle d'une story se montre ; toucher garde la fiche (le bouton « Voir la story » y est).
+                        if (entete != null) Avatar(entete, 36.dp, grise = absente.grise(), presence = true, fondPoint = if (P.ega) P.barre else P.fil, story = true)
                         Spacer(Modifier.width(10.dp))
                         // Le nom et le service, serrés et centrés sur l'avatar : la barre donne
                         // au titre l'interligne de titleLarge (28 sp), qui les poussait vers le haut.

@@ -165,7 +165,8 @@ fun FichePersonne(ancre: String, fermer: () -> Unit) {
             val taille: Dp = if (lierOuvert) 72.dp else 140.dp
             if (photo != null) {
                 Box(Modifier.size(taille)) {
-                    Avatar(photo.copy(name = nom), taille, badge = false)
+                    // Le cercle d'une story de la personne (§5.15) ; le toucher l'ouvre (le crayon garde le sien).
+                    Avatar(photo.copy(name = nom), taille, badge = false, story = true, ouvrirStory = !lierOuvert, storyIds = g.ids)
                     if (!lierOuvert) Crayon(taille, Modifier.align(Alignment.BottomEnd)) { edition = true }
                     if (enLigne) {
                         val d = taille * 0.19f
@@ -181,6 +182,14 @@ fun FichePersonne(ancre: String, fermer: () -> Unit) {
                 }
             }
             Text(nom, color = P.texteFort, fontWeight = FontWeight.Bold, fontSize = 24.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
+            // « Voir la story » (§5.15) : ouvre la story hors de Jasette ; son cercle s'efface partout.
+            val story = if (lierOuvert) null else ca.jasette.android.Stories.premiere(g.ids)
+            if (story != null) {
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                PetitBouton(
+                    if (story.service == "instagram") t("Voir la story Instagram") else t("Voir la story Facebook"), true,
+                ) { ca.jasette.android.Stories.ouvrir(ctx, story) }
+            }
             // Les noms sur les autres services, s'ils diffèrent.
             val vus = mutableListOf(mots(nom))
             for (id in g.ids) {
@@ -218,7 +227,7 @@ fun FichePersonne(ancre: String, fermer: () -> Unit) {
                         LigneConv(c, active = id == ancre, detail = detail, toucher = {
                             fermer()
                             if (id != ancre) Depot.aOuvrir = id
-                        }) {
+                        }, story = true) {
                             // Toute ligne qui n'est pas déjà la principale : même avec un nom
                             // pareil, la photo peut différer.
                             val estPrincipale = Marques.personnes.any { it.principal == id && id in it.convs }
@@ -540,7 +549,7 @@ private fun PetitBouton(texte: String, plein: Boolean, toucher: () -> Unit) {
  * message ou présence, date, non-lu ; [boutons] sous le détail.
  */
 @Composable
-private fun LigneConv(c: Conv, active: Boolean, detail: String?, toucher: (() -> Unit)?, boutons: @Composable () -> Unit = {}) {
+private fun LigneConv(c: Conv, active: Boolean, detail: String?, toucher: (() -> Unit)?, story: Boolean = false, boutons: @Composable () -> Unit = {}) {
     Row(
         Modifier.fillMaxWidth().clip(forme(14.dp))
             .let { if (active) it.background(P.choisi).border(1.dp, P.accent, forme(14.dp)) else it }
@@ -548,7 +557,8 @@ private fun LigneConv(c: Conv, active: Boolean, detail: String?, toucher: (() ->
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Avatar(c, 44.dp, presence = true, fondPoint = if (active) P.choisi else P.menu, propre = true)
+        // Le cercle d'une story de cette conversation-ci (§5.15) : le toucher l'ouvre ; le reste de la ligne garde son geste.
+        Avatar(c, 44.dp, presence = true, fondPoint = if (active) P.choisi else P.menu, propre = true, story = story, ouvrirStory = story)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

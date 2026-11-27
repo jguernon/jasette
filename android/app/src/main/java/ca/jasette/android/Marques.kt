@@ -98,6 +98,13 @@ object Marques {
      * détection ; partagé comme les emojis rapides (champ `groupes_auto`, §5.5).
      */
     val groupesAuto: SnapshotStateMap<String, String> = mutableStateMapOf()
+
+    /**
+     * Les stories ouvertes depuis Jasette (`stories_ouvertes`, PROTOCOLE.md
+     * §5.15) : {id de conversation : heure (ms) de la story la plus récente
+     * ouverte}. Le cercle reste caché jusqu'à une story plus récente.
+     */
+    val storiesOuvertes: SnapshotStateMap<String, Long> = mutableStateMapOf()
     /**
      * Depuis quand (ms, horloge du téléphone) chaque id est dans [archives], ici :
      * seul un message reçu après cette heure la désarchive (pas une réaction
@@ -186,6 +193,35 @@ object Marques {
         notesContacts = oui
         changement()
         surNotesContacts?.invoke(oui)
+    }
+
+    /**
+     * « Afficher les stories Facebook et Instagram » (cercle autour des avatars,
+     * PROTOCOLE.md §5.15). Faux par défaut. Une marque (`stories`) ; [surStories]
+     * prévient les ponts Instagram et Messenger locaux.
+     */
+    var stories by mutableStateOf(false)
+        private set
+
+    /** Appelée à chaque changement de [stories] (ici ou par le serveur). Posée par [Depot]. */
+    var surStories: ((Boolean) -> Unit)? = null
+
+    fun choisirStories(oui: Boolean) {
+        if (oui == stories) return
+        stories = oui
+        changement()
+        surStories?.invoke(oui)
+    }
+
+    /** La story de [id], la plus récente à [latest], vient d'être ouverte : son cercle s'efface partout. */
+    fun storyOuverte(id: String, latest: Long) {
+        val t = maxOf(latest, 1L)
+        if ((storiesOuvertes[id] ?: 0L) >= t) return
+        storiesOuvertes[id] = t
+        nettoyerStoriesOuvertes(storiesOuvertes.toMap()).let {
+            if (it != storiesOuvertes.toMap()) { storiesOuvertes.clear(); storiesOuvertes.putAll(it) }
+        }
+        changement()
     }
 
     /**
@@ -384,6 +420,11 @@ object Marques {
         presenceEnLigne = p.getBoolean("presence_en_ligne", true)
         sonsConversation = jeuSons(p.getString("sons_conversation", "bulle"))
         notesContacts = p.getBoolean("notes_contacts", true)
+        stories = p.getBoolean("stories", false)
+        storiesOuvertes.clear()
+        try {
+            storiesOuvertes.putAll(lireStoriesOuvertes(JSONObject(p.getString("stories_ouvertes", "{}") ?: "{}")))
+        } catch (_: Exception) {}
         notesMusique = p.getString("notes_musique", "") ?: ""
         notesMusiqueFormat = formatMusique(p.getString("notes_musique_format", "artiste"))
         notesServices = try {
@@ -479,6 +520,8 @@ object Marques {
             ?.putBoolean("presence_en_ligne", presenceEnLigne)
             ?.putString("sons_conversation", sonsConversation)
             ?.putBoolean("notes_contacts", notesContacts)
+            ?.putBoolean("stories", stories)
+            ?.putString("stories_ouvertes", JSONObject(storiesOuvertes.toMap() as Map<*, *>).toString())
             ?.putString("notes_musique", notesMusique)
             ?.putString("notes_musique_format", notesMusiqueFormat)
             ?.putString("notes_services", JSONArray(notesServices).toString())
@@ -638,11 +681,14 @@ object Marques {
         val contactsPerso: Map<String, ContactPerso> = emptyMap(),
         val ordreServices: List<String> = emptyList(),
         val groupesAuto: Map<String, String> = emptyMap(),
+        val stories: Boolean = false,
+        val storiesOuvertes: Map<String, Long> = emptyMap(),
     ) {
         fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty() && privees.isEmpty() &&
             moods.isEmpty() && emojis.isEmpty() && !garderArchives && cacherApresJours == 0 && presenceEnLigne &&
             sons == "bulle" && notesContacts && notesMusique.isEmpty() && notesMusiqueFormat == "artiste" && notesServices == listOf("tout") &&
-            personnes.isEmpty() && personnesRefus.isEmpty() && contactsPerso.isEmpty() && ordreServices.isEmpty() && groupesAuto.isEmpty()
+            personnes.isEmpty() && personnesRefus.isEmpty() && contactsPerso.isEmpty() && ordreServices.isEmpty() && groupesAuto.isEmpty() &&
+            !stories && storiesOuvertes.isEmpty()
 
         /** Chaque liste de this, dans son ordre, puis les ids de [b] qui n'y sont pas. */
         fun union(b: Listes) = Listes(
@@ -674,6 +720,10 @@ object Marques {
             ordreServices.ifEmpty { b.ordreServices },
             // Les corrections du regroupement : comme les emojis, les nôtres gagnent.
             b.groupesAuto + groupesAuto,
+            // Un oui/non : celui de this.
+            stories,
+            // Les stories ouvertes : l'heure la plus récente de chaque côté (comme le serveur).
+            unirStoriesOuvertes(storiesOuvertes, b.storiesOuvertes),
         )
 
         /** Les ids de this absents de [b], liste par liste. */
@@ -695,6 +745,8 @@ object Marques {
             contactsPerso.filter { (k, v) -> b.contactsPerso[k] != v },
             ordreServices,
             groupesAuto.filter { (k, v) -> b.groupesAuto[k] != v },
+            stories,
+            storiesOuvertes.filter { (k, v) -> (b.storiesOuvertes[k] ?: 0L) < v },
         )
     }
 
@@ -704,6 +756,7 @@ object Marques {
             garderArchives, cacherApresJours, presenceEnLigne, sonsConversation,
             notesContacts, notesMusique, notesMusiqueFormat, notesServices,
             personnes, personnesRefus, contactsPerso, ordreServices, groupesAuto.toMap(),
+            stories, storiesOuvertes.toMap(),
         )
 
     private fun poser(l: Listes) {
@@ -730,6 +783,11 @@ object Marques {
             notesContacts = l.notesContacts
             surNotesContacts?.invoke(l.notesContacts)
         }
+        if (stories != l.stories) {
+            stories = l.stories
+            surStories?.invoke(l.stories)
+        }
+        if (storiesOuvertes.toMap() != l.storiesOuvertes) { storiesOuvertes.clear(); storiesOuvertes.putAll(l.storiesOuvertes) }
         notesMusique = l.notesMusique
         notesMusiqueFormat = l.notesMusiqueFormat
         notesServices = l.notesServices
@@ -788,6 +846,8 @@ object Marques {
             .put("contacts_perso", ContactsPerso.json(l.contactsPerso))
             .put("ordre_services", JSONArray(l.ordreServices))
             .put("groupes_auto", JSONObject(l.groupesAuto))
+            .put("stories", l.stories)
+            .put("stories_ouvertes", JSONObject(l.storiesOuvertes as Map<*, *>))
             .put("version", version).put("id", prochain)
         if (!envoi(JSONObject().put("marques", corps))) {
             // La connexion tombe : le rejeu suivant tranchera.
@@ -842,6 +902,9 @@ object Marques {
             m.optJSONArray("ordre_services")?.let { nettoyerOrdreServices(it.chaines()) } ?: ordreServices,
             // Et pour le regroupement automatique (serveur d'avant `groupes_auto`) : les nôtres restent.
             m.optJSONObject("groupes_auto")?.let { objetMoods(it, GROUPE_AUTO_MAX) } ?: groupesAuto.toMap(),
+            // Et pour les stories (serveur d'avant §5.15) : les nôtres restent.
+            if (m.opt("stories") is Boolean) m.optBoolean("stories") else stories,
+            m.optJSONObject("stories_ouvertes")?.let { lireStoriesOuvertes(it) } ?: storiesOuvertes.toMap(),
         )
         val v = m.optLong("version", -1)
         if (v < 0) return
@@ -943,4 +1006,33 @@ fun bornerOctets(s: String, max: Int): String {
 fun formatMusique(f: String?): String = when (f) {
     "artiste", "genre", "titre" -> f
     else -> "artiste"
+}
+
+/** Une story dure 24 h : une entrée de `stories_ouvertes` de plus de 48 h ne sert plus (comme le serveur). */
+const val STORIES_OUVERTES_DUREE = 48 * 3_600_000L
+const val STORIES_OUVERTES_MAX = 2000
+
+/** `stories_ouvertes` normalisé comme par le serveur : ids propres, heures positives, rien d'échu, borné. */
+fun nettoyerStoriesOuvertes(m: Map<String, Long>, maintenant: Long = System.currentTimeMillis()): Map<String, Long> {
+    val limite = maintenant - STORIES_OUVERTES_DUREE
+    val r = m.filter { (k, v) -> k.isNotEmpty() && k.toByteArray().size <= 512 && v > limite }
+    if (r.size <= STORIES_OUVERTES_MAX) return r
+    return r.entries.sortedByDescending { it.value }.take(STORIES_OUVERTES_MAX).associate { it.key to it.value }
+}
+
+/** L'union de deux copies : pour chaque id, l'heure la plus récente. */
+fun unirStoriesOuvertes(a: Map<String, Long>, b: Map<String, Long>, maintenant: Long = System.currentTimeMillis()): Map<String, Long> {
+    val r = HashMap(b)
+    for ((k, v) in a) if (v > (r[k] ?: 0L)) r[k] = v
+    return nettoyerStoriesOuvertes(r, maintenant)
+}
+
+/** {id: heure} d'un objet JSON ; les valeurs non numériques sont ignorées. */
+fun lireStoriesOuvertes(o: JSONObject): Map<String, Long> {
+    val r = HashMap<String, Long>()
+    for (k in o.keys()) {
+        val v = o.opt(k) as? Number ?: continue
+        r[k] = v.toLong()
+    }
+    return nettoyerStoriesOuvertes(r)
 }

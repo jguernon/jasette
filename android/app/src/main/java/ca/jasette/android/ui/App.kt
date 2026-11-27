@@ -1023,7 +1023,8 @@ private fun Suggestion(
         if (image != null) {
             image()
         } else if (conv != null) {
-            Avatar(conv, 42.dp, groupeAuto = ca.jasette.android.RegroupementAuto.groupe(conv))
+            // Le cercle d'une story (§5.15) : le toucher l'ouvre, sauf en mode groupe (on coche).
+            Avatar(conv, 42.dp, groupeAuto = ca.jasette.android.RegroupementAuto.groupe(conv), story = true, ouvrirStory = coche == null)
         } else {
             androidx.compose.foundation.Image(
                 androidx.compose.ui.res.painterResource(iconeService(s)), null,
