@@ -31,7 +31,7 @@ object NotifAuto {
     fun peutRepondre(c: Conv?): Boolean = c == null || (!c.readOnly && !c.announce && !c.large)
 
     /** Les actions de la voiture ont-elles leur place ? Jamais pour un grand espace (Canaux, §5.13) ni une promotion regroupée. */
-    fun pourVoiture(c: Conv?): Boolean = c?.large != true && !RegroupementAuto.promo(c)
+    fun pourVoiture(c: Conv?): Boolean = c?.large != true && !RegroupementAuto.promo(c) && (c == null || !Marques.estSpam(c.id))
 
     private fun intention(ctx: Context, action: String, conv: String): Intent =
         Intent(ctx, AutoRecepteur::class.java)

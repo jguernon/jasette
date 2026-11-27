@@ -96,6 +96,7 @@ enum class SectionReglages(val nom: String, val couleur: Long, val couleurEga: L
     CONVERSATIONS("Conversations", 0x14b8a6, 0x00aaaa),
     SERVEUR("Serveur Jasette", 0x8b5cf6, 0xaa00aa),
     PRIVE("Liste privée", 0xf59e0b, 0xaa5500),
+    SPAM("Spam", 0xef4444, 0xaa0000),
     LANGUE("Langue", 0x0ea5e9, 0x00aaaa),
     APROPOS("À propos", 0x64748b, 0x555555),
 }
@@ -109,6 +110,7 @@ private fun iconeSection(s: SectionReglages): androidx.compose.ui.graphics.vecto
     SectionReglages.CONVERSATIONS -> Icones.forum
     SectionReglages.SERVEUR -> Icones.serveur
     SectionReglages.PRIVE -> Icons.Filled.Lock
+    SectionReglages.SPAM -> Icones.spam
     SectionReglages.LANGUE -> Icones.langue
     SectionReglages.APROPOS -> Icons.Filled.Info
 }
@@ -129,6 +131,7 @@ private fun resumeSection(s: SectionReglages): String? = when (s) {
         else -> t("Automatique")
     }
     SectionReglages.APROPOS -> ca.jasette.android.MiseAJour.nomInstalle.takeIf { it.isNotEmpty() }
+    SectionReglages.SPAM -> ca.jasette.android.Spam.liste.size.takeIf { it > 0 }?.toString()
     else -> null
 }
 
@@ -149,6 +152,8 @@ fun Reglages(
     serveur: () -> Unit,
     section: SectionReglages? = null,
     choisir: (SectionReglages?) -> Unit = {},
+    /** Ouvre une conversation (le dossier Spam). */
+    ouvrirConv: (String) -> Unit = {},
 ) {
     val largeur = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp
     val volets = largeur >= LARGEUR_RAIL && ca.jasette.android.Marques.deuxVolets
@@ -185,11 +190,11 @@ fun Reglages(
                 }
                 androidx.compose.material3.VerticalDivider(color = P.traitFin)
                 key(montree) {
-                    PageSection(montree, Modifier.weight(1f).fillMaxHeight(), connecter, serveur)
+                    PageSection(montree, Modifier.weight(1f).fillMaxHeight(), connecter, serveur, ouvrirConv)
                 }
             }
         } else if (section != null) {
-            key(section) { PageSection(section, Modifier.fillMaxSize().padding(marges), connecter, serveur) }
+            key(section) { PageSection(section, Modifier.fillMaxSize().padding(marges), connecter, serveur, ouvrirConv) }
         } else {
             Column(
                 Modifier.fillMaxSize().padding(marges).defilementAvecOmbre().navigationBarsPadding()
@@ -248,6 +253,7 @@ private fun PageSection(
     modifier: Modifier,
     connecter: (Service, String) -> Unit,
     serveur: () -> Unit,
+    ouvrirConv: (String) -> Unit,
 ) {
     Column(
         modifier.defilementAvecOmbre().navigationBarsPadding().padding(16.dp),
@@ -297,6 +303,7 @@ private fun PageSection(
                 }
             }
             SectionReglages.PRIVE -> ReglagesPrive()
+            SectionReglages.SPAM -> SectionSpam(ouvrirConv)
             SectionReglages.LANGUE -> ChoixLangue()
             SectionReglages.APROPOS -> AProposMiseAJour()
         }

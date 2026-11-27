@@ -757,6 +757,15 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Reclasser" to "Reclassify",
     // La sourdine (Sourdine.kt, ui/SourdineUi.kt).
     "Mettre en sourdine…" to "Mute…",
+    // Le spam (Spam.kt, ui/SpamUi.kt).
+    "Marquer comme spam" to "Mark as spam",
+    "Marquer comme spam et envoyer STOP" to "Mark as spam and send STOP",
+    "Envoie le message STOP à ce numéro pour te désinscrire." to "Sends the message STOP to this number to unsubscribe.",
+    "Ce n'est pas du spam" to "Not spam",
+    "Tout vider" to "Empty all",
+    "Spam" to "Spam",
+    "Elle quitte la boîte de réception, ne notifie plus et va dans Réglages > Spam." to "It leaves the inbox, stops notifying and moves to Settings > Spam.",
+    "Aucune conversation marquée comme spam. « Marquer comme spam » est dans le menu d'une conversation, sous « Classer… »." to "No conversation marked as spam. “Mark as spam” is in a conversation's menu, under “Classify…”.",
     "Mettre en sourdine" to "Mute",
     "Réactiver les notifications" to "Unmute",
     "En sourdine" to "Muted",

@@ -115,7 +115,7 @@ fun nonLus(v: Vue): Int = when (v) {
     // Les promotions regroupées (RegroupementAuto.kt) ne comptent pas.
     Vue.Tout -> Depot.inbox.count { it.unread && !ServicesCaches.cache(it.service) && !ca.jasette.android.RegroupementAuto.promo(it) }
     Vue.Favoris -> Marques.favoris.count { id ->
-        !Marques.estPrivee(id) && !ServicesCaches.cache(Service.de(id)) && Depot.conv(id)?.unread == true
+        !Marques.estPrivee(id) && !Marques.estSpam(id) && !ServicesCaches.cache(Service.de(id)) && Depot.conv(id)?.unread == true
     }
     // « Pastille sur l'onglet Archives » / « … Canaux » décochée (Réglages → Apparence) : aucune.
     Vue.Archives -> if (!Pastilles.archives) 0 else Depot.toutesArchives.count { it.unread && !ServicesCaches.cache(it.service) }
@@ -633,7 +633,7 @@ fun Rangee(
 /**
  * Le menu d'une conversation (`menu_conversation` du bureau), le même dans la
  * liste (appui long) et dans l'en-tête du fil (« … ») : Head, favoris,
- * épingler, sourdine (SourdineUi.kt), médias, archiver et supprimer (selon `peutArchiver` et
+ * épingler, sourdine (SourdineUi.kt), spam (SpamUi.kt), médias, archiver et supprimer (selon `peutArchiver` et
  * `peutSupprimer` ; supprimer demande une confirmation), puis rechercher.
  */
 @Composable
@@ -649,6 +649,7 @@ fun MenuConversation(
     var feuilleMood by remember { mutableStateOf(false) }
     var classer by remember { mutableStateOf(false) }
     var sourdine by remember { mutableStateOf(false) }
+    var spam by remember { mutableStateOf(false) }
     // Une conversation absente (affichée depuis le cache des marques) : seules ses
     // marques se changent ; archiver ou supprimer attend que son service la charge.
     val chargee = Depot.conv(c.id) != null
@@ -730,6 +731,8 @@ fun MenuConversation(
             // « Classer… » : la fenêtre des cinq groupes (FenetreClasser, GroupesAutoUi.kt).
             Item(if (actuel != null) t("Reclasser…") else t("Classer…"), Icons.AutoMirrored.Filled.List) { classer = true }
         }
+        // « Marquer comme spam » / « Ce n'est pas du spam » (Spam.kt, SpamUi.kt), juste sous « Classer… ».
+        Item(texteSpam(c.id), iconeSpam(c.id)) { basculerSpam(c.id) { spam = true } }
         HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = P.traitFin)
         Item(t("Supprimer"), Icons.Filled.Delete, couleur = P.danger, actif = supprimable) { confirmer = true }
         HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = P.traitFin)
@@ -739,6 +742,7 @@ fun MenuConversation(
     if (feuilleMood) FeuilleMood(c.id, nomAffiche(c)) { feuilleMood = false }
     if (classer) FenetreClasser(c) { classer = false }
     if (sourdine) FenetreSourdine(listOf(c.id), nomAffiche(c)) { sourdine = false }
+    if (spam) FenetreSpam(c, fermer = { spam = false }, marquee = { retiree(c.id) })
 
     if (confirmer) {
         AlertDialog(

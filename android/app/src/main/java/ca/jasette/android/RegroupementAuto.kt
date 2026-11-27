@@ -85,10 +85,10 @@ object RegroupementAuto {
         return Contacts.cleDe(c.number).isNotEmpty() && c.name.any { it.isLetter() }
     }
 
-    /** Jamais classée : contact, favori, Head, épinglée, groupe, grand espace, privée. */
+    /** Jamais classée : contact, favori, Head, épinglée, groupe, grand espace, privée, spam. */
     fun exclue(c: Conv): Boolean =
         c.group || c.large || Marques.estFavori(c.id) || Marques.estDansHead(c.id) || Marques.estEpinglee(c.id) ||
-            Marques.estPrivee(c.id) || contact(c)
+            Marques.estPrivee(c.id) || Marques.estSpam(c.id) || contact(c)
 
     /** Ce que la détection sait de [c] : ses messages reçus connus, sinon son aperçu. */
     fun entree(c: Conv, msgs: List<Msg>? = Depot.messages[c.id]): EntreeGroupe {
@@ -104,10 +104,10 @@ object RegroupementAuto {
         )
     }
 
-    /** Jamais classée, même corrigée à la main : groupe, grand espace, favori, Head, épinglée, privée. */
+    /** Jamais classée, même corrigée à la main : groupe, grand espace, favori, Head, épinglée, privée, spam. */
     fun horsClassement(c: Conv): Boolean =
         c.group || c.large || Marques.estFavori(c.id) || Marques.estDansHead(c.id) || Marques.estEpinglee(c.id) ||
-            Marques.estPrivee(c.id)
+            Marques.estPrivee(c.id) || Marques.estSpam(c.id)
 
     /**
      * Son groupe, case cochée ou non : la correction à la main, sinon la

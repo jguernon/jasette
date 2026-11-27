@@ -112,6 +112,12 @@ object Marques {
      */
     val sourdine: SnapshotStateMap<String, Long> = mutableStateMapOf()
     /**
+     * Les conversations marquées comme spam (Spam.kt, marque `spam`, §5.5) :
+     * id → heure (ms) du marquage. Hors de la boîte, jamais notifiées ; le
+     * dossier Spam est dans Réglages.
+     */
+    val spam: SnapshotStateMap<String, Long> = mutableStateMapOf()
+    /**
      * Depuis quand (ms, horloge du téléphone) chaque id est dans [archives], ici :
      * seul un message reçu après cette heure la désarchive (pas une réaction
      * ni la mise à jour d'un vieux message). Propre à l'appareil, jamais envoyé.
@@ -435,6 +441,10 @@ object Marques {
         try {
             sourdine.putAll(lireSourdine(JSONObject(p.getString("sourdine", "{}") ?: "{}")))
         } catch (_: Exception) {}
+        spam.clear()
+        try {
+            spam.putAll(lireSpam(JSONObject(p.getString("spam", "{}") ?: "{}")))
+        } catch (_: Exception) {}
         notesMusique = p.getString("notes_musique", "") ?: ""
         notesMusiqueFormat = formatMusique(p.getString("notes_musique_format", "artiste"))
         notesServices = try {
@@ -533,6 +543,7 @@ object Marques {
             ?.putBoolean("stories", stories)
             ?.putString("stories_ouvertes", JSONObject(storiesOuvertes.toMap() as Map<*, *>).toString())
             ?.putString("sourdine", JSONObject(sourdine.toMap() as Map<*, *>).toString())
+            ?.putString("spam", JSONObject(spam.toMap() as Map<*, *>).toString())
             ?.putString("notes_musique", notesMusique)
             ?.putString("notes_musique_format", notesMusiqueFormat)
             ?.putString("notes_services", JSONArray(notesServices).toString())
@@ -609,6 +620,30 @@ object Marques {
         sourdine.clear()
         sourdine.putAll(r)
         return true
+    }
+
+    /** [id] est-elle marquée comme spam ? (Spam.kt) */
+    fun estSpam(id: String): Boolean = id in spam
+
+    /**
+     * « Marquer comme spam » : la marque (heure du marquage), une sourdine sans
+     * fin, et la conversation quitte le Head, les favoris et les épinglées.
+     * Gardé et partagé (le STOP éventuel part par Depot, voir Spam.kt).
+     */
+    fun marquerSpam(id: String, maintenant: Long = System.currentTimeMillis()) {
+        spam[id] = maintenant
+        sourdine[id] = 0L
+        head.remove(id)
+        favoris.remove(id)
+        epingles.remove(id)
+        changement()
+    }
+
+    /** « Ce n'est pas du spam » : la marque s'en va, et la sourdine sans fin posée avec elle. */
+    fun pasSpam(id: String) {
+        if (spam.remove(id) == null) return
+        if (sourdine[id] == 0L) sourdine.remove(id)
+        changement()
     }
 
     /** Rend privée (à la fin de la liste) ou ne l'est plus ; rien si c'est déjà fait. */
@@ -723,12 +758,13 @@ object Marques {
         val stories: Boolean = false,
         val storiesOuvertes: Map<String, Long> = emptyMap(),
         val sourdine: Map<String, Long> = emptyMap(),
+        val spam: Map<String, Long> = emptyMap(),
     ) {
         fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty() && privees.isEmpty() &&
             moods.isEmpty() && emojis.isEmpty() && !garderArchives && cacherApresJours == 0 && presenceEnLigne &&
             sons == "bulle" && notesContacts && notesMusique.isEmpty() && notesMusiqueFormat == "artiste" && notesServices == listOf("tout") &&
             personnes.isEmpty() && personnesRefus.isEmpty() && contactsPerso.isEmpty() && ordreServices.isEmpty() && groupesAuto.isEmpty() &&
-            !stories && storiesOuvertes.isEmpty() && sourdine.isEmpty()
+            !stories && storiesOuvertes.isEmpty() && sourdine.isEmpty() && spam.isEmpty()
 
         /** Chaque liste de this, dans son ordre, puis les ids de [b] qui n'y sont pas. */
         fun union(b: Listes) = Listes(
@@ -766,6 +802,8 @@ object Marques {
             unirStoriesOuvertes(storiesOuvertes, b.storiesOuvertes),
             // La sourdine : comme les moods, les nôtres gagnent ; les échues tombent.
             nettoyerSourdine(b.sourdine + sourdine),
+            // Le spam : de même, les nôtres gagnent.
+            nettoyerSpam(b.spam + spam),
         )
 
         /** Les ids de this absents de [b], liste par liste. */
@@ -790,6 +828,7 @@ object Marques {
             stories,
             storiesOuvertes.filter { (k, v) -> (b.storiesOuvertes[k] ?: 0L) < v },
             sourdine.filter { (k, v) -> b.sourdine[k] != v },
+            spam.filter { (k, v) -> b.spam[k] != v },
         )
     }
 
@@ -799,7 +838,7 @@ object Marques {
             garderArchives, cacherApresJours, presenceEnLigne, sonsConversation,
             notesContacts, notesMusique, notesMusiqueFormat, notesServices,
             personnes, personnesRefus, contactsPerso, ordreServices, groupesAuto.toMap(),
-            stories, storiesOuvertes.toMap(), sourdine.toMap(),
+            stories, storiesOuvertes.toMap(), sourdine.toMap(), spam.toMap(),
         )
 
     private fun poser(l: Listes) {
@@ -832,6 +871,7 @@ object Marques {
         }
         if (storiesOuvertes.toMap() != l.storiesOuvertes) { storiesOuvertes.clear(); storiesOuvertes.putAll(l.storiesOuvertes) }
         if (sourdine.toMap() != l.sourdine) { sourdine.clear(); sourdine.putAll(l.sourdine) }
+        if (spam.toMap() != l.spam) { spam.clear(); spam.putAll(l.spam) }
         notesMusique = l.notesMusique
         notesMusiqueFormat = l.notesMusiqueFormat
         notesServices = l.notesServices
@@ -893,6 +933,7 @@ object Marques {
             .put("stories", l.stories)
             .put("stories_ouvertes", JSONObject(l.storiesOuvertes as Map<*, *>))
             .put("sourdine", JSONObject(l.sourdine as Map<*, *>))
+            .put("spam", JSONObject(l.spam as Map<*, *>))
             .put("version", version).put("id", prochain)
         if (!envoi(JSONObject().put("marques", corps))) {
             // La connexion tombe : le rejeu suivant tranchera.
@@ -952,6 +993,8 @@ object Marques {
             m.optJSONObject("stories_ouvertes")?.let { lireStoriesOuvertes(it) } ?: storiesOuvertes.toMap(),
             // Et pour la sourdine (serveur d'avant elle) : la nôtre reste.
             m.optJSONObject("sourdine")?.let { lireSourdine(it) } ?: nettoyerSourdine(sourdine.toMap()),
+            // Et pour le spam (serveur d'avant lui) : le nôtre reste.
+            m.optJSONObject("spam")?.let { lireSpam(it) } ?: spam.toMap(),
         )
         val v = m.optLong("version", -1)
         if (v < 0) return

@@ -106,7 +106,7 @@ object ConvVoiture {
     /** Le Head (marque `head`), ou les favoris si le Head est vide. */
     fun visages(): List<Conv> {
         val ids = Marques.head.toList().ifEmpty { Marques.favoris.toList() }
-        return ids.filter { !Marques.estPrivee(it) }.mapNotNull { Depot.conv(it) }.filter { !it.large }
+        return ids.filter { !Marques.estPrivee(it) && !Marques.estSpam(it) }.mapNotNull { Depot.conv(it) }.filter { !it.large }
     }
 
     /** Les messages pour la voiture, du plus ancien au plus récent ; l'aperçu de la liste s'ils ne sont pas chargés. */

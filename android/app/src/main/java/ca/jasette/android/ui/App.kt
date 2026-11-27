@@ -261,6 +261,11 @@ fun App(activite: Activity, prive: Boolean = false) {
                     serveur = { aller(Ecran.Serveur) },
                     section = sectionReglages,
                     choisir = { sectionReglages = it },
+                    // Le dossier Spam (SpamUi.kt) : la conversation s'ouvre comme d'habitude.
+                    ouvrirConv = { id ->
+                        pile = listOf(Ecran.Liste)
+                        ouverte = id
+                    },
                 )
                 Ecran.Serveur -> ServeurJasette(retour = ::retour)
                 // WhatsApp et Signal : code QR ou code à taper ; les autres : la fenêtre web (X : puis son code).
@@ -470,8 +475,9 @@ private fun Liste(
             // Un service caché (Réglages > Comptes) : absent de la boîte, des favoris et des
             // archives, sauf dans sa propre vue et dans la recherche. Ses marques restent.
             val cache = f.isEmpty() && vue !is Vue.DuService && vue != Vue.Privees && ServicesCaches.cache(c.service)
-            // Liste privée : nulle part ailleurs que dans sa vue.
-            !cache && dansVue && Marques.estPrivee(c.id) == (vue == Vue.Privees) && (f.isEmpty() || ca.jasette.android.plier(c.name).contains(f) || ca.jasette.android.plier(ca.jasette.android.nomAffiche(c)).contains(f) ||
+            // Liste privée : nulle part ailleurs que dans sa vue. Le spam (Spam.kt) : nulle
+            // part dans la liste (ni favoris, ni épinglées, ni recherche) ; Réglages > Spam.
+            !cache && dansVue && Marques.estPrivee(c.id) == (vue == Vue.Privees) && !Marques.estSpam(c.id) && (f.isEmpty() || ca.jasette.android.plier(c.name).contains(f) || ca.jasette.android.plier(ca.jasette.android.nomAffiche(c)).contains(f) ||
                 ca.jasette.android.plier(c.preview).contains(f) ||
                 c.members.any { ca.jasette.android.plier(it).contains(f) })
         }
@@ -509,7 +515,7 @@ private fun Liste(
         val nbTete = if (ouvert != null) 0 else nbEpingles
         // Le Head : la grille en haut de la boîte de réception, tous ses ids (chargés ou du cache).
         val head = if (vue == Vue.Tout && f.isEmpty() && ouvert == null) {
-            Marques.head.filter { !Marques.estPrivee(it) && !ServicesCaches.cache(Service.de(it)) }.map { convMarquee(it) }
+            Marques.head.filter { !Marques.estPrivee(it) && !Marques.estSpam(it) && !ServicesCaches.cache(Service.de(it)) }.map { convMarquee(it) }
         } else {
             emptyList()
         }

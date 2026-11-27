@@ -1176,7 +1176,7 @@ object Depot {
                 commande(JSONObject().put("cmd", "read").put("conv", m.conv).put("msg", m.id))
             } else if (!Marques.estPrivee(m.conv) && notifierMessage(conv, m) && !RegroupementAuto.promo(conv) && notificationPermise(m.conv)) {
                 // Liste privée : aucune notification, même neutre (rien ne trahit la conversation).
-                // En sourdine (Sourdine.kt) : aucune notification, ni son, ni vibration, ni voiture.
+                // En sourdine (Sourdine.kt) ou en spam (Spam.kt) : aucune notification, ni son, ni vibration, ni voiture.
                 // Une promotion regroupée (RegroupementAuto.kt) : aucune non plus.
                 // Un grand espace hors de la boîte de réception : seulement sur mention ou réponse (§5.13).
                 notifier?.invoke(m, conv)
@@ -1212,8 +1212,8 @@ object Depot {
     /** Archivée, par son service ou par Jasette. */
     fun estArchivee(c: Conv) = c.archived || archives.any { it.id == c.id } || archiveeJasette(c.id)
 
-    /** La boîte de réception (et les vues Favoris et par service) : sans les archives de Jasette. */
-    val boite: List<Conv> get() = convs.filter { !archiveeJasette(it.id) && !Marques.estPrivee(it.id) }
+    /** La boîte de réception (et les vues Favoris et par service) : sans les archives de Jasette ni le spam (Spam.kt). */
+    val boite: List<Conv> get() = convs.filter { !archiveeJasette(it.id) && !Marques.estPrivee(it.id) && !Marques.estSpam(it.id) }
 
     /**
      * La conversation va-t-elle dans la boîte de réception (vue Tout et vues
@@ -1231,7 +1231,7 @@ object Depot {
     /** La vue Archives : celles des services et celles de Jasette, ensemble, les plus récentes d'abord. */
     val toutesArchives: List<Conv>
         get() = (archives + convs.filter { archiveeJasette(it.id) }).distinctBy { it.id }
-            .filter { !Marques.estPrivee(it.id) }.sortedByDescending { it.time }
+            .filter { !Marques.estPrivee(it.id) && !Marques.estSpam(it.id) }.sortedByDescending { it.time }
 
     /** La vue Privées : les conversations de la Liste privée (boîte et archives), les plus récentes d'abord. */
     val privees: List<Conv>

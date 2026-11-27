@@ -63,9 +63,14 @@ fun echeanceSourdine(s: Map<String, Long>, ids: Collection<String>, maintenant: 
 /**
  * La notification système d'un message de [conv] a-t-elle lieu ? Non pour une
  * conversation en sourdine (Depot, Android Auto) ; oui dès l'échéance passée.
+ * Jamais pour une conversation marquée comme spam (Spam.kt), même sans sourdine.
  */
 fun notificationPermise(conv: String, maintenant: Long = System.currentTimeMillis()): Boolean =
-    !Marques.enSourdine(conv, maintenant)
+    notificationPermiseDans(Marques.spam, Marques.sourdine, conv, maintenant)
+
+/** [notificationPermise] sur des marques données (pour les essais). */
+fun notificationPermiseDans(spam: Map<String, Long>, sourdine: Map<String, Long>, conv: String, maintenant: Long): Boolean =
+    conv !in spam && !sourdineActive(sourdine, conv, maintenant)
 
 private val JOURS_FR = listOf("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
 private val JOURS_EN = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
