@@ -1384,6 +1384,18 @@ pub struct Marques {
     /// de conversation → heure (ms) de la story la plus récente ouverte.
     /// Toujours unie (l'heure la plus grande) et purgée après 48 h.
     pub stories_ouvertes: BTreeMap<String, i64>,
+    /// La sourdine par conversation (marque `sourdine`, PROTOCOLE.md §5.5) :
+    /// id → échéance (ms), 0 = jusqu'à réactivation. Sans entrée échue.
+    pub sourdine: BTreeMap<String, i64>,
+}
+
+/// La sourdine sans entrée échue, vide, démesurée ou négative (comme le
+/// serveur) : une échéance passée n'est plus en sourdine.
+pub fn nettoyer_sourdine(m: &BTreeMap<String, i64>, maintenant: i64) -> BTreeMap<String, i64> {
+    m.iter()
+        .filter(|(k, t)| !k.is_empty() && k.len() <= 512 && (**t == 0 || **t > maintenant))
+        .map(|(k, t)| (k.clone(), *t))
+        .collect()
 }
 
 /// Une story dure 24 h : au-delà de 48 h, une entrée de `stories_ouvertes`
@@ -1485,6 +1497,7 @@ impl Marques {
             && self.contacts_perso.is_empty()
             && !self.stories
             && self.stories_ouvertes.is_empty()
+            && self.sourdine.is_empty()
     }
 
     /// Chaque liste de `dabord`, dans son ordre, puis les ids de `ensuite` qui n'y sont pas.
@@ -1533,6 +1546,11 @@ impl Marques {
             stories: dabord.stories,
             // L'heure la plus grande de chaque côté : rien ne se perd.
             stories_ouvertes: unir_stories_ouvertes(&dabord.stories_ouvertes, &ensuite.stories_ouvertes),
+            // Comme les moods (les entrées de `dabord` gagnent), sans les échues.
+            sourdine: nettoyer_sourdine(
+                &ensuite.sourdine.iter().chain(dabord.sourdine.iter()).map(|(k, v)| (k.clone(), *v)).collect(),
+                maintenant_ms_distant(),
+            ),
         }
     }
 
@@ -1578,6 +1596,7 @@ impl Marques {
                 .filter(|(k, t)| autre.stories_ouvertes.get(*k).is_none_or(|a| a < *t))
                 .map(|(k, t)| (k.clone(), *t))
                 .collect(),
+            sourdine: self.sourdine.iter().filter(|(k, v)| autre.sourdine.get(*k) != Some(*v)).map(|(k, v)| (k.clone(), *v)).collect(),
         }
     }
 }
@@ -1601,6 +1620,7 @@ pub enum NouvelleMarques {
     /// `avec_contacts_perso` : de même pour un serveur d'avant `contacts_perso`.
     /// `avec_ordre` : de même pour un serveur d'avant `ordre_services`.
     /// `avec_stories` : de même pour un serveur d'avant `stories`.
+    /// `avec_sourdine` : de même pour un serveur d'avant `sourdine`.
     Recues {
         marques: Marques,
         version: u64,
@@ -1620,6 +1640,7 @@ pub enum NouvelleMarques {
         avec_contacts_perso: bool,
         avec_ordre: bool,
         avec_stories: bool,
+        avec_sourdine: bool,
     },
     /// La connexion est tombée : rien n'est plus en vol.
     Coupure,
@@ -1697,6 +1718,13 @@ impl NouvelleMarques {
                         .unwrap_or_default(),
                     &BTreeMap::new(),
                 ),
+                sourdine: nettoyer_sourdine(
+                    &v.get("sourdine")
+                        .and_then(Value::as_object)
+                        .map(|o| o.iter().filter_map(|(k, t)| Some((k.clone(), t.as_i64()?))).collect())
+                        .unwrap_or_default(),
+                    maintenant_ms_distant(),
+                ),
             },
             version: v.get("version")?.as_u64()?,
             id: v.get("id").and_then(Value::as_u64),
@@ -1715,6 +1743,7 @@ impl NouvelleMarques {
             avec_contacts_perso: v.get("contacts_perso").is_some_and(Value::is_object),
             avec_ordre: v.get("ordre_services").is_some_and(Value::is_array),
             avec_stories: v.get("stories").is_some_and(Value::is_boolean),
+            avec_sourdine: v.get("sourdine").is_some_and(Value::is_object),
         })
     }
 }
@@ -1831,6 +1860,7 @@ impl SuiviMarques {
             "contacts_perso": c.listes.contacts_perso,
             "stories": c.listes.stories,
             "stories_ouvertes": c.listes.stories_ouvertes,
+            "sourdine": c.listes.sourdine,
             "version": c.version,
             "id": id,
         }}))
@@ -1863,6 +1893,7 @@ impl SuiviMarques {
                 avec_contacts_perso,
                 avec_ordre,
                 avec_stories,
+                avec_sourdine,
             } => {
                 // Un serveur d'avant `archives` : nos archives restent les nôtres, jamais vidées.
                 let mut marques = marques;
@@ -1925,6 +1956,10 @@ impl SuiviMarques {
                 if !avec_stories {
                     marques.stories = c.listes.stories;
                     marques.stories_ouvertes = c.listes.stories_ouvertes.clone();
+                }
+                // Et pour la sourdine (serveur d'avant elle) : la nôtre reste.
+                if !avec_sourdine {
+                    marques.sourdine = c.listes.sourdine.clone();
                 }
                 (marques, version, id, refus)
             }
@@ -2227,6 +2262,7 @@ mod essais {
             avec_contacts_perso: true,
             avec_ordre: true,
             avec_stories: true,
+            avec_sourdine: true,
         }
     }
 
@@ -2695,6 +2731,7 @@ mod essais {
             avec_contacts_perso: true,
             avec_ordre: true,
             avec_stories: true,
+            avec_sourdine: true,
         };
         let t = s.recu(r, &mut c).expect("renvoi");
         assert_eq!(t["marques"]["favoris"], json!(["z", "a", "y", "x"]));
@@ -2733,6 +2770,35 @@ mod essais {
         s.recu(n, &mut c);
         assert!(c.listes.stories);
         assert_eq!(c.listes.stories_ouvertes, b);
+    }
+
+    /// La sourdine : lue sans les échues, envoyée, réactivée (la clé part),
+    /// unie ; un serveur d'avant : la nôtre reste.
+    #[test]
+    fn marques_sourdine() {
+        let maint = maintenant_ms_distant();
+        let v = json!({"head": [], "favoris": [], "epingles": [], "version": 3,
+            "sourdine": {"m:1": 0, "w:2": maint + 3_600_000, "i:3": maint - 1, "": 0}});
+        let Some(NouvelleMarques::Recues { marques, avec_sourdine: true, .. }) = NouvelleMarques::lire(&v) else { panic!("non lue") };
+        assert_eq!(marques.sourdine, BTreeMap::from([("m:1".to_string(), 0), ("w:2".to_string(), maint + 3_600_000)]));
+        // Réactivée ici : la clé disparaît de la trame.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { listes: Marques { sourdine: marques.sourdine.clone(), ..m(&[], &["a"], &[]) }, version: 3, a_envoyer: false };
+        assert!(s.recu(recues(Marques { sourdine: marques.sourdine.clone(), ..m(&[], &["a"], &[]) }, 3, None), &mut c).is_none());
+        c.listes.sourdine.remove("m:1");
+        let t = s.changement(&mut c).expect("trame");
+        assert_eq!(t["marques"]["sourdine"], json!({"w:2": maint + 3_600_000}));
+        // L'union : les entrées de `dabord` gagnent, les échues tombent.
+        let a = Marques { sourdine: BTreeMap::from([("k".to_string(), 0), ("vieille".to_string(), maint - 5)]), ..Default::default() };
+        let b = Marques { sourdine: BTreeMap::from([("k".to_string(), maint + 9_000), ("j".to_string(), 0)]), ..Default::default() };
+        let u = Marques::union(&a, &b);
+        assert_eq!(u.sourdine, BTreeMap::from([("k".to_string(), 0), ("j".to_string(), 0)]));
+        // Un serveur d'avant la sourdine : la nôtre reste.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { listes: Marques { sourdine: BTreeMap::from([("k".to_string(), 0)]), ..m(&[], &["a"], &[]) }, version: 2, a_envoyer: false };
+        let Some(n) = NouvelleMarques::lire(&json!({"head": [], "favoris": ["a"], "epingles": [], "version": 2})) else { panic!("non lue") };
+        s.recu(n, &mut c);
+        assert_eq!(c.listes.sourdine.get("k"), Some(&0));
     }
 
     fn ordre(l: &[&str]) -> Vec<String> {

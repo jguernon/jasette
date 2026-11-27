@@ -1051,6 +1051,20 @@ impl Jasette {
                 .text_center()
                 .child(texte_emoji(nom.clone(), th().texte_fort, Some(FontWeight::BOLD))),
         );
+        // En sourdine (src/sourdine.rs) : la cloche barrée et jusqu'à quand.
+        if let Some(fin) = sourdine::echeance_de(&self.reglages.sourdine, &groupe.ids(), maintenant_ms()).filter(|_| !f.lier) {
+            haut = haut.child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(6.))
+                    .text_size(px(13.))
+                    .text_color(th().texte_pale)
+                    .child(Self::icone_sourdine(14., th().texte_pale))
+                    .child(sourdine::libelle(fin)),
+            );
+        }
         if let Some((id_story, sorte)) = story.filter(|_| !f.lier) {
             let titre = match sorte {
                 stories::SorteStory::Instagram => notes::tr("Voir la story Instagram", "View Instagram story"),
@@ -1214,6 +1228,7 @@ impl Jasette {
                             .text_size(px(12.5))
                             .text_color(if conv.unread { th().texte_fort } else { th().texte_pale })
                             .child(div().flex_1().min_w(px(0.)).truncate().child(texte_emoji(apercu, if conv.unread { th().texte_fort } else { th().texte_pale }, None)))
+                            .when(self.en_sourdine(&conv.id), |d| d.child(Self::icone_sourdine(12., th().texte_pale)))
                             .when(conv.time > 0, |d| d.child(div().flex_none().child(heure(conv.time, true)))),
                     )
                     .when(detail.is_some() || boutons.is_some(), |d| {
@@ -1233,7 +1248,7 @@ impl Jasette {
     }
 
     /// Les lignes de la fiche : « Même personne sur », les suggestions, « Lier… ».
-    fn fiche_lignes(&self, groupe: &Groupe, _nom: &str, cx: &mut Context<Self>) -> Div {
+    fn fiche_lignes(&self, groupe: &Groupe, nom: &str, cx: &mut Context<Self>) -> Div {
         let choisie = self.choisie.clone().unwrap_or_default();
         let mut col = div().flex().flex_col().gap(px(4.)).child(Self::titre_fiche(tr("Même personne sur", "Same person on")));
         let seule = groupe.membres.len() == 1;
@@ -1369,6 +1384,34 @@ impl Jasette {
                 .child(icone("link", 17., th().accent))
                 .child(tr("Lier une autre conversation…", "Link another conversation…")),
         )
+        .child(self.fiche_sourdine(groupe, nom, cx))
+    }
+
+    /// « Mettre en sourdine… » / « Réactiver les notifications » : pour
+    /// toutes les conversations de la personne (src/sourdine.rs).
+    fn fiche_sourdine(&self, groupe: &Groupe, nom: &str, cx: &mut Context<Self>) -> impl IntoElement {
+        let ids = groupe.ids();
+        let (ic, texte) = self.entree_sourdine(&ids);
+        let nom = nom.to_string();
+        div()
+            .id("fiche-sourdine")
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(10.))
+            .px(px(10.))
+            .py(px(9.))
+            .rounded(rayon(14.))
+            .cursor_pointer()
+            .text_color(th().accent)
+            .font_weight(FontWeight::SEMIBOLD)
+            .hover(|s| s.bg(th().survol))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.basculer_sourdine(ids.clone(), nom.clone());
+                cx.notify();
+            }))
+            .child(icone(ic, 17., th().accent))
+            .child(texte)
     }
 
     /// « Lier une autre conversation… » : une recherche, des puces par

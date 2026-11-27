@@ -43,6 +43,7 @@ mod codes;
 mod groupes_auto;
 mod boite_groupes;
 mod ponts_langue;
+mod sourdine;
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "macos")]
@@ -1772,6 +1773,11 @@ struct Reglages {
     /// Les stories ouvertes depuis Jasette (marque `stories_ouvertes`).
     #[serde(default)]
     stories_ouvertes: std::collections::BTreeMap<String, i64>,
+    /// La sourdine par conversation (src/sourdine.rs) : id → échéance (ms),
+    /// 0 = jusqu'à réactivation. Gardée ici, et partagée par le serveur
+    /// Jasette s'il y en a un (marque `sourdine`).
+    #[serde(default)]
+    sourdine: std::collections::BTreeMap<String, i64>,
     /// L'audience des notes Instagram : 0 abonnés mutuels, 1 amis proches.
     /// Propre à cet appareil.
     #[serde(default)]
@@ -1960,6 +1966,7 @@ impl Default for Reglages {
             contacts_perso: Default::default(),
             stories: false,
             stories_ouvertes: Default::default(),
+            sourdine: Default::default(),
             notes_audience: 0,
             head_grille: String::new(),
             marques_cache: HashMap::new(),
@@ -2106,6 +2113,7 @@ impl Reglages {
                     contacts_perso: self.contacts_perso.clone(),
                     stories: self.stories,
                     stories_ouvertes: self.stories_ouvertes.clone(),
+                    sourdine: self.sourdine.clone(),
                 },
                 version: self.marques_version,
                 a_envoyer: self.marques_a_envoyer,
@@ -2137,6 +2145,7 @@ impl Reglages {
         self.contacts_perso = b.copie.listes.contacts_perso;
         self.stories = b.copie.listes.stories;
         self.stories_ouvertes = b.copie.listes.stories_ouvertes;
+        self.sourdine = b.copie.listes.sourdine;
         self.marques_version = b.copie.version;
         self.marques_a_envoyer = b.copie.a_envoyer;
         self.marques_serveur = b.serveur;
@@ -2478,6 +2487,10 @@ struct Jasette {
     menu_groupe: Option<boite_groupes::MenuGroupe>,
     /// La modale « Classer… » du clic droit : l'id de la conversation.
     modale_classer: Option<String>,
+    /// La modale « Mettre en sourdine » (src/sourdine.rs) : ses conversations.
+    modale_sourdine: Option<sourdine::ModaleSourdine>,
+    /// Le dernier passage de `sourdine_tic`.
+    dernier_tic_sourdine: Option<Instant>,
     /// La rangée Codes est en haut (dernier dessin), et quand on l'a revue.
     codes_en_haut: std::cell::Cell<bool>,
     codes_verifies: Instant,
@@ -3335,6 +3348,8 @@ impl Jasette {
                         change |= this.notes_tic();
                         // Les stories échues s'en vont (toutes les 30 s).
                         change |= this.stories_tic();
+                        // Les sourdines échues s'en vont (toutes les 15 s).
+                        change |= this.sourdine_tic();
                         let finie = this.lecture.as_mut().is_some_and(|l| !matches!(l.enfant.try_wait(), Ok(None)));
                         if finie {
                             this.lecture = None;
@@ -3560,6 +3575,8 @@ impl Jasette {
             groupe_ouvert: None,
             menu_groupe: None,
             modale_classer: None,
+            modale_sourdine: None,
+            dernier_tic_sourdine: None,
             codes_en_haut: Default::default(),
             codes_verifies: Instant::now(),
             reorganiser: false,
@@ -4682,6 +4699,11 @@ impl Jasette {
     fn notifier(&self, m: &Msg) {
         // Une conversation privée ne notifie jamais (pas même une bulle neutre).
         if !self.reglages.notifications || self.privee(&m.conv) {
+            return;
+        }
+        // Une conversation en sourdine (src/sourdine.rs) : ni bulle ni son de
+        // notification ; tout le reste (non-lus, liste) suit son cours.
+        if self.en_sourdine(&m.conv) {
             return;
         }
         let conv = self.conv(&m.conv);
@@ -7306,17 +7328,14 @@ impl Jasette {
                         this.choisir(id.clone());
                         cx.notify();
                     }))
-                    // Le clic droit : corriger le regroupement automatique.
-                    .when(!self.hors_classement(conv), |d| {
+                    // Le clic droit : la sourdine, et corriger le regroupement automatique.
+                    .on_mouse_down(MouseButton::Right, {
                         let id = conv.id.clone();
-                        d.on_mouse_down(
-                            MouseButton::Right,
-                            cx.listener(move |this, ev: &gpui::MouseDownEvent, _, cx| {
-                                cx.stop_propagation();
-                                this.menu_groupe = Some(boite_groupes::MenuGroupe { id: id.clone(), pos: ev.position });
-                                cx.notify();
-                            }),
-                        )
+                        cx.listener(move |this, ev: &gpui::MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                            this.menu_groupe = Some(boite_groupes::MenuGroupe { id: id.clone(), pos: ev.position });
+                            cx.notify();
+                        })
                     })
                     .child(
                         div()
@@ -7363,6 +7382,7 @@ impl Jasette {
                                             .gap(px(4.))
                                             .text_size(px(12. + self.plus_liste()))
                                             .text_color(if conv.unread { th().accent } else { th().texte_pale })
+                                            .when(self.en_sourdine(&conv.id), |d| d.child(Self::icone_sourdine(12. + self.plus_liste(), th().texte_pale)))
                                             .when(epinglee && !reorganiser, |d| d.child(icone("pin", 12., th().texte_pale)))
                                             .when(!reorganiser, |d| d.child(heure(conv.time, true)))
                                             .when(reorganiser, |d| {
@@ -9504,7 +9524,17 @@ impl Jasette {
                                         .flex_col()
                                         .flex_1()
                                         .min_w(px(0.))
-                                        .child(div().truncate().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(texte_emoji(nom, th().texte_fort, Some(FontWeight::SEMIBOLD))))
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .flex_row()
+                                                .items_center()
+                                                .gap(px(6.))
+                                                .min_w(px(0.))
+                                                .child(div().truncate().font_weight(FontWeight::SEMIBOLD).text_color(th().texte_fort).child(texte_emoji(nom, th().texte_fort, Some(FontWeight::SEMIBOLD))))
+                                                // En sourdine (src/sourdine.rs) : la cloche barrée.
+                                                .when(self.en_sourdine(&conv.id), |d| d.child(Self::icone_sourdine(14., th().texte_pale))),
+                                        )
                                         .child(div().truncate().text_size(px(12.)).text_color(th().texte_pale).child(detail)),
                                 ),
                         )
@@ -9707,6 +9737,10 @@ impl Jasette {
         let id_t = id.clone();
         let epinglee = self.reglages.epingles.contains(&id);
         let id_e = id.clone();
+        // « Mettre en sourdine… » / « Réactiver les notifications » (src/sourdine.rs).
+        let (ic_sourdine, texte_sourdine) = self.entree_sourdine(std::slice::from_ref(&id));
+        let id_sd = id.clone();
+        let nom_sd = self.conv(&id).map(|c| self.nom_affiche(c)).unwrap_or_default();
         let mut menu = verre(0.96, 16.)
             .shadow(ombre_verre())
             .w(px(240.))
@@ -9773,6 +9807,13 @@ impl Jasette {
                     cx.notify();
                 })),
             )
+            .child(item("menu-sourdine", ic_sourdine, texte_sourdine.into(), th().texte_fort, true).on_click(cx.listener(
+                move |this, _, _, cx| {
+                    this.menu_conv = false;
+                    this.basculer_sourdine(vec![id_sd.clone()], nom_sd.clone());
+                    cx.notify();
+                },
+            )))
             .children(self.item_menu_prive(&id, cx))
             .children(self.item_menu_mood(&id, cx))
             .child(item("menu-rechercher", "search", t("Rechercher").into(), th().texte_fort, true).on_click(cx.listener(
@@ -12738,7 +12779,7 @@ impl Jasette {
                         cx.notify();
                     }
                 } else if k.key == "escape" {
-                    if this.modale_classer.take().is_some() {
+                    if this.modale_classer.take().is_some() || this.modale_sourdine.take().is_some() {
                         cx.stop_propagation();
                         cx.notify();
                     } else if this.fiche.as_ref().is_some_and(|f| f.lier) {
@@ -12853,6 +12894,8 @@ impl Jasette {
         .children(self.modale_classer_vue(cx))
         // La fiche de la personne (src/personne.rs).
         .children(self.fiche_vue(cx))
+        // « Mettre en sourdine » (src/sourdine.rs), par-dessus la fiche.
+        .children(self.modale_sourdine_vue(cx))
         .when_some(self.apercu.clone(), |d, chemin| {
             d.child(
                 div()
@@ -14035,6 +14078,15 @@ fn t(fr: &'static str) -> &'static str {
         "Ce n'est pas un rendez-vous" => "Not an appointment",
         "Ce n'est pas de l'argent" => "Not about money",
         "Classer…" => "Classify…",
+        "Mettre en sourdine…" => "Mute…",
+        "Mettre en sourdine" => "Mute",
+        "Réactiver les notifications" => "Unmute",
+        "Pendant 1 heure" => "For 1 hour",
+        "Pendant 8 heures" => "For 8 hours",
+        "Pendant 24 heures" => "For 24 hours",
+        "Pendant 1 semaine" => "For 1 week",
+        "Jusqu'à ce que je la réactive" => "Until I turn it back on",
+        "Les messages arrivent comme d'habitude, sans notification." => "Messages still arrive as usual, without notifications.",
         "Reclasser…" => "Reclassify…",
         "Classer" => "Classify",
         "Reclasser" => "Reclassify",

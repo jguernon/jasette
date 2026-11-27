@@ -599,6 +599,8 @@ impl Jasette {
                                     .text_color(th().texte_fort)
                                     .child(texte_emoji(nom, th().texte_fort, Some(if conv.unread { FontWeight::BOLD } else { FontWeight::SEMIBOLD }))),
                             )
+                            // En sourdine (src/sourdine.rs) : la cloche barrée.
+                            .when(self.en_sourdine(&conv.id), |d| d.child(Self::icone_sourdine(12. + self.plus_liste(), th().texte_pale)))
                             .child(
                                 div()
                                     .flex_none()

@@ -598,7 +598,16 @@ impl Jasette {
                         .text_size(px(11. + plus))
                         .when(conv.unread, |d| d.font_weight(FontWeight::BOLD).text_color(c(0x0b5bc4)))
                         .when(!conv.unread, |d| d.text_color(c(0x4d6c92)))
-                        .child(heure(conv.time, true))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap(px(4.))
+                                // En sourdine (src/sourdine.rs) : la cloche barrée.
+                                .when(self.en_sourdine(&conv.id), |d| d.child(Self::icone_sourdine(11. + plus, c(0x4d6c92))))
+                                .child(heure(conv.time, true)),
+                        )
                         .when(badge, |d| d.child(logo(svc, 14.))),
                 );
         }
@@ -637,6 +646,7 @@ impl Jasette {
                 d.child(div().flex_none().w(px(14.)).h(px(11.)).bg(c(0xffe26a)).border_1().border_color(c(0x8a6d00)))
             })
             .when(badge, |d| d.child(logo(svc, 14.)))
+            .when(self.en_sourdine(&conv.id), |d| d.child(Self::icone_sourdine(11. + plus, pale)))
             .child(div().flex_none().text_size(px(11. + plus)).text_color(pale).child(heure(conv.time, true)))
     }
 

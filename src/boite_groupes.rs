@@ -524,10 +524,12 @@ impl Jasette {
             .into_any_element()
     }
 
-    /// Le menu du clic droit sur une conversation : « Ce n'est pas … » et
-    /// « Classer… » (« Reclasser… » si elle est dans un groupe), qui ouvre
-    /// la modale `modale_classer`. Regroupement activé ou non (l'avatar
-    /// montre le groupe dans tous les cas).
+    /// Le menu du clic droit sur une conversation : « Mettre en sourdine… »
+    /// (ou « Réactiver les notifications », src/sourdine.rs), puis, pour une
+    /// conversation qui peut être classée, « Ce n'est pas … » et « Classer… »
+    /// (« Reclasser… » si elle est dans un groupe), qui ouvre la modale
+    /// `modale_classer`. Regroupement activé ou non (l'avatar montre le
+    /// groupe dans tous les cas).
     pub(crate) fn menu_groupe_vue(&self, cx: &mut Context<Self>) -> Option<gpui::Deferred> {
         let m = self.menu_groupe.clone()?;
         let conv = self.conv(&m.id)?;
@@ -560,6 +562,19 @@ impl Jasette {
                 .child(div().size(px(22.)).flex_none().flex().items_center().justify_center().child(symbole))
                 .child(texte)
         };
+        let (ic, texte) = self.entree_sourdine(std::slice::from_ref(&m.id));
+        let (id, nom) = (m.id.clone(), self.nom_affiche(conv));
+        menu = menu.child(ligne("menu-groupe-sourdine", icone(ic, 16., th().texte).into_any_element(), texte).on_click(cx.listener(
+            move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.menu_groupe = None;
+                this.basculer_sourdine(vec![id.clone()], nom.clone());
+                cx.notify();
+            },
+        )));
+        if self.hors_classement(conv) {
+            return Some(gpui::deferred(gpui::anchored().position(m.pos).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(1));
+        }
         if let Some(g) = actuel {
             let id = m.id.clone();
             menu = menu.child(ligne("menu-groupe-aucun", icone("undo-2", 16., th().texte_pale).into_any_element(), pas_un(g)).on_click(
