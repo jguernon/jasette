@@ -35,7 +35,11 @@ use serde_json::Value;
 
 /// Le seul hôte d'où Jasette accepte une mise à jour (en HTTPS).
 pub const HOTE: &str = "jonathanguernon.net";
+#[cfg(not(target_os = "macos"))]
 pub const ADRESSE_VERSION: &str = "https://jonathanguernon.net/jasette/telecharger/version-linux.json";
+/// macOS : version-macos.json (paquets/empaqueter-macos.sh), avec le .dmg sous « dmg ».
+#[cfg(target_os = "macos")]
+pub const ADRESSE_VERSION: &str = "https://jonathanguernon.net/jasette/telecharger/version-macos.json";
 /// La page de téléchargement, pour une installation que Jasette ne sait pas mettre à jour.
 pub const PAGE: &str = "https://jonathanguernon.net/jasette/";
 pub const INTERVALLE_MS: i64 = 6 * 3600 * 1000;
@@ -144,6 +148,13 @@ pub fn lire(json: &str, local: bool) -> Option<VersionDispo> {
     let code = v.get("versionCode")?.as_u64().filter(|c| *c > 0)?;
     let deb = lire_paquet(v.get("deb"), local);
     let targz = lire_paquet(v.get("targz"), local);
+    // macOS : le seul paquet est le .dmg (gardé dans `targz`, jamais installé
+    // par l'app : `detecter` rend Autre, la carte envoie vers le site).
+    #[cfg(target_os = "macos")]
+    let (deb, targz): (Option<Paquet>, _) = {
+        let _ = (deb, targz);
+        (None, lire_paquet(v.get("dmg"), local))
+    };
     if deb.is_none() && targz.is_none() {
         return None;
     }
@@ -286,6 +297,13 @@ pub fn detecter_chemin(exe: &Path, dpkg: impl Fn(&Path) -> bool) -> Installation
 }
 
 pub fn detecter() -> Installation {
+    // macOS : Jasette.app se remplace en glissant le nouveau .dmg dans
+    // Applications ; l'app ne se modifie pas elle-même (signature du paquet).
+    #[cfg(target_os = "macos")]
+    return match chemin_exe() {
+        Some(exe) if dans_cargo(&exe) => Installation::Dev,
+        _ => Installation::Autre,
+    };
     if essai("JASETTE_MAJ_INSTALL").as_deref() == Some("deb") {
         return Installation::Deb;
     }
@@ -299,6 +317,18 @@ pub fn detecter() -> Installation {
 // Le réseau
 // ---------------------------------------------------------------------------
 
+#[cfg(target_os = "macos")]
+fn agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(8))
+        .timeout_read(Duration::from_secs(30))
+        .redirects(0)
+        .user_agent(&format!("Jasette-macOS/{}", nom_installe()))
+        .try_proxy_from_env(false)
+        .build()
+}
+
+#[cfg(not(target_os = "macos"))]
 fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(8))

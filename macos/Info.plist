@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Jasette.app : @VERSION@ et @BUILD@ remplacés par macos/construire.sh. -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>fr_CA</string>
+	<key>CFBundleDisplayName</key>
+	<string>Jasette</string>
+	<key>CFBundleExecutable</key>
+	<string>jasette</string>
+	<key>CFBundleIconFile</key>
+	<string>jasette</string>
+	<key>CFBundleIdentifier</key>
+	<string>ca.jasette.Jasette</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Jasette</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@BUILD@</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.social-networking</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>12.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026 Jonathan Guernon — AGPL-3.0-or-later</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Jasette utilise le micro pour enregistrer les messages vocaux que vous envoyez.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Jasette affiche ses notifications par le Centre de notifications.</string>
+</dict>
+</plist>

@@ -32,3 +32,8 @@ flate2 = "1"
 rodio = { version = "0.23", default-features = false, features = ["playback", "mp3"] }
 # « Ce que j'écoute » (src/musique.rs) : lire Spotify par MPRIS sur D-Bus (déjà dans l'arbre par gpui).
 zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
+
+# macOS seulement : les shaders Metal compilés au lancement (pas besoin de
+# l'outil « metal » de Xcode, la Metal Toolchain, pour compiler).
+[target.'cfg(target_os = "macos")'.dependencies]
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.14", features = ["runtime_shaders"] }

@@ -12,6 +12,9 @@
 //! plat à la Beeper (aplats gris, fil noir), le défaut ; et « Verre », le look
 //! liquid glass du skill stageshow (fond pastel à halos, verre translucide).
 
+// macOS : les blocs `#[cfg(target_os = "macos")] return …;` laissent le code Linux
+// qui suit inatteignable sur Mac (voir src/macos.rs).
+#![cfg_attr(target_os = "macos", allow(unreachable_code))]
 mod apercu;
 mod cache;
 mod pont;
@@ -33,6 +36,8 @@ mod codes;
 mod groupes_auto;
 mod boite_groupes;
 mod ponts_langue;
+#[cfg(target_os = "macos")]
+mod macos;
 
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -2660,6 +2665,9 @@ fn icone_app_grande() -> Arc<gpui::Image> {
 /// la reprennent. Le lanceur .desktop est retouché pour que GNOME relise.
 fn installer_icone(blanche: bool) -> Result<(), String> {
     ICONE_EST_BLANCHE.store(blanche, Ordering::Relaxed);
+    // macOS : pas de thème d'icônes XDG ; l'icône du Dock est celle de Jasette.app.
+    #[cfg(target_os = "macos")]
+    return Ok(());
     let donnees = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
@@ -2760,6 +2768,9 @@ fn deprefixer_meta(v: &mut Value) -> Option<Service> {
 /// socket wayland-0 par défaut et ouvrirait la fenêtre sur l'écran physique :
 /// on le force alors sur X11, le même écran que Jasette.
 fn commande_fenetre_connexion() -> std::process::Command {
+    // macOS : jasette-connexion (WKWebView) au lieu de python3 + GTK.
+    #[cfg(target_os = "macos")]
+    return macos::commande_connexion();
     let mut c = std::process::Command::new("python3");
     let sans_wayland = std::env::var_os("WAYLAND_DISPLAY").map_or(true, |v| v.is_empty());
     if sans_wayland && std::env::var_os("DISPLAY").is_some() && std::env::var_os("GDK_BACKEND").is_none() {
@@ -2769,6 +2780,8 @@ fn commande_fenetre_connexion() -> std::process::Command {
 }
 
 fn script_connexion_nomme(nom: &str) -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    return macos::script_connexion(nom);
     let mut essais = Vec::new();
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
@@ -2783,6 +2796,8 @@ fn script_connexion() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("JASETTE_CONNEXION") {
         return Some(PathBuf::from(p));
     }
+    #[cfg(target_os = "macos")]
+    return macos::script_connexion("jasette-connexion.py");
     let mut essais = Vec::new();
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
@@ -2795,6 +2810,9 @@ fn script_connexion() -> Option<PathBuf> {
 
 /// Le lanceur de démarrage automatique (norme XDG, lu par GNOME, KDE, etc.).
 fn fichier_demarrage() -> Option<PathBuf> {
+    // macOS : un LaunchAgent (~/Library/LaunchAgents).
+    #[cfg(target_os = "macos")]
+    return macos::fichier_demarrage();
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
@@ -2807,6 +2825,8 @@ fn demarrage_auto() -> bool {
 }
 
 fn regler_demarrage_auto(actif: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    return macos::regler_demarrage_auto(actif);
     let fichier = fichier_demarrage().ok_or("Dossier de configuration introuvable")?;
     if !actif {
         return match std::fs::remove_file(&fichier) {
@@ -2847,6 +2867,8 @@ fn adresses_serveur() -> Vec<String> {
 }
 
 fn nom_machine() -> String {
+    #[cfg(target_os = "macos")]
+    return macos::nom_machine();
     std::fs::read_to_string("/etc/hostname").map(|s| s.trim().to_string()).ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "Jasette".into())
 }
 
@@ -2875,6 +2897,9 @@ fn commande_serveur(args: &[&str]) -> Result<String, String> {
 /// Installe jasette-serveur comme service systemd de l'utilisateur, le démarre,
 /// puis jumelle cette interface avec lui (code lu sur place, empreinte vérifiée).
 fn installer_serveur() -> Result<pont::ConfigServeur, String> {
+    // macOS : pas de systemd ; le mode client (un serveur Linux) marche.
+    #[cfg(target_os = "macos")]
+    return Err(macos::SERVEUR_NON_OFFERT.into());
     let bin = pont::chemin("jasette-serveur", "JASETTE_SERVEUR").ok_or("jasette-serveur introuvable")?;
     let ponts = pont::chemin("jasette-pont", "JASETTE_PONT")
         .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
@@ -2929,6 +2954,8 @@ fn installer_serveur() -> Result<pont::ConfigServeur, String> {
 
 /// Ouvre une adresse (https:, tel:) avec l'application par défaut.
 fn ouvrir_adresse(adresse: &str) {
+    #[cfg(target_os = "macos")]
+    return macos::ouvrir(adresse.as_ref());
     let _ = std::process::Command::new("xdg-open")
         .arg(adresse)
         .stdin(std::process::Stdio::null())
@@ -2957,6 +2984,8 @@ fn adresse_appel(conv: &Conv) -> Option<String> {
 
 /// Ouvre un fichier avec l'application par défaut.
 fn ouvrir_fichier(p: &PathBuf) {
+    #[cfg(target_os = "macos")]
+    return macos::ouvrir(p.as_os_str());
     let _ = std::process::Command::new("xdg-open")
         .arg(p)
         .stdin(std::process::Stdio::null())
@@ -4616,6 +4645,13 @@ impl Jasette {
         };
         let conv_id = m.conv.clone();
         let boite = self.a_ouvrir.clone();
+        // macOS : le Centre de notifications, par osascript (sans image ni clic).
+        #[cfg(target_os = "macos")]
+        {
+            let _ = (photo, conv_id, boite);
+            std::thread::spawn(move || macos::notifier(&titre, &corps));
+            return;
+        }
         std::thread::spawn(move || {
             // Rendue une fois, puis gardée (hors du fil de l'interface).
             let photo = match groupe {
@@ -5656,6 +5692,17 @@ impl Jasette {
         if duree > 0. && depuis >= duree - 0.05 {
             depuis = 0.;
         }
+        // macOS : ffplay s'il est installé, sinon afplay.
+        #[cfg(target_os = "macos")]
+        {
+            match macos::lecture_vocal(&chemin, depuis) {
+                Ok(enfant) => {
+                    self.lecture = Some(Lecture { media_id: p.media_id.clone(), enfant, debut: Instant::now(), depuis })
+                }
+                Err(e) => self.erreur = Some(format!("Lecture : {e}")),
+            }
+            return;
+        }
         match std::process::Command::new("ffplay")
             .args(["-nodisp", "-autoexit", "-loglevel", "quiet", "-ss", &format!("{depuis:.2}")])
             .arg(&chemin)
@@ -6093,6 +6140,15 @@ impl Jasette {
         let dir = dossier_medias().join("vocaux");
         let _ = std::fs::create_dir_all(&dir);
         let fichier = dir.join(format!("vocal-{}.ogg", chrono::Local::now().format("%Y%m%d-%H%M%S")));
+        // macOS : ffmpeg (AVFoundation) au lieu de pw-record.
+        #[cfg(target_os = "macos")]
+        {
+            match macos::enregistrer_vocal(&fichier) {
+                Ok(enfant) => self.vocal = Some(Vocal { enfant, fichier, debut: Instant::now() }),
+                Err(e) => self.erreur = Some(format!("Micro : {e}")),
+            }
+            return;
+        }
         match std::process::Command::new("pw-record")
             .args(["--channels", "1", "--rate", "48000"])
             .arg(&fichier)
@@ -14122,6 +14178,9 @@ fn main() {
         println!("jasette {} {}", maj::nom_installe(), maj::code_installe());
         return;
     }
+    // macOS : les données dans ~/Library/Application Support/Jasette, PATH de Homebrew.
+    #[cfg(target_os = "macos")]
+    macos::preparer();
     // Sans fenêtre : faire de cette machine le serveur Jasette (comme le
     // bouton des réglages), pour une installation à distance.
     if std::env::args().any(|a| a == "--devenir-serveur") {
@@ -14148,6 +14207,8 @@ fn main() {
             eprintln!("jasette : police d'emojis : {e}");
         }
         gpui_component::init(cx);
+        #[cfg(target_os = "macos")]
+        macos::installer_menus(cx);
         gpui_component::Theme::update(cx, |t| {
             t.font_family = POLICE.into();
             t.font_size = px(15.);
