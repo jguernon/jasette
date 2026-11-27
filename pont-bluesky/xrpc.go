@@ -184,6 +184,12 @@ func (a *auth) refresh(ctx context.Context) error {
 	if err != nil {
 		var x *xrpcErr
 		if errors.As(err, &x) && (x.Status == 400 || x.Status == 401) {
+			log.Warn().Int("statut", x.Status).Str("erreur", x.Name).Str("message", x.Message).Msg("renouvellement de session refusé")
+			if x.Name != "ExpiredToken" && x.Name != "InvalidToken" && x.Name != "AuthenticationRequired" && x.Name != "AccountTakedown" {
+				// Refus d'un autre genre (requête rejetée, panne passagère du
+				// PDS) : on garde la session et on réessaiera.
+				return err
+			}
 			// Jeton expiré ou révoqué (mot de passe d'app supprimé) : il faut
 			// se reconnecter.
 			a.sess = nil
