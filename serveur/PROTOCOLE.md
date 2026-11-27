@@ -597,7 +597,7 @@ linkedingo, la bibliothèque de mautrix-linkedin ; pur Go, sans CGO) :
   `send_media`, `react` et `read` ne partent pas (`error` / ignoré). Pas
   de Sales Navigator, pas d'InMail envoyé, pas de pages d'entreprise.
 
-### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, personnes, contacts perso, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*, ordre_services, groupes_auto, stories, stories_ouvertes, sourdine)
+### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, personnes, contacts perso, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*, ordre_services, groupes_auto, stories, stories_ouvertes, sourdine, spam)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
@@ -714,6 +714,21 @@ Et des réglages (facultatifs) :
   l'en-tête du fil et sur la fiche. Une échéance passée n'est plus en
   sourdine : chaque client cesse de l'appliquer de lui-même, sans attendre
   le serveur. Le serveur, lui, n'envoie aucune notification.
+- `spam` (objet, **`{}`** par défaut) : les conversations **marquées comme
+  spam**, `{id de conversation : heure (ms depuis l'epoch) du marquage}`.
+  Posée par « Marquer comme spam » (menu de la conversation, juste sous
+  « Classer… ») ; « Ce n'est pas du spam » retire la clé. Le client pose en
+  même temps une sourdine sans fin (`sourdine`, `0`) et la retire avec « Ce
+  n'est pas du spam ». Une conversation en spam quitte la boîte de
+  réception, les groupes automatiques, le Head, les favoris et les
+  épinglées ; elle ne fait **jamais** de notification (ni son, ni Android
+  Auto), même pour un nouveau message, et ne compte pas dans les non-lus de
+  la boîte ni de l'icône. Elle se range dans le **dossier Spam** (Réglages),
+  d'où « Ce n'est pas du spam » ou « Supprimer » (là où le service sait
+  supprimer une conversation). Pour une conversation Google Messages à deux,
+  le client peut aussi envoyer `STOP` par la commande `send` ordinaire, sur
+  clic explicite seulement. Le serveur ne fait que garder et partager cette
+  marque ; un client d'avant le spam l'ignore.
 
 C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 
@@ -721,7 +736,7 @@ C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 changement, à **tous** les clients) :
 
 ```json
-{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"groupes_auto":{"72345":"codes","t:93372553":"aucun"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"ordre_services":["google","signal","messenger"],"personnes":[{"id":"p1764160000000a3f","convs":["123","m:99"],"principal":"123"}],"personnes_refus":[["i:42","m:99"]],"contacts_perso":{"123":{"nom":"Maman","photo":"/srv/jasette/media/contacts/9f3c0a.jpg"}},"sourdine":{"m:99":0,"w:5551":1764370800000},"version":7}}
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"groupes_auto":{"72345":"codes","t:93372553":"aucun"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"ordre_services":["google","signal","messenger"],"personnes":[{"id":"p1764160000000a3f","convs":["123","m:99"],"principal":"123"}],"personnes_refus":[["i:42","m:99"]],"contacts_perso":{"123":{"nom":"Maman","photo":"/srv/jasette/media/contacts/9f3c0a.jpg"}},"sourdine":{"m:99":0,"w:5551":1764370800000},"spam":{"15145550000":1764370800000},"version":7}}
 ```
 
 `version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
@@ -730,7 +745,7 @@ encore rien reçu (listes vides).
 **Client → serveur** :
 
 ```json
-{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"groupes_auto":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"ordre_services":[…],"personnes":[…],"personnes_refus":[…],"contacts_perso":{…},"sourdine":{…},"version":7,"id":12}}
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"groupes_auto":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"ordre_services":[…],"personnes":[…],"personnes_refus":[…],"contacts_perso":{…},"sourdine":{…},"spam":{…},"version":7,"id":12}}
 ```
 
 - `version` : la dernière version reçue du serveur (0 si aucune).
@@ -784,6 +799,13 @@ encore rien reçu (listes vides).
   lointaines). D'un client en retard (autre `version`), pas de refus :
   union, ses entrées gagnent et celles du serveur qu'il n'a pas restent.
   Toujours envoyé (objet, jamais `null`) ; absent de `marques.json` : `{}`.
+- `spam` : absent, `null` ou mal formé, rien ne change (un client d'avant le
+  spam ne l'efface jamais) ; présent, c'est l'objet complet (une clé absente
+  = « Ce n'est pas du spam »). Entrées à id vide ou démesuré (512 octets) ou
+  à heure négative retirées ; aucune échéance ; au plus 5000 entrées (les
+  plus récemment marquées). D'un client en retard, pas de refus : union, ses
+  entrées gagnent. Toujours envoyé (objet, jamais `null`) ; absent de
+  `marques.json` : `{}`.
 - `notes_musique` : absent ou `null`, rien ne change ; une chaîne est prise
   telle quelle (tronquée à 128 octets). Toujours envoyé ; absent de
   `marques.json` : `""`.
@@ -888,7 +910,8 @@ pas, et le client garde les siens pour lui. De même pour `contacts_perso`
 ce champ : le client garde les siens pour lui). Pour `sourdine` : union par
 id, l'entrée de la copie qui passe d'abord gagne, les échéances passées
 tombent ; un serveur d'avant ce champ ne l'envoie pas, et le client garde sa
-sourdine pour lui (en mode autonome, elle reste aussi sur l'appareil).
+sourdine pour lui (en mode autonome, elle reste aussi sur l'appareil). Même
+règle pour `spam` (union par id).
 
 **Règle des personnes** (fiche de la personne).
 
@@ -2051,8 +2074,8 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"svc":…,"ev":{"ev":"messages",…,"cache":true}}` | copie du cache, avant la réponse du pont (§5.8) |
 | C→S | `{"rejouer":"<svc>"}` | redemander l'état d'un service |
 | ↔ | `{"ping":n}` / `{"pong":n}` | signes de vie |
-| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","groupes_auto","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","stories","stories_ouvertes","sourdine","version"[,"id","refus"]}}` | rejeu, changement |
-| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","groupes_auto","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","stories","stories_ouvertes","sourdine","version"[,"id"]}}` | changement local |
+| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","groupes_auto","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","stories","stories_ouvertes","sourdine","spam","version"[,"id","refus"]}}` | rejeu, changement |
+| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","groupes_auto","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","stories","stories_ouvertes","sourdine","spam","version"[,"id"]}}` | changement local |
 | S→C | `{"svc":…,"ev":{"ev":"presence","item":{"conv","user","online","last_active"}}}` | présence (§5.10), aussi au rejeu |
 | S→C | `{"svc":…,"ev":{"ev":"typing","conv","on"[,"name","audio"]}}` | « en train d'écrire » (§5.11) |
 | C→S | `{"svc":…,"cmd":{"cmd":"note_set","text","audience","source"[,"req"]}}` | publier ma note (§5.12) |

@@ -1,7 +1,7 @@
 // Les marques : le Head, les favoris, les épinglées, les archives, les
 // privées, les moods, les emojis rapides, les corrections du regroupement
 // automatique (groupes_auto), les personnes et les contacts perso (fiche de la
-// personne, personnes.go), la sourdine par conversation (sourdine.go), l'ordre des services et les réglages garder_archives et
+// personne, personnes.go), la sourdine par conversation (sourdine.go), le spam (spam.go), l'ordre des services et les réglages garder_archives et
 // cacher_apres_jours de Jasette, partagés entre tous les appareils de l'utilisateur (voir
 // PROTOCOLE.md, §5.5).
 //
@@ -92,6 +92,10 @@ type Marques struct {
 	// réactivation} (sourdine.go). Coupe seulement les notifications système
 	// des clients. Élaguée quand l'échéance est passée. Absent : vide.
 	Sourdine map[string]int64 `json:"sourdine"`
+	// Spam : {id de conversation : heure (ms) du marquage} (spam.go). La
+	// conversation quitte la boîte des clients et ne notifie plus. Absent :
+	// vide.
+	Spam map[string]int64 `json:"spam"`
 	// NotesMusique : l'appareil qui publie « ce que j'écoute » ("" : personne).
 	NotesMusique string `json:"notes_musique"`
 	// NotesMusiqueFormat : ce que dit la note musicale, "artiste" (défaut),
@@ -149,6 +153,7 @@ func (m *Marques) normaliser() {
 	m.ContactsPerso = nettoyerContactsPerso(m.ContactsPerso)
 	m.StoriesOuvertes = nettoyerStoriesOuvertes(m.StoriesOuvertes)
 	m.Sourdine = nettoyerSourdine(m.Sourdine)
+	m.Spam = nettoyerSpam(m.Spam)
 	depuis := make(map[string]int64, len(m.Archives))
 	maintenant := time.Now().UnixMilli()
 	for _, id := range m.Archives {
@@ -176,7 +181,7 @@ func (m *Marques) memesListes(n *Marques) bool {
 		egalesPersonnes(m.Personnes, n.Personnes) && egalesRefus(m.PersonnesRefus, n.PersonnesRefus) &&
 		egalesContactsPerso(m.ContactsPerso, n.ContactsPerso) &&
 		m.Stories == n.Stories && egalesStoriesOuvertes(m.StoriesOuvertes, n.StoriesOuvertes) &&
-		egalesSourdine(m.Sourdine, n.Sourdine)
+		egalesSourdine(m.Sourdine, n.Sourdine) && egalesSpam(m.Spam, n.Spam)
 }
 
 // cacherApresJoursMax : au-delà de dix ans, autant tout afficher.
@@ -423,6 +428,7 @@ func trameMarques(m Marques, id json.RawMessage, refus string) []byte {
 		"ordre_services": nettoyerOrdreServices(m.OrdreServices), "personnes": nettoyerPersonnes(m.Personnes), "personnes_refus": nettoyerRefus(m.PersonnesRefus),
 		"contacts_perso": nettoyerContactsPerso(m.ContactsPerso), "stories": m.Stories,
 		"stories_ouvertes": nettoyerStoriesOuvertes(m.StoriesOuvertes), "sourdine": nettoyerSourdine(m.Sourdine),
+		"spam": nettoyerSpam(m.Spam),
 		"version": m.Version,
 	}
 	if len(id) > 0 {
@@ -470,6 +476,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		Stories  *bool              `json:"stories"`
 		StoriesO json.RawMessage    `json:"stories_ouvertes"`
 		Sourdine json.RawMessage    `json:"sourdine"`
+		Spam     json.RawMessage    `json:"spam"`
 		Version  int64              `json:"version"`
 		ID       json.RawMessage    `json:"id"`
 	}
@@ -577,6 +584,13 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		nouv.Sourdine = m
 		sourdineRecue = true
 	}
+	// Le spam : même règle (absent, rien ne change ; présent, l'objet complet,
+	// une clé absente : « Ce n'est pas du spam »).
+	spamRecu := false
+	if m, ok := lireSpam(d.Spam); ok {
+		nouv.Spam = m
+		spamRecu = true
+	}
 	repondre := func(m Marques, refus string) {
 		select {
 		case c.evs <- trameMarques(m, d.ID, refus):
@@ -635,6 +649,9 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		if sourdineRecue {
 			nouv.Sourdine = unirSourdine(nouv.Sourdine, cur.Sourdine)
 		}
+		if spamRecu {
+			nouv.Spam = unirSpam(nouv.Spam, cur.Spam)
+		}
 	}
 	nouv.normaliser()
 	if nouv.memesListes(&cur) {
@@ -649,8 +666,8 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		return
 	}
 	s.marques = nouv
-	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, groupes_auto %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s, notes_contacts %v, notes_services %v, ordre_services %v, personnes %d, refus %d, contacts perso %d, stories %v (ouvertes %d), sourdine %d",
-		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), len(nouv.GroupesAuto), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation, nouv.NotesContacts, nouv.NotesServices, nouv.OrdreServices, len(nouv.Personnes), len(nouv.PersonnesRefus), len(nouv.ContactsPerso), nouv.Stories, len(nouv.StoriesOuvertes), len(nouv.Sourdine))
+	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, groupes_auto %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s, notes_contacts %v, notes_services %v, ordre_services %v, personnes %d, refus %d, contacts perso %d, stories %v (ouvertes %d), sourdine %d, spam %d",
+		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), len(nouv.GroupesAuto), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation, nouv.NotesContacts, nouv.NotesServices, nouv.OrdreServices, len(nouv.Personnes), len(nouv.PersonnesRefus), len(nouv.ContactsPerso), nouv.Stories, len(nouv.StoriesOuvertes), len(nouv.Sourdine), len(nouv.Spam))
 	if nouv.PresenceEnLigne != cur.PresenceEnLigne {
 		s.presenceChangee(nouv.PresenceEnLigne)
 	}
