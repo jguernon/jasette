@@ -253,7 +253,7 @@ impl Jasette {
             .flex()
             .items_center()
             .justify_center()
-            .child(avec_repli_emoji(div().text_size(px(taille * 0.56)).line_height(px(taille))).child(g.emoji()))
+            .child(avec_repli_emoji(div().text_size(px(taille * 0.62)).line_height(px(taille))).child(g.emoji()))
     }
 
     /// La rangée d'un groupe dans la boîte.
@@ -261,13 +261,15 @@ impl Jasette {
         let r = self.resume_groupe(g, membres);
         let non_lu = r.non_lus > 0 && g != Groupe::Promos;
         let poids = if non_lu { FontWeight::BOLD } else { FontWeight::SEMIBOLD };
+        // « Google : 482913 » (en anglais, sans espace avant les deux-points).
+        let deux_points = if anglais() { ": " } else { " : " };
         let apercu = match g {
             Groupe::Codes => match &r.code {
-                Some((code, nom, _)) => format!("{nom} : {code}"),
-                None => format!("{} : {}", r.dernier_nom, r.dernier_apercu),
+                Some((code, nom, _)) => format!("{nom}{deux_points}{code}"),
+                None => format!("{}{deux_points}{}", r.dernier_nom, r.dernier_apercu),
             },
             Groupe::Promos => r.noms.join(", "),
-            Groupe::Avis => format!("{} : {}", r.dernier_nom, r.dernier_apercu),
+            Groupe::Avis => format!("{}{deux_points}{}", r.dernier_nom, r.dernier_apercu),
         };
         let copie = (g == Groupe::Codes).then(|| r.code.clone()).flatten().map(|(code, _, _)| {
             let cle = format!("groupe-codes-{code}");
@@ -394,12 +396,26 @@ impl Jasette {
                 cx.notify();
             })))
             .child(Self::avatar_groupe(g, 34.))
-            .child(div().flex_1().min_w(px(0.)).truncate().font_weight(FontWeight::BOLD).text_color(th().texte_fort).child(titre(g)))
+            .child(div().flex_1().min_w(px(60.)).truncate().font_weight(FontWeight::BOLD).text_color(th().texte_fort).child(titre(g)))
             .when(non_lus > 0, |d| {
-                d.child(bouton_texte("groupe-tout-lu", t("Tout marquer comme lu"), ACCENT).on_click(cx.listener(move |this, _, _, cx| {
-                    this.groupe_tout_lu(g);
-                    cx.notify();
-                })))
+                d.child(
+                    div()
+                        .id("groupe-tout-lu")
+                        .flex_none()
+                        .px(px(8.))
+                        .py(px(4.))
+                        .rounded(rayon(8.))
+                        .text_size(px(12.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(th().accent)
+                        .cursor_pointer()
+                        .hover(|s| s.bg(th().survol))
+                        .child(t("Tout marquer comme lu"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.groupe_tout_lu(g);
+                            cx.notify();
+                        })),
+                )
             })
             .into_any_element()
     }
