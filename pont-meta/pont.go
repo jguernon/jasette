@@ -94,6 +94,9 @@ type Pont struct {
 
 	// « Quoi de neuf ? » (notes.go).
 	notes *notesPont
+
+	// Les stories Facebook des contacts (stories.go).
+	stories storiesEtat
 }
 
 func newPont(ctx context.Context) *Pont {
@@ -114,12 +117,14 @@ func newPont(ctx context.Context) *Pont {
 		e2eeReady:    exsync.NewEvent(),
 		auteurs:      map[int64]bool{},
 		fileAuteurs:  make(chan int64, 256),
+		stories:      storiesEtat{on: storiesEnv(), now: make(chan struct{}, 1)},
 	}
 	mediadl.SetHTTP(exhttp.SensibleClientSettings)
 	p.notes = nouvellesNotesFB(p)
 	p.flux = p.newFluxPresence()
 	go p.listLoop()
 	go p.boucleAuteurs()
+	go p.storiesLoop()
 	return p
 }
 
@@ -432,6 +437,7 @@ func (p *Pont) onMetaEvent(ctx context.Context, raw any) {
 		p.emitList()
 		p.setPresence(p.presenceWanted())
 		go p.notes.annoncer()
+		p.demanderStories()
 		go p.connectE2EE()
 		go p.threadBackfill()
 		go p.myAvatarDownload()

@@ -217,7 +217,7 @@ non), `qr` (seulement en cours d'association),
 `history_pin` (seulement s'il attend un NIP : `{"needed":true}`), puis les
 dernières listes `conversations` gardées (boîte de réception, puis archives :
 §5.8), puis la présence en ligne (§5.10) et les notes des contacts
-(`notes`, §5.12). Le `qr` et
+(`notes`, §5.12), et les stories des contacts (`stories`, §5.15). Le `qr` et
 le `pair_code` (et le `login_step`) gardés sont oubliés dès `paired`, `state` `ready` ou
 `unpaired`, ou si le pont s'arrête ; un `pair_code` remplace le `qr` (le pont
 WhatsApp cesse alors de montrer des QR). Un client
@@ -597,7 +597,7 @@ linkedingo, la bibliothèque de mautrix-linkedin ; pur Go, sans CGO) :
   `send_media`, `react` et `read` ne partent pas (`error` / ignoré). Pas
   de Sales Navigator, pas d'InMail envoyé, pas de pages d'entreprise.
 
-### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, personnes, contacts perso, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*, ordre_services, groupes_auto)
+### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, personnes, contacts perso, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*, ordre_services, groupes_auto, stories, stories_ouvertes)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
@@ -693,6 +693,13 @@ Et des réglages (facultatifs) :
   sont en liste (rail, filtres, Nouveau, réglages…) : ceux de la liste
   d'abord, puis ceux qui n'y sont pas (un service ajouté plus tard) dans son
   ordre par défaut ; une clé inconnue est ignorée. `[]` : l'ordre par défaut.
+- `stories` (booléen, **faux** par défaut) : « Afficher les stories
+  Facebook et Instagram » (cercle autour des avatars, §5.15). Le serveur le
+  transmet aux ponts Instagram et Messenger (`JASETTE_STORIES`, commande
+  `stories`) ; faux, aucun pont ne lit les stories et le serveur ne relaie
+  plus `stories`.
+- `stories_ouvertes` (objet, **`{}`** par défaut) : `{id de conversation :
+  heure (ms) de la story la plus récente ouverte depuis Jasette}` (§5.15).
 
 C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 
@@ -745,6 +752,15 @@ encore rien reçu (listes vides).
   de `marques.json` : `"bulle"`. Un client qui reçoit des marques sans ce
   champ (serveur d'avant) garde le sien.
 - `notes_contacts` : comme `presence_en_ligne` (absent veut dire vrai).
+- `stories` : absent ou `null`, rien ne change ; présent, pris tel quel.
+  Absent de `marques.json` : faux. Toujours envoyé.
+- `stories_ouvertes` : absent, `null` ou mal formé, rien ne change ;
+  présent, **toujours uni** à celui du serveur, même d'un client à jour
+  (pour chaque id, l'heure la plus grande) : un client n'en retire jamais
+  rien (un objet vide ne change rien). Le serveur **purge** les heures de
+  plus de 48 h (une story dure 24 h) à chaque écriture et au chargement, et
+  en garde 2000 au plus (les plus récentes). Toujours envoyé (objet, jamais
+  `null`).
 - `notes_musique` : absent ou `null`, rien ne change ; une chaîne est prise
   telle quelle (tronquée à 128 octets). Toujours envoyé ; absent de
   `marques.json` : `""`.
@@ -839,8 +855,9 @@ archives (ou ses privées) pour lui seul, sans les vider. De même pour
 client garde le sien pour lui (il l'applique alors lui-même). Union de deux
 copies : `garder_archives` de celle qui passe d'abord. Idem pour
 `cacher_apres_jours`, `presence_en_ligne`, `sons_conversation`,
-`notes_contacts`, `notes_musique`, `notes_musique_format` et
-`notes_services`. Pour `personnes` et `personnes_refus`, l'union suit la
+`notes_contacts`, `notes_musique`, `notes_musique_format`,
+`notes_services` et `stories` (`stories_ouvertes` : l'heure la plus grande
+de chaque côté). Pour `personnes` et `personnes_refus`, l'union suit la
 règle du serveur (personnes par id, celles de la copie qui passe d'abord
 gagnent ; union des refus) ; un serveur d'avant ces champs ne les envoie
 pas, et le client garde les siens pour lui. De même pour `contacts_perso`
@@ -1809,6 +1826,75 @@ attente », « 🔒 Message chiffré pas encore lisible ») est remplacé plus t
 par le vrai message, et n'a pas de code (la reconnaissance de la chaîne
 suffit). Les aperçus des conversations (`preview`) n'ont pas de code.
 
+### 5.15 Stories des contacts
+
+Un **cercle** autour de l'avatar d'un contact qui a une story Instagram ou
+Facebook active ; le toucher ouvre la story **hors de Jasette** (navigateur
+ou app officielle). Jasette n'affiche pas la story, ne télécharge aucun
+média et ne marque **jamais** une story comme vue chez Meta.
+
+**Événement du pont** (liste complète à chaque fois, elle remplace la
+précédente de ce service) :
+
+```json
+{"ev":"stories","items":[{"conv":"340282366841710300949128","user":"1784…","username":"camille.t","latest":1764160000000,"until":1764246400000,"seen":false,"link":"https://www.instagram.com/stories/camille.t/","service":"instagram"}],"time":1764160500000}
+{"ev":"stories","items":[{"conv":"100004…","user":"100004…","latest":1764160000000,"until":1764246400000,"seen":false,"link":"https://www.facebook.com/stories/100004…","service":"facebook"}],"time":1764160500000}
+{"ev":"stories","items":[],"time":1764160500000,"indispo":"Pour les stories Facebook, reconnecte Messenger « Avec Facebook »."}
+```
+
+- `conv` : la conversation individuelle du contact chez ce pont (comme
+  `notes`) ; un contact sans conversation n'est pas annoncé.
+- `latest` (ms) : sa story la plus récente (0 : inconnue) ; `until` (ms) :
+  son échéance ; `seen` : déjà vue (dans l'app officielle ou ailleurs) ;
+  `link` : à ouvrir ; `service` : `instagram` ou `facebook`.
+- `indispo` (facultatif) : pourquoi ce service ne donne rien, en français,
+  pour l'utilisateur (sous la case du réglage).
+
+**Lecture.** Seulement si la marque `stories` est vraie (transmise comme
+`notes_contacts` : `JASETTE_STORIES=1|0` au lancement, puis la commande
+`stories`). Dès que le pont est prêt, puis **au plus toutes les 20
+minutes**, une seule requête en lecture ; trois échecs de suite : pause
+d'une heure.
+
+- Instagram (`pont-ig`) : `GET https://www.instagram.com/api/v1/feed/reels_tray/`
+  avec la session web du pont (le plateau des stories du site : `user.pk`,
+  `username`, `latest_reel_media`, `expiring_at`, `seen`). Les comptes en
+  sourdine sont écartés. Jamais `media/seen`, jamais de média.
+- Facebook (`pont-meta`) : la synchro de Messenger ne les donne pas
+  (`storyContactSyncFromBucket` arrive vide). Il faut le plateau des
+  stories de facebook.com, une requête GraphQL web (`POST
+  /api/graphql/`) avec une session **« Avec Facebook »** (celle de
+  messenger.com n'y a pas accès : `indispo` le dit). Son `doc_id` change
+  avec le site : pas de valeur par défaut, il se règle sans recompiler dans
+  `<données>/messenger/stories-docs.json`, `{"nom":"<x-fb-friendly-name>",
+  "doc_id":"…","variables":{…}}` (relevés dans les outils du navigateur sur
+  facebook.com). La réponse est lue sans dépendre de sa forme exacte : tout
+  nœud avec `story_bucket_owner.id` (ou `__typename` `StoryBucket` et
+  `owner.id`) est une personne ; dessous, la plus grande `creation_time`,
+  `expiration_time`, et `is_bucket_seen_by_viewer` (ou `is_seen_by_viewer`,
+  `seen_by_viewer`). Le lien : `https://www.facebook.com/stories/<id>`.
+
+**Le serveur** garde la dernière liste `stories` de chaque pont et la
+rejoue (après `notes`) ; il l'oublie et ne relaie plus rien quand le
+réglage est désactivé. Sans serveur (ponts locaux), le client fait ce
+travail : `JASETTE_STORIES` au lancement, commande `stories`.
+
+**Les clients.** Le cercle se montre si `until` est à venir, `seen` est
+faux, et `latest` est plus grand que `stories_ouvertes[id]` (l'id du
+client, avec le préfixe du service) ; sinon rien (pas d'anneau gris).
+Toucher le cercle ouvre `link` (Android : `ACTION_VIEW`, l'app officielle
+le prend si elle est installée ; bureau : comme les autres liens) et met
+`stories_ouvertes[id] = latest` (marque partagée : le cercle disparaît sur
+tous les appareils, et revient avec une story plus récente). Cercle
+Instagram : dégradé jaune #feda75 → orange #fa7e1e → rose #d62976 →
+violet #962fbf → #4f5bd5, un petit espace entre l'anneau et la photo ;
+Facebook : dégradé bleu #1877f2 → #00c6ff. Partout où l'avatar du contact
+paraît (boîte, archives, groupes ouverts, Head, favoris, recherche, fiche,
+en-tête de la conversation) ; pas sur l'icône d'un groupe automatique.
+Là où toucher l'avatar fait déjà autre chose (ouvrir la fiche, changer la
+photo), ce geste est gardé : la story s'ouvre par le bouton « Voir la
+story » de la fiche.
+
 ## 6. Fichiers
 
 Les événements contiennent des chemins de fichiers **du serveur** :
@@ -1929,8 +2015,8 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"svc":…,"ev":{"ev":"messages",…,"cache":true}}` | copie du cache, avant la réponse du pont (§5.8) |
 | C→S | `{"rejouer":"<svc>"}` | redemander l'état d'un service |
 | ↔ | `{"ping":n}` / `{"pong":n}` | signes de vie |
-| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","groupes_auto","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","version"[,"id","refus"]}}` | rejeu, changement |
-| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","groupes_auto","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","version"[,"id"]}}` | changement local |
+| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","groupes_auto","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","stories","stories_ouvertes","version"[,"id","refus"]}}` | rejeu, changement |
+| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","groupes_auto","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","stories","stories_ouvertes","version"[,"id"]}}` | changement local |
 | S→C | `{"svc":…,"ev":{"ev":"presence","item":{"conv","user","online","last_active"}}}` | présence (§5.10), aussi au rejeu |
 | S→C | `{"svc":…,"ev":{"ev":"typing","conv","on"[,"name","audio"]}}` | « en train d'écrire » (§5.11) |
 | C→S | `{"svc":…,"cmd":{"cmd":"note_set","text","audience","source"[,"req"]}}` | publier ma note (§5.12) |
@@ -1938,6 +2024,8 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"svc":…,"ev":{"ev":"note_moi","text","time","expires","source","audience"}}` | ma note actuelle (§5.12), aussi au rejeu |
 | S→C | `{"svc":…,"ev":{"ev":"note_result","op","ok"[,"error","req"]}}` | résultat d'une publication (§5.12) |
 | S→C | `{"svc":"instagram","ev":{"ev":"notes","items":[…],"time"}}` | notes des contacts (§5.12), aussi au rejeu |
+| C→S | `{"svc":"instagram"|"messenger","cmd":{"cmd":"stories","on"}}` | lire ou non les stories (ponts locaux, §5.15) |
+| S→C | `{"svc":"instagram"|"messenger","ev":{"ev":"stories","items":[…],"time"[,"indispo"]}}` | stories des contacts (§5.15), aussi au rejeu |
 | C→S | `{"get":{"id","chemin","sha256"}}` | télécharger |
 | S→C | `{"fichier":{"id",…}}` | morceaux ou erreur |
 | C→S | `{"put":{"id","nom","donnees","fin"}}` | téléverser |

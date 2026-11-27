@@ -345,6 +345,8 @@ func main() {
 			go p.historyPIN(cmd.Pin)
 		case "presence":
 			p.setPresence(cmd.On)
+		case "stories":
+			p.setStories(cmd.On)
 		case "note_set":
 			go p.notes.set(p.ctx, cmd.Text, cmd.Audience, cmd.Source, cmd.Req, p.estPret())
 		case "note_clear":

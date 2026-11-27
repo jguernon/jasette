@@ -105,6 +105,11 @@ func lireGraphQL(corps []byte, racine string) (json.RawMessage, error) {
 
 // graphQLNote : une requête GraphQL web, envoyée une seule fois.
 func (p *Pont) graphQLNote(ctx context.Context, nom string, variables any) ([]byte, error) {
+	return p.graphQLDoc(ctx, nom, docNote(nom), variables)
+}
+
+// graphQLDoc : de même, avec un doc_id donné (stories.go).
+func (p *Pont) graphQLDoc(ctx context.Context, nom, docID string, variables any) ([]byte, error) {
 	cli := p.client()
 	if cli == nil || cli.GetHTTP() == nil {
 		return nil, erreurNote("Messenger n'est pas connecté.")
@@ -119,7 +124,7 @@ func (p *Pont) graphQLNote(ctx context.Context, nom string, variables any) ([]by
 	q.FbAPIReqFriendlyName = nom
 	q.Variables = string(v)
 	q.ServerTimestamps = "true"
-	q.DocID = docNote(nom)
+	q.DocID = docID
 	form, err := query.Values(q)
 	if err != nil {
 		return nil, err

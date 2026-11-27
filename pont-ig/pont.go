@@ -78,6 +78,9 @@ type Pont struct {
 	notesNow      chan struct{}
 	notesDerniere map[string]any
 	maNoteTray    string // l'id de ma note vue dans le plateau
+
+	// Les stories des contacts (stories.go).
+	stories storiesEtat
 }
 
 func newPont(ctx context.Context) *Pont {
@@ -92,6 +95,7 @@ func newPont(ctx context.Context) *Pont {
 		presence:    map[string]presenceState{},
 		notesOn:     notesEnv(),
 		notesNow:    make(chan struct{}, 1),
+		stories:     storiesEtat{on: storiesEnv(), now: make(chan struct{}, 1)},
 		pending:     map[string]string{},
 		loaded:      map[string]int64{},
 		fetching:    map[string]bool{},
@@ -108,6 +112,7 @@ func newPont(ctx context.Context) *Pont {
 		publier: p.publierNoteIG, effacer: p.effacerNoteIG,
 	})
 	go p.notesLoop()
+	go p.storiesLoop()
 	return p
 }
 
@@ -473,7 +478,7 @@ func (p *Pont) onIGEvent(ctx context.Context, cli *instameow.Client, raw slidety
 		p.demanderNotes(false)
 		go p.threadBackfill(cli)
 		go p.myAvatarDownload()
-		p.sondeStoriesIG(p.ctx)
+		p.demanderStories()
 	case *slidetypes.Disconnected:
 		p.mu.Lock()
 		p.ready = false

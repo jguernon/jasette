@@ -332,6 +332,8 @@ func main() {
 			p.demanderNotes(true)
 		case "notes_contacts":
 			p.setNotesContacts(cmd.On)
+		case "stories":
+			p.setStories(cmd.On)
 		case "unpair", "logout":
 			go p.unpair()
 		default:

@@ -80,6 +80,14 @@ type Marques struct {
 	// PROTOCOLE.md §5.12). Vrai par défaut, et pour un ancien fichier. Le
 	// serveur le transmet au pont Instagram (notes.go).
 	NotesContacts bool `json:"notes_contacts"`
+	// Stories : « Afficher les stories Facebook et Instagram » (cercle autour
+	// des avatars, PROTOCOLE.md §5.15). Faux par défaut. Le serveur le
+	// transmet aux ponts Instagram et Messenger (stories.go).
+	Stories bool `json:"stories"`
+	// StoriesOuvertes : {id de conversation : heure (ms) de la story la plus
+	// récente ouverte depuis Jasette}. Le cercle de ce contact reste caché
+	// jusqu'à une story plus récente. Purgé après 48 h. Absent : vide.
+	StoriesOuvertes map[string]int64 `json:"stories_ouvertes"`
 	// NotesMusique : l'appareil qui publie « ce que j'écoute » ("" : personne).
 	NotesMusique string `json:"notes_musique"`
 	// NotesMusiqueFormat : ce que dit la note musicale, "artiste" (défaut),
@@ -135,6 +143,7 @@ func (m *Marques) normaliser() {
 	m.Personnes = nettoyerPersonnes(m.Personnes)
 	m.PersonnesRefus = nettoyerRefus(m.PersonnesRefus)
 	m.ContactsPerso = nettoyerContactsPerso(m.ContactsPerso)
+	m.StoriesOuvertes = nettoyerStoriesOuvertes(m.StoriesOuvertes)
 	depuis := make(map[string]int64, len(m.Archives))
 	maintenant := time.Now().UnixMilli()
 	for _, id := range m.Archives {
@@ -160,7 +169,8 @@ func (m *Marques) memesListes(n *Marques) bool {
 		m.NotesMusique == n.NotesMusique && m.NotesMusiqueFormat == n.NotesMusiqueFormat && egales(m.NotesServices, n.NotesServices) &&
 		egales(m.OrdreServices, n.OrdreServices) &&
 		egalesPersonnes(m.Personnes, n.Personnes) && egalesRefus(m.PersonnesRefus, n.PersonnesRefus) &&
-		egalesContactsPerso(m.ContactsPerso, n.ContactsPerso)
+		egalesContactsPerso(m.ContactsPerso, n.ContactsPerso) &&
+		m.Stories == n.Stories && egalesStoriesOuvertes(m.StoriesOuvertes, n.StoriesOuvertes)
 }
 
 // cacherApresJoursMax : au-delà de dix ans, autant tout afficher.
@@ -401,7 +411,8 @@ func trameMarques(m Marques, id json.RawMessage, refus string) []byte {
 		"sons_conversation": jeuSons(m.SonsConversation), "notes_contacts": m.NotesContacts,
 		"notes_musique": m.NotesMusique, "notes_musique_format": formatMusique(m.NotesMusiqueFormat), "notes_services": nettoyerServicesNotes(m.NotesServices),
 		"ordre_services": nettoyerOrdreServices(m.OrdreServices), "personnes": nettoyerPersonnes(m.Personnes), "personnes_refus": nettoyerRefus(m.PersonnesRefus),
-		"contacts_perso": nettoyerContactsPerso(m.ContactsPerso), "version": m.Version,
+		"contacts_perso": nettoyerContactsPerso(m.ContactsPerso), "stories": m.Stories,
+		"stories_ouvertes": nettoyerStoriesOuvertes(m.StoriesOuvertes), "version": m.Version,
 	}
 	if len(id) > 0 {
 		corps["id"] = id
@@ -445,6 +456,8 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		Pers     json.RawMessage    `json:"personnes"`
 		PersR    json.RawMessage    `json:"personnes_refus"`
 		Perso    json.RawMessage    `json:"contacts_perso"`
+		Stories  *bool              `json:"stories"`
+		StoriesO json.RawMessage    `json:"stories_ouvertes"`
 		Version  int64              `json:"version"`
 		ID       json.RawMessage    `json:"id"`
 	}
@@ -535,6 +548,15 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	if m, ok := lireContactsPerso(d.Perso); ok {
 		nouv.ContactsPerso = m
 	}
+	// Les stories : absent, rien ne change. Les stories ouvertes s'unissent
+	// toujours (l'heure la plus récente gagne) : rien n'est jamais retiré par
+	// un client, seulement par la purge.
+	if d.Stories != nil {
+		nouv.Stories = *d.Stories
+	}
+	if m, ok := lireStoriesOuvertes(d.StoriesO); ok {
+		nouv.StoriesOuvertes = unirStoriesOuvertes(m, cur.StoriesOuvertes)
+	}
 	repondre := func(m Marques, refus string) {
 		select {
 		case c.evs <- trameMarques(m, d.ID, refus):
@@ -602,13 +624,16 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		return
 	}
 	s.marques = nouv
-	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, groupes_auto %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s, notes_contacts %v, notes_services %v, ordre_services %v, personnes %d, refus %d, contacts perso %d",
-		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), len(nouv.GroupesAuto), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation, nouv.NotesContacts, nouv.NotesServices, nouv.OrdreServices, len(nouv.Personnes), len(nouv.PersonnesRefus), len(nouv.ContactsPerso))
+	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, groupes_auto %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s, notes_contacts %v, notes_services %v, ordre_services %v, personnes %d, refus %d, contacts perso %d, stories %v (ouvertes %d)",
+		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), len(nouv.GroupesAuto), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation, nouv.NotesContacts, nouv.NotesServices, nouv.OrdreServices, len(nouv.Personnes), len(nouv.PersonnesRefus), len(nouv.ContactsPerso), nouv.Stories, len(nouv.StoriesOuvertes))
 	if nouv.PresenceEnLigne != cur.PresenceEnLigne {
 		s.presenceChangee(nouv.PresenceEnLigne)
 	}
 	if nouv.NotesContacts != cur.NotesContacts {
 		s.notesContactsChange(nouv.NotesContacts)
+	}
+	if nouv.Stories != cur.Stories {
+		s.storiesChange(nouv.Stories)
 	}
 	if !egalesContactsPerso(nouv.ContactsPerso, cur.ContactsPerso) {
 		perso := nouv.ContactsPerso

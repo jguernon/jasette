@@ -62,6 +62,10 @@ type Pont struct {
 	// Sous srv.mu : la dernière liste `notes` (notes des contacts, Instagram,
 	// PROTOCOLE.md §5.12), rejouée après la présence.
 	notes []byte
+
+	// Sous srv.mu : la dernière liste `stories` (stories des contacts,
+	// Instagram et Messenger, PROTOCOLE.md §5.15), rejouée après les notes.
+	stories []byte
 }
 
 // demande : des clients attendent la réponse `messages` d'une conversation.
@@ -195,8 +199,9 @@ func (p *Pont) executer() error {
 	p.srv.mu.Lock()
 	presence := p.srv.marques.PresenceEnLigne
 	notes := p.srv.marques.NotesContacts
+	stories := p.srv.marques.Stories
 	p.srv.mu.Unlock()
-	cmd.Env = append(cmd.Env, envPresence(presence), envNotes(notes))
+	cmd.Env = append(cmd.Env, envPresence(presence), envNotes(notes), envStories(stories))
 	entree, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -365,6 +370,13 @@ func (p *Pont) recu(ligne []byte) {
 			return
 		}
 		p.notes = trame
+	case "stories":
+		// Les stories des contacts : seulement si le réglage est activé (un
+		// pont d'avant la commande pourrait encore en envoyer).
+		if !srv.marques.Stories || !lisStories(p.svc) {
+			return
+		}
+		p.stories = trame
 	case "conversation":
 		p.cache.majConv(ligne)
 	case "deleted":
@@ -463,6 +475,7 @@ func (p *Pont) signalerArret() {
 	p.demandes = map[string]demande{}
 	p.presence = map[string][]byte{}
 	p.notes = nil
+	p.stories = nil
 	if p.precharge != "" {
 		p.finPrecharge()
 	}
@@ -492,6 +505,9 @@ func (p *Pont) rejeu() [][]byte {
 	}
 	if p.notes != nil {
 		r = append(r, p.notes)
+	}
+	if p.stories != nil {
+		r = append(r, p.stories)
 	}
 	return r
 }
