@@ -9814,6 +9814,19 @@ impl Jasette {
                     cx.notify();
                 },
             )))
+            // « Classer… » / « Reclasser… » (la modale de src/boite_groupes.rs),
+            // comme au clic droit de la liste ; pas pour ce qui ne se classe pas.
+            .children(self.conv(&id).filter(|c| !self.hors_classement(c)).map(|c| {
+                let texte = if self.groupe_detecte(c).is_some() { t("Reclasser…") } else { t("Classer…") };
+                let id_cl = id.clone();
+                item("menu-classer", "folder-input", texte.into(), th().texte_fort, true).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.menu_conv = false;
+                        this.modale_classer = Some(id_cl.clone());
+                        cx.notify();
+                    },
+                ))
+            }))
             .children(self.item_menu_prive(&id, cx))
             .children(self.item_menu_mood(&id, cx))
             .child(item("menu-rechercher", "search", t("Rechercher").into(), th().texte_fort, true).on_click(cx.listener(
