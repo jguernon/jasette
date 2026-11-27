@@ -1,6 +1,6 @@
 //! Le regroupement automatique dans la boîte de réception, côté interface du
 //! bureau : quelles conversations vont dans quel groupe (la détection est
-//! dans src/groupes_auto.rs), les rangées 🔐 Codes, 🏷️ Promotions et 📦 Avis,
+//! dans src/groupes_auto.rs), les rangées Codes, Promotions et Avis,
 //! la vue d'un groupe ouvert, le menu du clic droit (« Ce n'est pas une
 //! promo », « Mettre dans Codes »…) et la section « Regrouper
 //! automatiquement » des réglages.
@@ -243,17 +243,17 @@ impl Jasette {
         self.marques_changees();
     }
 
-    /// Le grand emoji d'un groupe, à la place de l'avatar.
+    /// Le rond de couleur d'un groupe, avec son icône blanche, à la place de l'avatar.
     pub(crate) fn avatar_groupe(g: Groupe, taille: f32) -> Div {
         div()
             .size(px(taille))
             .flex_none()
             .rounded(rayon(999.))
-            .bg(if th().ega { ega_fond(c(g.fond())) } else { ca(g.fond(), if th().sombre { 0.32 } else { 0.22 }) })
+            .bg(if th().ega { ega_fond(c(g.fond())) } else { c(g.fond()) })
             .flex()
             .items_center()
             .justify_center()
-            .child(avec_repli_emoji(div().text_size(px(taille * echelle_emoji(g))).line_height(px(taille))).child(g.emoji()))
+            .child(icone(g.icone(), (taille * 0.5).round(), blanc(1.)))
     }
 
     /// La rangée d'un groupe dans la boîte.
@@ -378,7 +378,7 @@ impl Jasette {
             .into_any_element()
     }
 
-    /// L'en-tête d'un groupe ouvert : retour, son emoji, son nom, et « Tout
+    /// L'en-tête d'un groupe ouvert : retour, son icône, son nom, et « Tout
     /// marquer comme lu ».
     pub(crate) fn entete_groupe(&self, g: Groupe, non_lus: usize, cx: &mut Context<Self>) -> AnyElement {
         div()
@@ -460,7 +460,7 @@ impl Jasette {
             }));
         for (valeur, texte) in choix {
             let id = m.id.clone();
-            let emoji = ga::lire_correction(valeur).flatten().map_or("↩️", Groupe::emoji);
+            let ic = ga::lire_correction(valeur).flatten();
             menu = menu.child(
                 div()
                     .id(SharedString::from(format!("menu-groupe-{valeur}")))
@@ -482,7 +482,10 @@ impl Jasette {
                         this.menu_groupe = None;
                         cx.notify();
                     }))
-                    .child(avec_repli_emoji(div().text_size(px(16.))).child(emoji))
+                    .child(match ic {
+                        Some(g) => Self::avatar_groupe(g, 22.),
+                        None => div().size(px(22.)).flex_none().flex().items_center().justify_center().child(icone("undo-2", 16., th().texte_pale)),
+                    })
                     .child(texte),
             );
         }
@@ -498,9 +501,9 @@ impl Jasette {
             }
             let actif = self.groupe_actif(g);
             let texte = match g {
-                Groupe::Codes => t("🔐 Codes de vérification"),
-                Groupe::Promos => t("🏷️ Promotions"),
-                Groupe::Avis => t("📦 Avis (livraisons, rendez-vous, banque, factures)"),
+                Groupe::Codes => t("Codes de vérification"),
+                Groupe::Promos => t("Promotions"),
+                Groupe::Avis => t("Avis (livraisons, rendez-vous, banque, factures)"),
             };
             lignes = lignes.child(
                 div()
@@ -524,7 +527,8 @@ impl Jasette {
                         this.reglages.garder();
                         cx.notify();
                     }))
-                    .child(avec_repli_emoji(div().flex_1().text_color(if actif { th().texte_fort } else { th().texte })).child(texte))
+                    .child(Self::avatar_groupe(g, 26.))
+                    .child(div().flex_1().text_color(if actif { th().texte_fort } else { th().texte }).child(texte))
                     .child(
                         div()
                             .size(px(20.))
@@ -550,15 +554,5 @@ impl Jasette {
             .child(div().px(px(4.)).text_size(px(12.)).text_color(th().texte_pale).child(t(
                 "Jasette range les expéditeurs automatiques dans une seule rangée, sur cet appareil, sans rien envoyer ailleurs. Les contacts, les favoris, les épinglées, les groupes et les conversations où vous avez écrit ne sont jamais regroupés.",
             )))
-    }
-}
-
-/// La taille d'un emoji de groupe, en part de l'avatar. Les glyphes de Noto
-/// Color Emoji n'ont pas les mêmes marges : le cadenas 🔐 remplit presque tout
-/// son carré, le colis et les étiquettes beaucoup moins. On les égalise à l'œil.
-fn echelle_emoji(g: Groupe) -> f32 {
-    match g {
-        Groupe::Codes => 0.52,
-        Groupe::Promos | Groupe::Avis => 0.62,
     }
 }

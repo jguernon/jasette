@@ -733,9 +733,8 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Regrouper automatiquement" to "Group automatically",
     "Jasette range les expéditeurs automatiques dans une seule rangée, sur cet appareil, sans rien envoyer ailleurs. Les contacts, les favoris, les épinglées, les groupes et les conversations où vous avez écrit ne sont jamais regroupés." to
         "Jasette puts automated senders into a single row, on this device, without sending anything anywhere. Contacts, favorites, pinned conversations, groups and conversations you wrote in are never grouped.",
-    "🔐 Codes de vérification" to "🔐 Verification codes",
-    "🏷️ Promotions" to "🏷️ Promotions",
-    "📦 Avis (livraisons, rendez-vous, banque, factures)" to "📦 Notices (deliveries, appointments, bank, bills)",
+    "Codes de vérification" to "Verification codes",
+    "Avis (livraisons, rendez-vous, banque, factures)" to "Notices (deliveries, appointments, bank, bills)",
     "Codes" to "Codes",
     "Promotions" to "Promotions",
     "Avis" to "Notices",

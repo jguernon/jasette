@@ -23,10 +23,11 @@ package ca.jasette.android
 // La correction à la main (marque `groupes_auto`) gagne toujours ([groupeFinal]).
 
 /** Un groupe de la boîte. */
-enum class GroupeAuto(val cle: String, val emoji: String, val fond: Long) {
-    CODES("codes", "🔐", 0x7c6cf0),
-    PROMOS("promos", "🏷️", 0xf0806c),
-    AVIS("avis", "📦", 0xd9a441);
+/** `fond` et `fondEga` : la couleur de son rond, comme les tuiles des Réglages. */
+enum class GroupeAuto(val cle: String, val fond: Long, val fondEga: Long) {
+    CODES("codes", 0x8b5cf6, 0xaa00aa),
+    PROMOS("promos", 0xec4899, 0xaa0000),
+    AVIS("avis", 0xf59e0b, 0xaa5500);
 
     /** Le titre de sa rangée (à traduire par t()). */
     val titre: String get() = when (this) {

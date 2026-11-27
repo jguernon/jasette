@@ -445,9 +445,9 @@ private fun RegrouperAutomatiquement() {
     Titre(t("Regrouper automatiquement"))
     Groupe {
         for ((g, texte) in listOf(
-            ca.jasette.android.GroupeAuto.CODES to t("🔐 Codes de vérification"),
-            ca.jasette.android.GroupeAuto.PROMOS to t("🏷️ Promotions"),
-            ca.jasette.android.GroupeAuto.AVIS to t("📦 Avis (livraisons, rendez-vous, banque, factures)"),
+            ca.jasette.android.GroupeAuto.CODES to t("Codes de vérification"),
+            ca.jasette.android.GroupeAuto.PROMOS to t("Promotions"),
+            ca.jasette.android.GroupeAuto.AVIS to t("Avis (livraisons, rendez-vous, banque, factures)"),
         )) {
             val coche = ca.jasette.android.RegroupementAuto.actif(g)
             Row(
@@ -455,6 +455,8 @@ private fun RegrouperAutomatiquement() {
                     .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                AvatarGroupe(g, 28.dp)
+                Spacer(Modifier.width(12.dp))
                 Text(texte, color = P.texteFort, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 androidx.compose.material3.Checkbox(
                     checked = coche,

@@ -42,6 +42,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
@@ -691,10 +692,13 @@ fun MenuConversation(
         if (ca.jasette.android.RegroupementAuto.unActif && !c.group && !c.large) {
             val actuel = ca.jasette.android.RegroupementAuto.groupeActif(c)
             @Composable
-            fun ItemGroupe(texte: String, emoji: String, valeur: String) {
+            fun ItemGroupe(texte: String, g: ca.jasette.android.GroupeAuto?, valeur: String) {
                 DropdownMenuItem(
                     text = { Text(texte, color = P.texteFort) },
-                    leadingIcon = { Text(emoji, fontSize = 18.sp) },
+                    leadingIcon = {
+                        if (g != null) AvatarGroupe(g, 24.dp)
+                        else Icon(Icons.Filled.Clear, null, tint = P.textePale, modifier = Modifier.size(20.dp))
+                    },
                     onClick = {
                         fermer()
                         Marques.corrigerGroupe(c.id, valeur)
@@ -708,7 +712,7 @@ fun MenuConversation(
                     ca.jasette.android.GroupeAuto.PROMOS -> t("Ce n'est pas une promo")
                     ca.jasette.android.GroupeAuto.AVIS -> t("Ce n'est pas un avis")
                 }
-                ItemGroupe(pas, "✋", "aucun")
+                ItemGroupe(pas, null, "aucun")
             }
             for (g in ca.jasette.android.GroupeAuto.entries) {
                 if (g == actuel) continue
@@ -717,7 +721,7 @@ fun MenuConversation(
                     ca.jasette.android.GroupeAuto.PROMOS -> t("Mettre dans Promotions")
                     ca.jasette.android.GroupeAuto.AVIS -> t("Mettre dans Avis")
                 }
-                ItemGroupe(texte, g.emoji, g.cle)
+                ItemGroupe(texte, g, g.cle)
             }
         }
         HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = P.traitFin)

@@ -49,21 +49,21 @@ impl Groupe {
         }
     }
 
-    /// Le grand emoji de sa rangée.
-    pub fn emoji(self) -> &'static str {
+    /// Son icône Lucide, blanche sur sa couleur, comme les tuiles des Réglages.
+    pub fn icone(self) -> &'static str {
         match self {
-            Groupe::Codes => "🔐",
-            Groupe::Promos => "🏷️",
-            Groupe::Avis => "📦",
+            Groupe::Codes => "key-round",
+            Groupe::Promos => "tag",
+            Groupe::Avis => "package",
         }
     }
 
-    /// Le fond doux de son avatar (RVB).
+    /// La couleur de son rond (RVB), prise dans la palette des Réglages.
     pub fn fond(self) -> u32 {
         match self {
-            Groupe::Codes => 0x7c6cf0,
-            Groupe::Promos => 0xf0806c,
-            Groupe::Avis => 0xd9a441,
+            Groupe::Codes => 0x8b5cf6,
+            Groupe::Promos => 0xec4899,
+            Groupe::Avis => 0xf59e0b,
         }
     }
 }

@@ -44,17 +44,21 @@ import ca.jasette.android.dernierCode
 import ca.jasette.android.nomAffiche
 import ca.jasette.android.t
 
-/** Le grand emoji d'un groupe, en guise d'avatar : la taille de l'avatar normal, sur un fond doux. */
+/** L'icône d'un groupe (glyphe Material, comme les tuiles des Réglages). */
+fun iconeGroupe(g: GroupeAuto): androidx.compose.ui.graphics.vector.ImageVector = when (g) {
+    GroupeAuto.CODES -> Icones.cle
+    GroupeAuto.PROMOS -> Icones.etiquette
+    GroupeAuto.AVIS -> Icones.colis
+}
+
+/** L'avatar d'un groupe : un rond de sa couleur, avec son icône blanche. */
 @Composable
 fun AvatarGroupe(g: GroupeAuto, taille: Dp) {
-    val fond = Color(0xFF000000L or g.fond)
     Box(
-        Modifier.size(taille).clip(formeRonde).background(fond.copy(alpha = if (P.clair) 0.20f else 0.32f)),
+        Modifier.size(taille).clip(formeRonde).background(Color(0xFF000000L or if (P.ega) g.fondEga else g.fond)),
         contentAlignment = Alignment.Center,
     ) {
-        // L'emoji occupe ~60 % du rond.
-        val px = with(LocalDensity.current) { (taille * echelleEmoji(g)).toSp() }
-        Text(g.emoji, fontSize = px, lineHeight = px)
+        Icon(iconeGroupe(g), null, tint = Color.White, modifier = Modifier.size(taille * 0.52f))
     }
 }
 
@@ -159,22 +163,14 @@ fun EnteteGroupe(g: GroupeAuto, membres: List<Conv>, fermer: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = fermer) { Icon(Icons.AutoMirrored.Filled.ArrowBack, t("Retour"), tint = P.texteFort) }
+        AvatarGroupe(g, 30.dp)
+        Spacer(Modifier.width(10.dp))
         Text(
-            "${g.emoji} ${t(g.titre)}", color = P.texteFort, fontWeight = FontWeight.Bold, fontSize = 18.sp,
+            t(g.titre), color = P.texteFort, fontWeight = FontWeight.Bold, fontSize = 18.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
         )
         TextButton(onClick = { Depot.marquerTousLus(nonLues) }, enabled = nonLues.isNotEmpty(), shape = formeBouton) {
             Text(t("Tout marquer comme lu"), color = if (nonLues.isNotEmpty()) P.accent else P.textePale)
         }
     }
-}
-
-/**
- * La taille d'un emoji de groupe, en part de l'avatar. Les glyphes de la police
- * d'emoji n'ont pas les mêmes marges : le cadenas 🔐 remplit presque tout son
- * carré, le colis et les étiquettes beaucoup moins. On les égalise à l'œil.
- */
-private fun echelleEmoji(g: GroupeAuto): Float = when (g) {
-    GroupeAuto.CODES -> 0.5f
-    else -> 0.6f
 }
