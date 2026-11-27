@@ -556,7 +556,12 @@ fun Rangee(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Le logo du service toujours en pastille sur une conversation absente.
-            Avatar(c, 52.dp, badge = badge || absente != null, grise = absente.grise(), presence = true)
+            // Un expéditeur automatique (Codes, Promotions, Avis) : l'icône de son groupe,
+            // regroupement activé ou non (RegroupementAuto.groupe).
+            Avatar(
+                c, 52.dp, badge = badge || absente != null, grise = absente.grise(), presence = true,
+                groupeAuto = ca.jasette.android.RegroupementAuto.groupe(c),
+            )
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -688,9 +693,10 @@ fun MenuConversation(
             )
         }
         // Le regroupement automatique (RegroupementAuto.kt), corrigé à la main : la
-        // correction gagne toujours et est partagée (marque `groupes_auto`).
-        if (ca.jasette.android.RegroupementAuto.unActif && !c.group && !c.large) {
-            val actuel = ca.jasette.android.RegroupementAuto.groupeActif(c)
+        // correction gagne toujours et est partagée (marque `groupes_auto`). Offert
+        // aussi sans regroupement : l'avatar montre le groupe dans tous les cas.
+        if (!ca.jasette.android.RegroupementAuto.horsClassement(c)) {
+            val actuel = ca.jasette.android.RegroupementAuto.groupe(c)
             @Composable
             fun ItemGroupe(texte: String, g: ca.jasette.android.GroupeAuto?, valeur: String) {
                 DropdownMenuItem(

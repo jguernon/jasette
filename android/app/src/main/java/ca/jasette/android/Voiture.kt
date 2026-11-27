@@ -79,8 +79,12 @@ object ConvVoiture {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap?>?) = size > 60
     }
 
-    /** L'avatar rond, comme dans les notifications : photo du contact, du service, ou mosaïque du groupe. */
+    /**
+     * L'avatar rond, comme dans les notifications : l'icône du groupe d'un
+     * expéditeur automatique, sinon la photo du contact, du service, ou la mosaïque du groupe.
+     */
     fun image(ctx: Context, c: Conv): Bitmap? {
+        RegroupementAuto.groupe(c)?.let { return imageGroupe(it, ca.jasette.android.ui.P.ega) }
         val photo = photoPerso(c) ?: Contacts.photoPour(c, grande = true) ?: Depot.avatarDe(c)
         val cle = "${c.id}|$photo"
         synchronized(images) { if (images.containsKey(cle)) return images[cle] }

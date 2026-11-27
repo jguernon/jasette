@@ -1023,7 +1023,7 @@ private fun Suggestion(
         if (image != null) {
             image()
         } else if (conv != null) {
-            Avatar(conv, 42.dp)
+            Avatar(conv, 42.dp, groupeAuto = ca.jasette.android.RegroupementAuto.groupe(conv))
         } else {
             androidx.compose.foundation.Image(
                 androidx.compose.ui.res.painterResource(iconeService(s)), null,

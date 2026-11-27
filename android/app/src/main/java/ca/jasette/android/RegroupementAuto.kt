@@ -91,12 +91,24 @@ object RegroupementAuto {
         )
     }
 
-    /** Son groupe : la correction à la main, sinon la détection (case cochée ou non). */
-    fun groupe(c: Conv): GroupeAuto? = groupeFinal(Marques.groupeAuto(c.id), classer(entree(c)))
+    /** Jamais classée, même corrigée à la main : groupe, grand espace, favori, Head, épinglée, privée. */
+    fun horsClassement(c: Conv): Boolean =
+        c.group || c.large || Marques.estFavori(c.id) || Marques.estDansHead(c.id) || Marques.estEpinglee(c.id) ||
+            Marques.estPrivee(c.id)
+
+    /**
+     * Son groupe, case cochée ou non : la correction à la main, sinon la
+     * détection (qui laisse aussi de côté les contacts et les conversations où
+     * j'ai écrit). Sert aussi à l'avatar (la liste, les notifications, Android
+     * Auto) : un expéditeur automatique montre l'icône de son groupe même sans
+     * regroupement.
+     */
+    fun groupe(c: Conv): GroupeAuto? =
+        if (horsClassement(c)) null else groupeFinal(Marques.groupeAuto(c.id), classer(entree(c)))
 
     /** Son groupe si sa case est cochée (sinon null : elle reste dans la boîte). */
     fun groupeActif(c: Conv): GroupeAuto? {
-        if (!unActif || c.large || Marques.estPrivee(c.id)) return null
+        if (!unActif) return null
         return groupe(c)?.takeIf { actif(it) }
     }
 

@@ -202,6 +202,39 @@ object Raccourcis {
     }
 }
 
+/** Les avatars des groupes automatiques déjà dessinés, par (groupe, EGA). */
+private val imagesGroupes = HashMap<Pair<GroupeAuto, Boolean>, Bitmap>()
+
+/**
+ * L'avatar d'un groupe automatique en image ([cote] px), pour les
+ * notifications et Android Auto : le rond de sa couleur ([GroupeAuto.fondEga]
+ * en EGA) et son icône blanche, comme [ca.jasette.android.ui.AvatarGroupe].
+ */
+fun imageGroupe(g: GroupeAuto, ega: Boolean, cote: Int = 256): Bitmap = synchronized(imagesGroupes) {
+    imagesGroupes.getOrPut(g to ega) {
+        val bmp = Bitmap.createBitmap(cote, cote, Bitmap.Config.ARGB_8888)
+        val toile = Canvas(bmp)
+        val fond = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = (0xFF000000L or if (ega) g.fondEga else g.fond).toInt() }
+        toile.drawCircle(cote / 2f, cote / 2f, cote / 2f, fond)
+        val chemin = when (g) {
+            GroupeAuto.CODES -> ca.jasette.android.ui.Icones.CHEMIN_CLE
+            GroupeAuto.PROMOS -> ca.jasette.android.ui.Icones.CHEMIN_ETIQUETTE
+            GroupeAuto.AVIS -> ca.jasette.android.ui.Icones.CHEMIN_COLIS
+        }
+        // L'icône (24 × 24) à 52 % du rond, centrée.
+        val icone = cote * 0.52f
+        val trace = androidx.core.graphics.PathParser.createPathFromPathData(chemin)
+        trace.transform(
+            android.graphics.Matrix().apply {
+                setScale(icone / 24f, icone / 24f)
+                postTranslate((cote - icone) / 2f, (cote - icone) / 2f)
+            },
+        )
+        toile.drawPath(trace, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt() })
+        bmp
+    }
+}
+
 /** Découpe une image carrée en rond, comme les avatars de l'app (le reste transparent). */
 private fun rond(src: Bitmap): Bitmap {
     val cote = src.width

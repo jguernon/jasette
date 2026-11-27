@@ -86,9 +86,14 @@ private fun initiales(nom: String): String? {
  * actif (voir [ca.jasette.android.Contacts.photoPour]) ; la grande photo pour les gros avatars.
  * Sans photo du service, celle gardée par [ca.jasette.android.CacheMarques] (conversation marquée).
  * [grise] : la conversation n'est pas chargée (service absent) ; le logo du service reste en couleur.
+ * [groupeAuto] : un expéditeur automatique (RegroupementAuto.groupe) montre l'icône de son
+ * groupe à la place de sa photo ; le logo du service et le point « en ligne » restent.
  */
 @Composable
-fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false, presence: Boolean = false, fondPoint: Color = P.fond, propre: Boolean = false) {
+fun Avatar(
+    conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false, presence: Boolean = false, fondPoint: Color = P.fond,
+    propre: Boolean = false, groupeAuto: ca.jasette.android.GroupeAuto? = null,
+) {
     // La photo de la principale de sa personne (fiche), sinon la sienne ; [propre] : la sienne seulement.
     // Un groupe sans image propre : la mosaïque de ses membres (`avatars_groupe`), avant
     // la photo gardée pour une conversation marquée (une version d'avant y mettait un membre).
@@ -102,7 +107,9 @@ fun Avatar(conv: Conv, taille: Dp, badge: Boolean = true, grise: Boolean = false
     Box(Modifier.size(taille)) {
         // Rond, carré (EGA), cadre vert brillant (Live) ou carré en creux (Sirène).
         val rond = Modifier.cadreAvatar(taille)
-        if (mosaique != null) {
+        if (groupeAuto != null) {
+            AvatarGroupe(groupeAuto, taille)
+        } else if (mosaique != null) {
             Mosaique(mosaique, taille, grise)
         } else if (photo != null) {
             ImageFichier(
@@ -280,15 +287,15 @@ object Icones {
         icone("pin", "M16,9V4l1,0c0.55,0 1,-0.45 1,-1v0c0,-0.55 -0.45,-1 -1,-1H7C6.45,2 6,2.45 6,3v0c0,0.55 0.45,1 1,1l1,0v5c0,1.66 -1.34,3 -3,3v2h5.97v7l1,1l1,-1v-7H19v-2C17.34,12 16,10.66 16,9z")
     }
     // Les groupes automatiques (Material « key », « local_offer », « inventory_2 »).
-    val cle by lazy {
-        icone("key", "M21,10h-8.35C11.83,7.67 9.61,6 7,6c-3.31,0 -6,2.69 -6,6s2.69,6 6,6c2.61,0 4.83,-1.67 5.65,-4H13l2,2l2,-2l2,2l4,-4.04L21,10zM7,15c-1.65,0 -3,-1.35 -3,-3c0,-1.65 1.35,-3 3,-3s3,1.35 3,3C10,13.65 8.65,15 7,15z")
-    }
-    val etiquette by lazy {
-        icone("local_offer", "M21.41,11.58l-9,-9C12.05,2.22 11.55,2 11,2H4c-1.1,0 -2,0.9 -2,2v7c0,0.55 0.22,1.05 0.59,1.42l9,9c0.36,0.36 0.86,0.58 1.41,0.58 0.55,0 1.05,-0.22 1.41,-0.59l7,-7c0.37,-0.36 0.59,-0.86 0.59,-1.41 0,-0.55 -0.23,-1.06 -0.59,-1.42zM5.5,7C4.67,7 4,6.33 4,5.5S4.67,4 5.5,4 7,4.67 7,5.5 6.33,7 5.5,7z")
-    }
-    val colis by lazy {
-        icone("inventory_2", "M20,2H4C3,2 2,2.9 2,4v3.01C2,7.73 2.43,8.35 3,8.7V20c0,1.1 1.1,2 2,2h14c0.9,0 2,-0.9 2,-2V8.7c0.57,-0.35 1,-0.97 1,-1.69V4C22,2.9 21,2 20,2zM15,14H9v-2h6V14zM20,7H4V4l16,0V7z")
-    }
+    val cle by lazy { icone("key", CHEMIN_CLE) }
+    val etiquette by lazy { icone("local_offer", CHEMIN_ETIQUETTE) }
+    val colis by lazy { icone("inventory_2", CHEMIN_COLIS) }
+
+    /** Les tracés des icônes des groupes (24 × 24), dessinés aussi en image (Raccourcis.kt, [ca.jasette.android.imageGroupe]). */
+    const val CHEMIN_CLE = "M21,10h-8.35C11.83,7.67 9.61,6 7,6c-3.31,0 -6,2.69 -6,6s2.69,6 6,6c2.61,0 4.83,-1.67 5.65,-4H13l2,2l2,-2l2,2l4,-4.04L21,10zM7,15c-1.65,0 -3,-1.35 -3,-3c0,-1.65 1.35,-3 3,-3s3,1.35 3,3C10,13.65 8.65,15 7,15z"
+    const val CHEMIN_ETIQUETTE = "M21.41,11.58l-9,-9C12.05,2.22 11.55,2 11,2H4c-1.1,0 -2,0.9 -2,2v7c0,0.55 0.22,1.05 0.59,1.42l9,9c0.36,0.36 0.86,0.58 1.41,0.58 0.55,0 1.05,-0.22 1.41,-0.59l7,-7c0.37,-0.36 0.59,-0.86 0.59,-1.41 0,-0.55 -0.23,-1.06 -0.59,-1.42zM5.5,7C4.67,7 4,6.33 4,5.5S4.67,4 5.5,4 7,4.67 7,5.5 6.33,7 5.5,7z"
+    const val CHEMIN_COLIS = "M20,2H4C3,2 2,2.9 2,4v3.01C2,7.73 2.43,8.35 3,8.7V20c0,1.1 1.1,2 2,2h14c0.9,0 2,-0.9 2,-2V8.7c0.57,-0.35 1,-0.97 1,-1.69V4C22,2.9 21,2 20,2zM15,14H9v-2h6V14zM20,7H4V4l16,0V7z"
+
     // Les tuiles des sections des Réglages (comme les icônes Lucide du bureau).
     val arobase by lazy {
         icone("alternate_email", "M12,1.95c-5.52,0 -10,4.48 -10,10s4.48,10 10,10h5v-2h-5c-4.34,0 -8,-3.66 -8,-8s3.66,-8 8,-8 8,3.66 8,8v1.43c0,0.79 -0.71,1.57 -1.5,1.57s-1.5,-0.78 -1.5,-1.57v-1.43c0,-2.76 -2.24,-5 -5,-5s-5,2.24 -5,5 2.24,5 5,5c1.38,0 2.64,-0.56 3.54,-1.47 0.65,0.89 1.77,1.47 2.96,1.47 1.97,0 3.5,-1.6 3.5,-3.57v-1.43c0,-5.52 -4.48,-10 -10,-10zM12,14.95c-1.66,0 -3,-1.34 -3,-3s1.34,-3 3,-3 3,1.34 3,3 -1.34,3 -3,3z")
