@@ -329,6 +329,7 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Ajouter au Head" to "Add to Head",
     "Ajouter aux favoris" to "Add to favorites",
     "Annuler" to "Cancel",
+    "Redemander la confirmation" to "Ask again",
     "Apparence" to "Appearance",
     "Archiver" to "Archive",
     "Archivée par le service : désarchive-la dans son app." to "Archived by the service: unarchive it in its app.",

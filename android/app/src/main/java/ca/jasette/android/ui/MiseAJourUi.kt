@@ -95,8 +95,16 @@ private fun ContenuMiseAJour(d: VersionDispo, plusTard: Boolean) {
         }
         MiseAJour.Etat.Verification ->
             Text(t("Vérification de l'empreinte SHA-256 et de la signature…"), color = P.textePale, fontSize = 13.sp)
-        MiseAJour.Etat.Installation ->
+        MiseAJour.Etat.Installation -> {
             Text(t("Android demande de confirmer l'installation."), color = P.textePale, fontSize = 13.sp)
+            // La fenêtre d'Android a pu être fermée sans réponse : on la redemande
+            // (l'APK déjà téléchargé et vérifié est réutilisé), ou on abandonne.
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                BoutonAccent(t("Redemander la confirmation")) { MiseAJour.installer(ctx) }
+                TextButton(shape = formeBouton, onClick = { MiseAJour.annulerInstallation() }) { Text(t("Annuler"), color = P.texte) }
+            }
+            return
+        }
         MiseAJour.Etat.Permission -> {
             Text(
                 t("Pour installer la mise à jour, Android doit permettre à Jasette d'installer des apps. Active « Autoriser cette source » pour Jasette, puis reviens ici."),

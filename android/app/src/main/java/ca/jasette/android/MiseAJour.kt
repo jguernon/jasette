@@ -426,6 +426,11 @@ object MiseAJour {
     }
 
     /** Efface le message d'erreur ou « à jour ». */
+    /** La confirmation d'Android a été manquée : retour à « Mettre à jour ». */
+    fun annulerInstallation() {
+        if (etat == Etat.Installation || etat == Etat.Permission) etat = Etat.Repos
+    }
+
     fun effacerMessage() {
         if (etat is Etat.Erreur || etat == Etat.AJour) etat = Etat.Repos
     }
