@@ -8689,7 +8689,9 @@ impl Jasette {
             boite = boite.child(bouton);
         }
         // La barre des réactions rapides, au-dessus de la bulle, par-dessus tout le reste.
-        if self.barre_reactions.as_deref() == Some(m.id.as_str()) {
+        // La barre est différée (peinte après tout le reste) : cachée tant
+        // qu'une fiche ou une modale est ouverte, sinon elle passe par-dessus.
+        if self.barre_reactions.as_deref() == Some(m.id.as_str()) && !self.superposition_ouverte() {
             let mienne = m.reactions.iter().find(|r| r.from_me).map(|r| r.emoji.clone());
             let mut barre = div()
                 .flex()
@@ -8801,6 +8803,16 @@ impl Jasette {
             ));
         }
         boite.into_any_element()
+    }
+
+    /// Une fiche ou une fenêtre modale couvre-t-elle le fil ?
+    fn superposition_ouverte(&self) -> bool {
+        self.fiche.is_some()
+            || self.modale_services
+            || self.modale_classer.is_some()
+            || self.modale_sourdine.is_some()
+            || self.mood_feuille.is_some()
+            || self.apercu.is_some()
     }
 
     /// La pastille des réactions : emojis groupés et leur nombre, à moitié
