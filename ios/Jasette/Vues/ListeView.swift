@@ -121,7 +121,7 @@ struct ListeView: View {
         } else {
             List(l) { c in
                 NavigationLink(value: c.id) {
-                    LigneConv(conv: c, epinglee: depot.estEpinglee(c.id))
+                    LigneConv(conv: c, epinglee: depot.estEpinglee(c.id), sourdine: depot.estEnSourdine(c.id))
                 }
                 .listRowBackground(Theme.liste)
                 .listRowInsets(EdgeInsets(top: 8, leading: 14, bottom: 8, trailing: 14))
@@ -151,6 +151,7 @@ struct ListeView: View {
 struct LigneConv: View {
     let conv: Conv
     let epinglee: Bool
+    var sourdine = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -162,6 +163,9 @@ struct LigneConv: View {
                         .foregroundStyle(Theme.texteFort)
                         .lineLimit(1)
                     Spacer(minLength: 6)
+                    if sourdine {
+                        Image(systemName: "bell.slash.fill").font(.caption2).foregroundStyle(Theme.textePale)
+                    }
                     if epinglee {
                         Image(systemName: "pin.fill").font(.caption2).foregroundStyle(Theme.textePale)
                     }

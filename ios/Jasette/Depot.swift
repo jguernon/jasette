@@ -48,6 +48,9 @@ final class Depot {
     private(set) var privees: Set<String> = []
     private(set) var cacherApresJours = 0
     private(set) var ordreServices: [String] = []
+    /// La sourdine (marque `sourdine`) : id → échéance (ms), 0 = sans fin.
+    /// iOS n'a pas de notifications : seule la cloche barrée se montre.
+    private(set) var sourdine: [String: Int64] = [:]
     private(set) var marquesRecues = false
 
     /// La conversation ouverte et l'app au premier plan.
@@ -90,6 +93,7 @@ final class Depot {
         epingles = []
         archivesJasette = []
         privees = []
+        sourdine = [:]
         marquesRecues = false
         ouverte = nil
     }
@@ -149,6 +153,11 @@ final class Depot {
         privees = Set(m.chaines("privees"))
         cacherApresJours = Int(m.entier("cacher_apres_jours"))
         ordreServices = m.chaines("ordre_services")
+        var s: [String: Int64] = [:]
+        for (id, v) in m.objet("sourdine") ?? [:] {
+            if let n = v as? NSNumber { s[id] = n.int64Value }
+        }
+        sourdine = s
         marquesRecues = true
     }
 
@@ -337,6 +346,12 @@ final class Depot {
     }
 
     func estEpinglee(_ id: String) -> Bool { epingles.contains(id) }
+
+    /// En sourdine maintenant (une échéance passée ne compte plus).
+    func estEnSourdine(_ id: String) -> Bool {
+        guard let t = sourdine[id] else { return false }
+        return t == 0 || t > Int64(Date().timeIntervalSince1970 * 1000)
+    }
 
     func conv(_ id: String) -> Conv? { convs[Service.de(id)]?.first { $0.id == id } }
 
