@@ -31,6 +31,7 @@ mod personne;
 mod selection;
 mod codes;
 mod groupes_auto;
+mod boite_groupes;
 mod ponts_langue;
 
 use std::borrow::Cow;
@@ -1684,6 +1685,15 @@ struct Reglages {
     /// serveur Jasette s'il y en a un (marque `emojis`). Aucun par défaut.
     #[serde(default)]
     emojis: std::collections::BTreeMap<String, String>,
+    /// La correction à la main du regroupement automatique (id → "codes",
+    /// "promos", "avis" ou "aucun", src/groupes_auto.rs) : gardée ici, et
+    /// partagée par le serveur Jasette s'il y en a un (marque `groupes_auto`).
+    #[serde(default)]
+    groupes_auto: std::collections::BTreeMap<String, String>,
+    /// « Regrouper automatiquement » : les groupes actifs sur cet appareil
+    /// (clés "codes", "promos", "avis"). Aucun par défaut.
+    #[serde(default)]
+    groupes_actifs: Vec<String>,
     /// « Garder les conversations archivées hors de la boîte de réception » :
     /// un message reçu ne désarchive plus. Gardé ici, et partagé par le
     /// serveur Jasette s'il y en a un (marque `garder_archives`). Faux par défaut.
@@ -1907,6 +1917,8 @@ impl Default for Reglages {
             groupes_replies: Vec::new(),
             moods: Default::default(),
             emojis: Default::default(),
+            groupes_auto: Default::default(),
+            groupes_actifs: Vec::new(),
             garder_archives: false,
             cacher_apres_jours: 0,
             presence_en_ligne: true,
@@ -2033,6 +2045,7 @@ impl Reglages {
                     privees: self.privees.clone(),
                     moods: self.moods.clone(),
                     emojis: self.emojis.clone(),
+                    groupes_auto: self.groupes_auto.clone(),
                     garder_archives: self.garder_archives,
                     cacher_apres_jours: self.cacher_apres_jours,
                     presence_cachee: !self.presence_en_ligne,
@@ -2061,6 +2074,7 @@ impl Reglages {
         self.privees = b.copie.listes.privees;
         self.moods = b.copie.listes.moods;
         self.emojis = b.copie.listes.emojis;
+        self.groupes_auto = b.copie.listes.groupes_auto;
         self.garder_archives = b.copie.listes.garder_archives;
         self.cacher_apres_jours = b.copie.listes.cacher_apres_jours;
         self.presence_en_ligne = !b.copie.listes.presence_cachee;
@@ -2402,6 +2416,15 @@ struct Jasette {
     haut_rail: Rc<std::cell::Cell<f32>>,
     /// La modale de tous les services (le « ••• » du rail, en débordement).
     modale_services: bool,
+    /// Le regroupement automatique (src/boite_groupes.rs) : la détection
+    /// gardée par conversation, le groupe ouvert dans la boîte, et le menu du
+    /// clic droit sur une conversation.
+    cache_groupes: boite_groupes::CacheDetection,
+    groupe_ouvert: Option<groupes_auto::Groupe>,
+    menu_groupe: Option<boite_groupes::MenuGroupe>,
+    /// La rangée Codes est en haut (dernier dessin), et quand on l'a revue.
+    codes_en_haut: std::cell::Cell<bool>,
+    codes_verifies: Instant,
     /// La vue Favoris en mode « réorganiser » (flèches sur chaque rangée).
     reorganiser: bool,
     /// Live et Sirène : les groupes « En ligne » et « Hors ligne » repliés.
@@ -3237,6 +3260,12 @@ impl Jasette {
                             change = true;
                         }
                         change |= this.suivre_services();
+                        // La rangée Codes en haut redescend 15 minutes après le
+                        // dernier code : redessinée toutes les 30 secondes d'ici là.
+                        if this.codes_en_haut.get() && this.codes_verifies.elapsed() >= Duration::from_secs(30) {
+                            this.codes_verifies = Instant::now();
+                            change = true;
+                        }
                         // Les photos des contacts du téléphone : une fois Google prêt, puis toutes les 30 minutes.
                         if this.etat == Etat::Pret
                             && this.reglages.photos_contacts
@@ -3422,6 +3451,11 @@ impl Jasette {
             menu_rail: None,
             haut_rail: Rc::new(std::cell::Cell::new(0.)),
             modale_services: false,
+            cache_groupes: Default::default(),
+            groupe_ouvert: None,
+            menu_groupe: None,
+            codes_en_haut: Default::default(),
+            codes_verifies: Instant::now(),
             reorganiser: false,
             retro_replie: [false; 2],
             confirmer_suppression: false,
@@ -4244,6 +4278,8 @@ impl Jasette {
                     && !self.privee(&c.id)
                     && !self.reglages.service_cache(service_de(&c.id))
                     && !self.hors_boite(c)
+                    // Les Promotions (regroupement automatique) ne comptent pas.
+                    && !self.en_promotions(c)
             })
             .count()
     }
@@ -4293,7 +4329,12 @@ impl Jasette {
         self.convs
             .iter()
             .filter(|c| {
-                c.unread && service_de(&c.id) == s && !self.reglages.archivee_jasette(&c.id) && !self.privee(&c.id) && !self.hors_boite(c)
+                c.unread
+                    && service_de(&c.id) == s
+                    && !self.reglages.archivee_jasette(&c.id)
+                    && !self.privee(&c.id)
+                    && !self.hors_boite(c)
+                    && !self.en_promotions(c)
             })
             .count()
     }
@@ -4539,6 +4580,10 @@ impl Jasette {
         // Un grand espace (onglet Canaux) ne notifie jamais, même une mention
         // ou une réponse à moi : la pastille « @ » de l'onglet suffit.
         if conv.is_some_and(|c| self.hors_boite(c)) {
+            return;
+        }
+        // Les Promotions (regroupement automatique) ne notifient jamais.
+        if conv.is_some_and(|c| self.en_promotions(c)) {
             return;
         }
         let nom = conv.map(|c| self.nom_affiche(c)).unwrap_or_else(|| "Jasette".into());
@@ -6178,6 +6223,8 @@ impl Jasette {
                         this.section = None;
                         this.galerie = None;
                         this.vue = Vue::Tout;
+                        // Un groupe ouvert (regroupement automatique) se referme.
+                        this.groupe_ouvert = None;
                         cx.notify();
                     }))
                     .child(icone("inbox", 22., th().texte_fort))
@@ -7008,7 +7055,26 @@ impl Jasette {
             visibles.sort_by_key(|c| ordre(c));
         }
         let reorganiser = self.vue == Vue::Favoris && self.reorganiser;
-        let nb_epingles = visibles.iter().filter(|c| rang(c) != usize::MAX).count();
+        let mut nb_epingles = visibles.iter().filter(|c| rang(c) != usize::MAX).count();
+        // Le regroupement automatique (src/boite_groupes.rs) : un groupe ouvert
+        // ne montre que ses conversations ; sinon chacun est une rangée.
+        let aucune = visibles.is_empty();
+        let regroupe = self.regroupe_ici();
+        let ouvert = self.groupe_ouvert.filter(|_| regroupe);
+        let (rangees, membres) = if let Some(g) = ouvert {
+            let l: Vec<&Conv> = visibles.into_iter().filter(|c| self.groupe_de(c) == Some(g)).collect();
+            nb_epingles = 0;
+            let non_lus = l.iter().filter(|c| c.unread).count();
+            col = col.child(self.entete_groupe(g, non_lus, cx));
+            if l.is_empty() {
+                col = col.child(div().p(px(16.)).text_color(th().texte_pale).child(t("Aucune conversation dans ce groupe")));
+            }
+            (l.into_iter().map(boite_groupes::Rangee::Conv).collect(), Vec::new())
+        } else if regroupe {
+            self.rangees(visibles, nb_epingles)
+        } else {
+            (visibles.into_iter().map(boite_groupes::Rangee::Conv).collect::<Vec<_>>(), Vec::new())
+        };
         if source.is_empty() {
             let t = if self.vue == Vue::Archives && !self.archives_chargees {
                 t("Chargement des archives…")
@@ -7020,14 +7086,21 @@ impl Jasette {
                 t("Chargement des conversations…")
             };
             col = col.child(div().p(px(16.)).text_color(th().texte_pale).child(t));
-        } else if visibles.is_empty() && self.vue == Vue::Favoris && self.filtre.is_empty() {
+        } else if aucune && self.vue == Vue::Favoris && self.filtre.is_empty() {
             col = col.child(
                 div().p(px(16.)).text_color(th().texte_pale).child(t("Aucun favori : ajoutez-en par le menu « … » d'une conversation.")),
             );
-        } else if visibles.is_empty() && self.resultats_msgs.is_empty() && cachees == 0 {
+        } else if aucune && self.resultats_msgs.is_empty() && cachees == 0 {
             col = col.child(div().p(px(16.)).text_color(th().texte_pale).child(t("Aucun résultat")));
         }
         if retro::retro() && !reorganiser {
+            let visibles: Vec<&Conv> = rangees
+                .into_iter()
+                .filter_map(|r| match r {
+                    boite_groupes::Rangee::Conv(c) => Some(c),
+                    boite_groupes::Rangee::Groupe(_) => None,
+                })
+                .collect();
             col = self.lignes_retro(col.pt(px(4.)).px(px(6.)), visibles, badge, cx);
             if cachees > 0 {
                 col = col.child(Self::ligne_anciennes(cachees, cx));
@@ -7037,12 +7110,20 @@ impl Jasette {
             }
             return col;
         }
-        let n = visibles.len();
-        for (i, conv) in visibles.into_iter().enumerate() {
+        let n = rangees.len();
+        for (i, rangee) in rangees.into_iter().enumerate() {
             // Un peu d'air sous les épinglées.
             if nb_epingles > 0 && i == nb_epingles {
                 col = col.child(div().h(px(1.)).mx(px(10.)).my(px(8.)).bg(th().survol));
             }
+            let conv = match rangee {
+                boite_groupes::Rangee::Conv(c) => c,
+                boite_groupes::Rangee::Groupe(g) => {
+                    let l = membres.iter().find(|(x, _)| *x == g).map(|(_, l)| l.as_slice()).unwrap_or(&[]);
+                    col = col.child(self.rangee_groupe(g, l, i + 1 == n, cx));
+                    continue;
+                }
+            };
             let epinglee = i < nb_epingles;
             let choisie = self.choisie.as_deref() == Some(conv.id.as_str());
             let id = conv.id.clone();
@@ -7070,6 +7151,18 @@ impl Jasette {
                         this.choisir(id.clone());
                         cx.notify();
                     }))
+                    // Le clic droit : corriger le regroupement automatique.
+                    .when(self.regroupement_actif() && !conv.group && !conv.large, |d| {
+                        let id = conv.id.clone();
+                        d.on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |this, ev: &gpui::MouseDownEvent, _, cx| {
+                                cx.stop_propagation();
+                                this.menu_groupe = Some(boite_groupes::MenuGroupe { id: id.clone(), pos: ev.position });
+                                cx.notify();
+                            }),
+                        )
+                    })
                     .child(
                         div()
                             .relative()
@@ -7183,7 +7276,7 @@ impl Jasette {
         if !self.filtre.is_empty() {
             col = self.resultats_messages(col, cx);
         }
-        col
+        col.children(self.menu_groupe_vue(cx))
     }
 
     /// Sous la boîte de réception : « N conversations plus anciennes cachées ·
@@ -10738,6 +10831,7 @@ impl Jasette {
                     .child(div().mt(px(14.)).child(lignes))
                 })
                 .child(self.boite_services(cx))
+                .child(self.regrouper_reglages(cx))
                 .into_any_element();
         }
         let associe = self.etat.associe();
@@ -10837,6 +10931,7 @@ impl Jasette {
                     .child(t("Ajouter un compte")),
             )
             .child(self.boite_services(cx))
+            .child(self.regrouper_reglages(cx))
             .into_any_element()
     }
 
@@ -13725,6 +13820,26 @@ fn t(fr: &'static str) -> &'static str {
         "Montrer dans la boîte de réception" => "Show in the inbox",
         "Cacher de la boîte de réception" => "Hide from the inbox",
         "Dans la boîte de réception" => "In the inbox",
+        // Le regroupement automatique (src/boite_groupes.rs).
+        "Regrouper automatiquement" => "Group automatically",
+        "Jasette range les expéditeurs automatiques dans une seule rangée, sur cet appareil, sans rien envoyer ailleurs. Les contacts, les favoris, les épinglées, les groupes et les conversations où vous avez écrit ne sont jamais regroupés." => {
+            "Jasette puts automated senders into a single row, on this device, without sending anything anywhere. Contacts, favorites, pinned conversations, groups and conversations you wrote in are never grouped."
+        }
+        "🔐 Codes de vérification" => "🔐 Verification codes",
+        "🏷️ Promotions" => "🏷️ Promotions",
+        "📦 Avis (livraisons, rendez-vous, banque, factures)" => "📦 Notices (deliveries, appointments, bank, bills)",
+        "Codes" => "Codes",
+        "Promotions" => "Promotions",
+        "Avis" => "Notices",
+        "nouveau" => "new",
+        "nouveaux" => "new",
+        "Aucune conversation dans ce groupe" => "No conversations in this group",
+        "Ce n'est pas un code" => "Not a code",
+        "Ce n'est pas une promo" => "Not a promotion",
+        "Ce n'est pas un avis" => "Not a notice",
+        "Mettre dans Codes" => "Move to Codes",
+        "Mettre dans Promotions" => "Move to Promotions",
+        "Mettre dans Avis" => "Move to Notices",
         "Les services décochés sont cachés de la boîte de réception, des Head, des favoris et des archives. Rien n'est oublié : recochez-les pour les retrouver. Le clic droit sur l'icône d'un service fait la même chose." => "Unchecked services are hidden from the inbox, the Head, favorites and archives. Nothing is forgotten: check them again to bring them back. Right-clicking a service's icon does the same.",
         "Noms, aperçus, heures et titres des Head un peu plus gros." => "Slightly larger names, previews, times and Head titles.",
         "Texte des messages :" => "Message text:",

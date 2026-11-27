@@ -1337,6 +1337,9 @@ pub struct Marques {
     pub moods: BTreeMap<String, String>,
     /// L'emoji rapide de chaque conversation (id → emoji), PROTOCOLE.md §5.5.
     pub emojis: BTreeMap<String, String>,
+    /// La correction à la main du regroupement automatique (id → "codes",
+    /// "promos", "avis" ou "aucun"), PROTOCOLE.md §5.5 (src/groupes_auto.rs).
+    pub groupes_auto: BTreeMap<String, String>,
     /// « Garder les conversations archivées hors de la boîte de réception » :
     /// un message reçu ne désarchive plus (PROTOCOLE.md §5.5). Faux par défaut.
     pub garder_archives: bool,
@@ -1438,6 +1441,7 @@ impl Marques {
             && self.privees.is_empty()
             && self.moods.is_empty()
             && self.emojis.is_empty()
+            && self.groupes_auto.is_empty()
             && !self.garder_archives
             && self.cacher_apres_jours == 0
             && !self.presence_cachee
@@ -1473,6 +1477,13 @@ impl Marques {
             moods: ensuite.moods.iter().chain(dabord.moods.iter()).map(|(k, v)| (k.clone(), v.clone())).collect(),
             // De même pour les emojis rapides.
             emojis: ensuite.emojis.iter().chain(dabord.emojis.iter()).map(|(k, v)| (k.clone(), v.clone())).collect(),
+            // Et pour les corrections du regroupement automatique.
+            groupes_auto: ensuite
+                .groupes_auto
+                .iter()
+                .chain(dabord.groupes_auto.iter())
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
             // Un oui/non : celui de `dabord`.
             garder_archives: dabord.garder_archives,
             cacher_apres_jours: dabord.cacher_apres_jours,
@@ -1502,6 +1513,12 @@ impl Marques {
             privees: garder(&self.privees, &autre.privees),
             moods: self.moods.iter().filter(|(k, v)| autre.moods.get(*k) != Some(*v)).map(|(k, v)| (k.clone(), v.clone())).collect(),
             emojis: self.emojis.iter().filter(|(k, v)| autre.emojis.get(*k) != Some(*v)).map(|(k, v)| (k.clone(), v.clone())).collect(),
+            groupes_auto: self
+                .groupes_auto
+                .iter()
+                .filter(|(k, v)| autre.groupes_auto.get(*k) != Some(*v))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
             garder_archives: self.garder_archives,
             cacher_apres_jours: self.cacher_apres_jours,
             presence_cachee: self.presence_cachee,
@@ -1533,6 +1550,7 @@ pub enum NouvelleMarques {
     /// `avec_privees` : de même pour un serveur d'avant `privees`.
     /// `avec_moods` : de même pour un serveur d'avant `moods`.
     /// `avec_emojis` : de même pour un serveur d'avant `emojis`.
+    /// `avec_groupes_auto` : de même pour un serveur d'avant `groupes_auto`.
     /// `avec_garder` : de même pour un serveur d'avant `garder_archives`.
     /// `avec_cacher` : de même pour un serveur d'avant `cacher_apres_jours`.
     /// `avec_presence` : de même pour un serveur d'avant `presence_en_ligne`.
@@ -1550,6 +1568,7 @@ pub enum NouvelleMarques {
         avec_privees: bool,
         avec_moods: bool,
         avec_emojis: bool,
+        avec_groupes_auto: bool,
         avec_garder: bool,
         avec_cacher: bool,
         avec_presence: bool,
@@ -1592,6 +1611,11 @@ impl NouvelleMarques {
                 privees: liste("privees")?,
                 moods: objet("moods", 64),
                 emojis: objet("emojis", EMOJI_RAPIDE_MAX),
+                // Seules les valeurs connues restent, comme au serveur.
+                groupes_auto: objet("groupes_auto", 16)
+                    .into_iter()
+                    .filter(|(_, g)| matches!(g.as_str(), "codes" | "promos" | "avis" | "aucun"))
+                    .collect(),
                 garder_archives: v.get("garder_archives").and_then(Value::as_bool).unwrap_or(false),
                 // Négatif ou démesuré : 0 (tout afficher), comme le serveur.
                 cacher_apres_jours: v
@@ -1624,6 +1648,7 @@ impl NouvelleMarques {
             avec_privees: v.get("privees").is_some_and(Value::is_array),
             avec_moods: v.get("moods").is_some_and(Value::is_object),
             avec_emojis: v.get("emojis").is_some_and(Value::is_object),
+            avec_groupes_auto: v.get("groupes_auto").is_some_and(Value::is_object),
             avec_garder: v.get("garder_archives").is_some_and(Value::is_boolean),
             avec_cacher: v.get("cacher_apres_jours").is_some_and(Value::is_number),
             avec_presence: v.get("presence_en_ligne").is_some_and(Value::is_boolean),
@@ -1733,6 +1758,7 @@ impl SuiviMarques {
             "privees": c.listes.privees,
             "moods": c.listes.moods,
             "emojis": c.listes.emojis,
+            "groupes_auto": c.listes.groupes_auto,
             "garder_archives": c.listes.garder_archives,
             "cacher_apres_jours": c.listes.cacher_apres_jours,
             "presence_en_ligne": !c.listes.presence_cachee,
@@ -1767,6 +1793,7 @@ impl SuiviMarques {
                 avec_privees,
                 avec_moods,
                 avec_emojis,
+                avec_groupes_auto,
                 avec_garder,
                 avec_cacher,
                 avec_presence,
@@ -1792,6 +1819,10 @@ impl SuiviMarques {
                 // Et pour les emojis rapides (serveur d'avant `emojis`).
                 if !avec_emojis {
                     marques.emojis = c.listes.emojis.clone();
+                }
+                // Et pour le regroupement automatique (serveur d'avant `groupes_auto`).
+                if !avec_groupes_auto {
+                    marques.groupes_auto = c.listes.groupes_auto.clone();
                 }
                 // Et pour `garder_archives` (serveur d'avant ce réglage).
                 if !avec_garder {
@@ -2120,6 +2151,7 @@ mod essais {
             avec_privees: true,
             avec_moods: true,
             avec_emojis: true,
+            avec_groupes_auto: true,
             avec_garder: true,
             avec_cacher: true,
             avec_presence: true,
@@ -2265,6 +2297,38 @@ mod essais {
         let u = Marques::union(&a, &b);
         assert_eq!(u.emojis.get("k").map(String::as_str), Some("👍"));
         assert_eq!(u.emojis.len(), 2);
+    }
+
+    #[test]
+    fn marques_groupes_auto() {
+        // Reçues : seules les valeurs connues restent.
+        let n = NouvelleMarques::lire(&json!({"head": [], "favoris": [], "epingles": [], "archives": [], "privees": [],
+            "groupes_auto": {"12345": "codes", "t:7": "aucun", "m:1": "pub", "x:2": ""}, "version": 3}));
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques::default();
+        s.recu(n.unwrap(), &mut c);
+        assert_eq!(c.listes.groupes_auto.len(), 2);
+        assert_eq!(c.listes.groupes_auto.get("t:7").map(String::as_str), Some("aucun"));
+        // Une correction part avec les autres marques.
+        c.listes.groupes_auto.insert("12345".into(), "aucun".into());
+        let t = s.changement(&mut c).expect("envoi");
+        assert_eq!(t["marques"]["groupes_auto"], json!({"12345": "aucun", "t:7": "aucun"}));
+        // Un serveur d'avant `groupes_auto` : les nôtres restent.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { version: 4, ..Default::default() };
+        c.listes.groupes_auto.insert("s:1".into(), "promos".into());
+        let vieux = NouvelleMarques::lire(&json!({"head": [], "favoris": ["b"], "epingles": [], "archives": [], "privees": [], "version": 4})).unwrap();
+        assert!(s.recu(vieux, &mut c).is_none());
+        assert_eq!(c.listes.groupes_auto.get("s:1").map(String::as_str), Some("promos"));
+        // Union : le premier gagne pour un même id.
+        let mut a = Marques::default();
+        a.groupes_auto.insert("k".into(), "codes".into());
+        let mut b = Marques::default();
+        b.groupes_auto.insert("k".into(), "aucun".into());
+        b.groupes_auto.insert("j".into(), "avis".into());
+        let u = Marques::union(&a, &b);
+        assert_eq!(u.groupes_auto.get("k").map(String::as_str), Some("codes"));
+        assert_eq!(u.groupes_auto.len(), 2);
     }
 
     #[test]
@@ -2553,6 +2617,7 @@ mod essais {
             avec_privees: true,
             avec_moods: true,
             avec_emojis: true,
+            avec_groupes_auto: true,
             avec_garder: true,
             avec_cacher: true,
             avec_presence: true,
