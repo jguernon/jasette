@@ -430,6 +430,9 @@ func (p *Pont) onEvent(cli *whatsmeow.Client, raw any) {
 	case *events.HistorySync:
 		p.handleHistory(cli, evt)
 	case *events.Message:
+		if evt.Info.Chat == types.StatusBroadcastJID && sondeStoriesActive() {
+			p.sondeStatut(cli, evt)
+		}
 		p.handleMessage(cli, evt, true)
 	case *events.UndecryptableMessage:
 		p.handleUndecryptable(cli, evt)

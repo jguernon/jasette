@@ -473,6 +473,7 @@ func (p *Pont) onIGEvent(ctx context.Context, cli *instameow.Client, raw slidety
 		p.demanderNotes(false)
 		go p.threadBackfill(cli)
 		go p.myAvatarDownload()
+		p.sondeStoriesIG(p.ctx)
 	case *slidetypes.Disconnected:
 		p.mu.Lock()
 		p.ready = false

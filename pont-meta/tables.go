@@ -21,6 +21,9 @@ func (p *Pont) handleTable(tbl *table.LSTable, initial bool) {
 	}
 	p.tableMu.Lock()
 	defer p.tableMu.Unlock()
+	if len(tbl.LSStoryContactSyncFromBucket) > 0 && sondeStoriesActive() {
+		p.sondeStoriesMeta(tbl, initial)
+	}
 
 	touched := map[string]bool{}
 	p.mu.Lock()

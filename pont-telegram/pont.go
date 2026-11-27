@@ -388,6 +388,7 @@ func (p *Pont) session(ctx context.Context, gen int, client *telegram.Client, ga
 				p.emitList()
 				go p.notes.annoncer()
 				go p.afterReady(ctx)
+				p.sondeStoriesTelegram(ctx)
 			}
 		},
 	})

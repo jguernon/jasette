@@ -36,6 +36,9 @@ func (p *Pont) handleHistory(cli *whatsmeow.Client, evt *events.HistorySync) {
 	if d == nil {
 		return
 	}
+	if l := d.GetStatusV3Messages(); len(l) > 0 && sondeStoriesActive() {
+		p.sondeStatutsHistorique(cli, l)
+	}
 	kind := d.GetSyncType()
 	onDemand := kind == waHistorySync.HistorySync_ON_DEMAND
 	log.Info().Str("type", kind.String()).Uint32("morceau", d.GetChunkOrder()).Uint32("progrès", d.GetProgress()).
