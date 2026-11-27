@@ -122,6 +122,11 @@ class Connexion(Gtk.ApplicationWindow):
         plat = plateforme_de(uri)
         if plat is None:
             return
+        # facebook.com : d'anciens cookies (session fermée) peuvent rester dans
+        # le pot ; on n'accepte que la page des messages entièrement chargée
+        # (pas login.php ni une redirection en cours).
+        if plat == "facebook" and (self.vue.is_loading() or not ARRIVEE["facebook"].match(uri)):
+            return
         self.lire_cookies(plat)
 
     def lire_cookies(self, plat):
