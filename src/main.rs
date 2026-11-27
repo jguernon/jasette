@@ -13826,7 +13826,7 @@ fn t(fr: &'static str) -> &'static str {
             "Jasette puts automated senders into a single row, on this device, without sending anything anywhere. Contacts, favorites, pinned conversations, groups and conversations you wrote in are never grouped."
         }
         "Codes de vérification" => "Verification codes",
-        "Avis (livraisons, rendez-vous, banque, factures)" => "Notices (deliveries, appointments, bank, bills)",
+        "livraisons, rendez-vous, banque, factures" => "deliveries, appointments, bank, bills",
         "Codes" => "Codes",
         "Promotions" => "Promotions",
         "Avis" => "Notices",

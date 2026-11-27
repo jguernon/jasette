@@ -500,10 +500,11 @@ impl Jasette {
                 lignes = lignes.child(separateur());
             }
             let actif = self.groupe_actif(g);
-            let texte = match g {
-                Groupe::Codes => t("Codes de vérification"),
-                Groupe::Promos => t("Promotions"),
-                Groupe::Avis => t("Avis (livraisons, rendez-vous, banque, factures)"),
+            // Le nom, puis la précision entre parenthèses, plus petite.
+            let (texte, precision) = match g {
+                Groupe::Codes => (t("Codes de vérification"), None),
+                Groupe::Promos => (t("Promotions"), None),
+                Groupe::Avis => (t("Avis"), Some(t("livraisons, rendez-vous, banque, factures"))),
             };
             lignes = lignes.child(
                 div()
@@ -528,7 +529,20 @@ impl Jasette {
                         cx.notify();
                     }))
                     .child(Self::avatar_groupe(g, 26.))
-                    .child(div().flex_1().text_color(if actif { th().texte_fort } else { th().texte }).child(texte))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .flex()
+                            .flex_row()
+                            .items_baseline()
+                            .gap(px(6.))
+                            .text_color(if actif { th().texte_fort } else { th().texte })
+                            .child(div().flex_none().child(texte))
+                            .when_some(precision, |d, p| {
+                                d.child(div().min_w(px(0.)).truncate().text_size(px(12.)).text_color(th().texte_pale).child(format!("({p})")))
+                            }),
+                    )
                     .child(
                         div()
                             .size(px(20.))

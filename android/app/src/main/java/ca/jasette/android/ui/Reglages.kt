@@ -444,10 +444,10 @@ private fun RegrouperAutomatiquement() {
     Spacer(Modifier.height(4.dp))
     Titre(t("Regrouper automatiquement"))
     Groupe {
-        for ((g, texte) in listOf(
-            ca.jasette.android.GroupeAuto.CODES to t("Codes de vérification"),
-            ca.jasette.android.GroupeAuto.PROMOS to t("Promotions"),
-            ca.jasette.android.GroupeAuto.AVIS to t("Avis (livraisons, rendez-vous, banque, factures)"),
+        for ((g, texte, precision) in listOf(
+            Triple(ca.jasette.android.GroupeAuto.CODES, t("Codes de vérification"), null),
+            Triple(ca.jasette.android.GroupeAuto.PROMOS, t("Promotions"), null),
+            Triple(ca.jasette.android.GroupeAuto.AVIS, t("Avis"), t("livraisons, rendez-vous, banque, factures")),
         )) {
             val coche = ca.jasette.android.RegroupementAuto.actif(g)
             Row(
@@ -457,7 +457,11 @@ private fun RegrouperAutomatiquement() {
             ) {
                 AvatarGroupe(g, 28.dp)
                 Spacer(Modifier.width(12.dp))
-                Text(texte, color = P.texteFort, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                // La précision entre parenthèses va sur une deuxième ligne, plus petite.
+                Column(Modifier.weight(1f)) {
+                    Text(texte, color = P.texteFort, fontWeight = FontWeight.SemiBold)
+                    if (precision != null) Text("($precision)", color = P.textePale, fontSize = 12.sp)
+                }
                 androidx.compose.material3.Checkbox(
                     checked = coche,
                     onCheckedChange = { ca.jasette.android.RegroupementAuto.choisir(ctx, g, it) },
