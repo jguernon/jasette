@@ -583,3 +583,62 @@ pub fn serveur_tourne() -> bool {
 pub fn redemarrer_serveur() -> Result<(), String> {
     Err("pas de serveur Jasette sous Windows".into())
 }
+
+#[cfg(test)]
+mod essais_windows {
+    use super::*;
+
+    /// Un dossier d'essai dans .cache du projet (jamais le dossier temporaire du système).
+    fn dossier(nom: &str) -> PathBuf {
+        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".cache").join("essais-maj-windows").join(nom);
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn lire_version_windows() {
+        let sha = "a".repeat(64);
+        let j = format!(
+            r#"{{"versionCode": 10300, "versionName": "1.0.2 (300)", "notes": {{"fr": "Bonjour"}},
+                "zip": {{"url": "https://jonathanguernon.net/jasette/telecharger/j.zip?v=1", "sha256": "{sha}", "taille": 5}}}}"#
+        );
+        let v = lire(&j, false).unwrap();
+        assert_eq!(v.code, 10300);
+        assert_eq!(v.targz.unwrap().taille, 5);
+        assert!(v.deb.is_none());
+        // Une adresse hors du site est refusée.
+        assert!(lire(&j.replace("jonathanguernon.net", "exemple.com"), false).is_none());
+    }
+
+    #[test]
+    fn chemins_refuses() {
+        assert!(chemin_sur("../x").is_err());
+        assert!(chemin_sur("a/../../x").is_err());
+        assert!(chemin_sur("/a/b").is_err());
+        assert!(chemin_sur("C:/a").is_err());
+        assert!(chemin_sur("a\\b").is_err());
+        assert_eq!(chemin_sur("jasette-1/jasette.exe").unwrap(), Some(PathBuf::from("jasette.exe")));
+        assert_eq!(chemin_sur("jasette-1/").unwrap(), None);
+    }
+
+    /// Le vrai zip de paquets/empaqueter-windows.sh (JASETTE_ZIP_ESSAI), extrait puis
+    /// installé par-dessus une installation qui contient déjà jasette.exe.
+    #[test]
+    fn extraire_et_remplacer_le_zip() {
+        let Some(zip) = std::env::var_os("JASETTE_ZIP_ESSAI") else { return };
+        let base = dossier("zip");
+        let install = base.join("install");
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::write(install.join("jasette.exe"), b"ancien").unwrap();
+        let tmp = dossier_extraction(&install, 1);
+        let fichiers = extraire_tgz(Path::new(&zip), &tmp).unwrap();
+        assert!(fichiers.iter().any(|f| f == Path::new("jasette.exe")));
+        assert!(fichiers.iter().any(|f| f == Path::new("jasette-pont.exe")));
+        let noms = remplacer(&tmp, &install).unwrap();
+        assert!(noms.iter().any(|n| n == "jasette-connexion.exe"));
+        assert!(std::fs::metadata(install.join("jasette.exe")).unwrap().len() > 1_000_000);
+        assert_eq!(std::fs::read(install.join("jasette.exe.ancien")).unwrap(), b"ancien");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+}
