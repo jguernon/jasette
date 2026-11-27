@@ -28,7 +28,9 @@ umask 022
 ICI="$(cd "$(dirname "$0")" && pwd)"
 PROJET="$(dirname "$ICI")"
 C="$PROJET/.cache"
-SORTIE="${JASETTE_PAQUETS:-$C/paquets}"
+# Le .cache du dépôt principal, même lancé depuis un worktree (.cache/wt-macos).
+DEPOT="$(dirname "$(git -C "$PROJET" rev-parse --path-format=absolute --git-common-dir)")"
+SORTIE="${JASETTE_PAQUETS:-$DEPOT/.cache/paquets}"
 MAC="${JASETTE_MAC:-macminitc}"
 DISTANT="Developer/jasette-macos"
 mkdir -p "$SORTIE"
@@ -55,7 +57,8 @@ ARGS=""
 for a in "$@"; do ARGS+=" $(q "$a")"; done
 
 echo "== construction sur le Mac"
-ssh "$MAC" "cd ~/$DISTANT/src && env $ENV bash macos/construire.sh$ARGS"
+# caffeinate -i : le Mac ne s'endort pas pendant la compilation.
+ssh "$MAC" "cd ~/$DISTANT/src && env $ENV caffeinate -i bash macos/construire.sh$ARGS"
 
 echo "== rapatriement"
 DMG="jasette-$VERSION-macos.dmg"

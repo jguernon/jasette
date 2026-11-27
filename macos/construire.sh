@@ -55,7 +55,13 @@ export PATH="$OUTILS/cargo/bin:$OUTILS/go/bin:$OUTILS/cmake/CMake.app/Contents/b
 export GOMODCACHE="$C/gomod" GOCACHE="$C/gocache" GOPATH="$C/gopath"
 export GOTMPDIR="$C/gotmp" TMPDIR="$C/gotmp" GOFLAGS=-modcacherw GOTOOLCHAIN=local
 export MACOSX_DEPLOYMENT_TARGET=12.0
-mkdir -p "$C/gotmp" "$SORTIE"
+# Ménager le Mac (24 Go, 8 cœurs ; il est déjà tombé sous deux compilations
+# à 8 tâches) : 4 tâches au plus, une compilation à la fois. JASETTE_JOBS pour changer.
+JOBS="${JASETTE_JOBS:-4}"
+export CARGO_BUILD_JOBS="$JOBS" GOMAXPROCS="$JOBS" CMAKE_BUILD_PARALLEL_LEVEL="$JOBS" NUM_JOBS="$JOBS"
+mkdir -p "$C/gotmp" "$SORTIE" "$CARGO_TARGET_DIR"
+# Spotlight n'indexe pas les dossiers de compilation.
+touch "$C/.metadata_never_index" "$CARGO_TARGET_DIR/.metadata_never_index" "$OUTILS/.metadata_never_index"
 
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$SRC/Cargo.toml" | head -1)"
 [[ -n "$VERSION" ]] || { echo "version introuvable dans Cargo.toml" >&2; exit 1; }
@@ -97,7 +103,7 @@ for paire in pont:jasette-pont pont-meta:jasette-meta pont-ig:jasette-ig pont-wa
 	morceaux=()
 	for g in "${GO_ARCHS[@]}"; do
 		echo "== $nom ($g)"
-		(cd "$SRC/$dossier" && CGO_ENABLED=0 GOOS=darwin GOARCH="$g" go build -trimpath -ldflags "-s -w" -o "$BIN/$nom-$g" .)
+		(cd "$SRC/$dossier" && CGO_ENABLED=0 GOOS=darwin GOARCH="$g" go build -p "$JOBS" -trimpath -ldflags "-s -w" -o "$BIN/$nom-$g" .)
 		morceaux+=("$BIN/$nom-$g")
 	done
 	fusionner "$BIN/$nom" "${morceaux[@]}"
@@ -113,7 +119,7 @@ if [[ $SIGNAL == 1 ]]; then
 			echo "== jasette-signal ($g)"
 			(cd "$SRC/pont-signal" && CGO_ENABLED=1 GOOS=darwin GOARCH="$g" CC="clang -arch $a" CXX="clang++ -arch $a" \
 				CGO_LDFLAGS="-L$C/libsignal-target/$t/release" \
-				go build -trimpath -ldflags "-s -w" -o "$BIN/jasette-signal-$g" .)
+				go build -p "$JOBS" -trimpath -ldflags "-s -w" -o "$BIN/jasette-signal-$g" .)
 			morceaux+=("$BIN/jasette-signal-$g")
 		done
 		fusionner "$BIN/jasette-signal" "${morceaux[@]}"
