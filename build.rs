@@ -28,9 +28,18 @@ fn main() {
         .filter(|o| o.status.success())
         .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
         .unwrap_or(0);
+    // macOS seulement : compilé sur le Mac depuis une copie sans .git
+    // (paquets/empaqueter-macos.sh) ; le nombre de commits arrive par
+    // JASETTE_BUILD_MACOS. (CARGO_CFG_TARGET_OS : la cible, pas la machine.)
+    let build = if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        println!("cargo:rerun-if-env-changed=JASETTE_BUILD_MACOS");
+        std::env::var("JASETTE_BUILD_MACOS").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(build)
+    } else {
+        build
+    };
     let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
-    // Windows (la cible) : « alpha » dans le nom tant que la version n'est pas éprouvée.
-    let alpha = if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") { " alpha" } else { "" };
+    // Windows et macOS (la cible) : « alpha » dans le nom tant que la version n'est pas éprouvée.
+    let alpha = if matches!(std::env::var("CARGO_CFG_TARGET_OS").as_deref(), Ok("windows" | "macos")) { " alpha" } else { "" };
     let nom = if build > 0 { format!("{version}{alpha} ({build})") } else { format!("{version}{alpha}") };
     println!("cargo:rustc-env=JASETTE_BUILD={build}");
     println!("cargo:rustc-env=JASETTE_CODE={}", 10_000 + build);

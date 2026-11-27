@@ -37,3 +37,7 @@ zbus = { version = "5.19", default-features = false, features = ["async-io", "bl
 # La même version que celle déjà dans Cargo.lock (rien ne change pour Linux).
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_System_Console", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+# macOS seulement : les shaders Metal compilés au lancement (pas besoin de
+# l'outil « metal » de Xcode, la Metal Toolchain, pour compiler).
+[target.'cfg(target_os = "macos")'.dependencies]
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.14", features = ["runtime_shaders"] }

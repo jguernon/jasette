@@ -187,6 +187,12 @@ fn poser_lanceur(oui: bool) {
     // Windows : pas de lanceur .desktop (« jasette --prive » reste possible).
     #[cfg(target_os = "windows")]
     return;
+    // macOS : pas de lanceur .desktop (« jasette --prive » depuis le Terminal).
+    #[cfg(target_os = "macos")]
+    {
+        let _ = oui;
+        return;
+    }
     let Some(donnees) = dossier_applis() else { return };
     let lanceur = donnees.join("applications/jasette-prive.desktop");
     let icone = donnees.join("icons/hicolor/256x256/apps/jasette-prive.png");
