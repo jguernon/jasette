@@ -44,6 +44,7 @@ mod groupes_auto;
 mod boite_groupes;
 mod ponts_langue;
 mod sourdine;
+mod spam;
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "macos")]
@@ -1616,6 +1617,8 @@ enum Vue {
     Archives,
     /// La Liste privée (src/prive.rs), ouverte par le code.
     Privees,
+    /// Le dossier Spam (src/spam.rs), ouvert depuis Réglages > Spam.
+    Spam,
     Service(Service),
 }
 
@@ -1631,6 +1634,8 @@ enum Section {
     APropos,
     /// La Liste privée (src/prive.rs).
     Prive,
+    /// Le dossier Spam (src/spam.rs).
+    Spam,
     /// L'écran « Moi » : « Quoi de neuf ? », l'avatar (src/notes.rs).
     Moi,
     /// Réglages > Quoi de neuf (src/notes.rs).
@@ -1778,6 +1783,11 @@ struct Reglages {
     /// Jasette s'il y en a un (marque `sourdine`).
     #[serde(default)]
     sourdine: std::collections::BTreeMap<String, i64>,
+    /// Les conversations marquées comme spam (src/spam.rs) : id → heure (ms)
+    /// du marquage. Gardées ici, et partagées par le serveur Jasette s'il y
+    /// en a un (marque `spam`).
+    #[serde(default)]
+    spam: std::collections::BTreeMap<String, i64>,
     /// L'audience des notes Instagram : 0 abonnés mutuels, 1 amis proches.
     /// Propre à cet appareil.
     #[serde(default)]
@@ -1967,6 +1977,7 @@ impl Default for Reglages {
             stories: false,
             stories_ouvertes: Default::default(),
             sourdine: Default::default(),
+            spam: Default::default(),
             notes_audience: 0,
             head_grille: String::new(),
             marques_cache: HashMap::new(),
@@ -2114,6 +2125,7 @@ impl Reglages {
                     stories: self.stories,
                     stories_ouvertes: self.stories_ouvertes.clone(),
                     sourdine: self.sourdine.clone(),
+                    spam: self.spam.clone(),
                 },
                 version: self.marques_version,
                 a_envoyer: self.marques_a_envoyer,
@@ -2146,6 +2158,7 @@ impl Reglages {
         self.stories = b.copie.listes.stories;
         self.stories_ouvertes = b.copie.listes.stories_ouvertes;
         self.sourdine = b.copie.listes.sourdine;
+        self.spam = b.copie.listes.spam;
         self.marques_version = b.copie.version;
         self.marques_a_envoyer = b.copie.a_envoyer;
         self.marques_serveur = b.serveur;
@@ -2489,6 +2502,9 @@ struct Jasette {
     modale_classer: Option<String>,
     /// La modale « Mettre en sourdine » (src/sourdine.rs) : ses conversations.
     modale_sourdine: Option<sourdine::ModaleSourdine>,
+    /// Le spam (src/spam.rs) : la fenêtre « Marquer comme spam » et les
+    /// confirmations du dossier Spam.
+    spam: spam::EtatSpam,
     /// Le dernier passage de `sourdine_tic`.
     dernier_tic_sourdine: Option<Instant>,
     /// La rangée Codes est en haut (dernier dessin), et quand on l'a revue.
@@ -3576,6 +3592,7 @@ impl Jasette {
             menu_groupe: None,
             modale_classer: None,
             modale_sourdine: None,
+            spam: Default::default(),
             dernier_tic_sourdine: None,
             codes_en_haut: Default::default(),
             codes_verifies: Instant::now(),
@@ -4401,6 +4418,7 @@ impl Jasette {
                 c.unread
                     && !self.reglages.archivee_jasette(&c.id)
                     && !self.privee(&c.id)
+                    && !self.en_spam(&c.id)
                     && !self.reglages.service_cache(service_de(&c.id))
                     && !self.hors_boite(c)
                     // Les Promotions (regroupement automatique) ne comptent pas.
@@ -4425,7 +4443,7 @@ impl Jasette {
 
     /// Une mention ou une réponse à moi non lue dans un grand espace.
     fn mentions_groupes(&self) -> bool {
-        self.convs.iter().any(|c| c.large && c.unread && !self.privee(&c.id) && (c.mentions > 0 || self.attention.contains(&c.id)))
+        self.convs.iter().any(|c| c.large && c.unread && !self.privee(&c.id) && !self.en_spam(&c.id) && (c.mentions > 0 || self.attention.contains(&c.id)))
     }
 
     /// Les grands espaces non lus (la pastille de l'onglet Groupes) ; 0 sans
@@ -4434,7 +4452,7 @@ impl Jasette {
         if !self.reglages.pastille_canaux {
             return 0;
         }
-        self.convs.iter().filter(|c| c.large && c.unread && !self.privee(&c.id)).count()
+        self.convs.iter().filter(|c| c.large && c.unread && !self.privee(&c.id) && !self.en_spam(&c.id)).count()
     }
 
     /// Les archives non lues (la pastille de l'onglet Archives, comme sur
@@ -4458,20 +4476,24 @@ impl Jasette {
                     && service_de(&c.id) == s
                     && !self.reglages.archivee_jasette(&c.id)
                     && !self.privee(&c.id)
+                    && !self.en_spam(&c.id)
                     && !self.hors_boite(c)
                     && !self.en_promotions(c)
             })
             .count()
     }
 
-    /// La boîte de réception (et les vues Favoris et par service) : sans les archives de Jasette.
+    /// La boîte de réception (et les vues Favoris et par service) : sans les archives de Jasette
+    /// ni le spam (src/spam.rs).
     /// Les fantômes y sont aussi : épinglés partout, favoris dans la vue Favoris.
     fn boite(&self) -> Vec<&Conv> {
         let r = &self.reglages;
-        let mut l: Vec<&Conv> = self.convs.iter().filter(|c| !r.archivee_jasette(&c.id) && !self.privee(&c.id)).collect();
+        let mut l: Vec<&Conv> =
+            self.convs.iter().filter(|c| !r.archivee_jasette(&c.id) && !self.privee(&c.id) && !self.en_spam(&c.id)).collect();
         l.extend(self.fantomes.iter().filter(|c| {
             !r.archivee_jasette(&c.id)
                 && !self.privee(&c.id)
+                && !self.en_spam(&c.id)
                 && (r.epingles.contains(&c.id) || (self.vue == Vue::Favoris && r.etoiles.contains(&c.id)))
         }));
         l
@@ -4484,7 +4506,7 @@ impl Jasette {
             .archives
             .iter()
             .chain(self.convs.iter().chain(self.fantomes.iter()).filter(|c| self.reglages.archivee_jasette(&c.id)))
-            .filter(|c| !self.privee(&c.id) && vues.insert(c.id.as_str()))
+            .filter(|c| !self.privee(&c.id) && !self.en_spam(&c.id) && vues.insert(c.id.as_str()))
             .collect();
         l.sort_by(|a, b| b.time.cmp(&a.time));
         l
@@ -4541,6 +4563,18 @@ impl Jasette {
             self.reglages.archives.retain(|x| x != id);
             self.marques_changees();
         }
+    }
+
+    /// « Supprimer la conversation » (Google, Messenger, Instagram : voir
+    /// `Service::supprimable`), après sa confirmation : retirée tout de suite ;
+    /// Messenger et Instagram confirment par « deleted », ou disent leur
+    /// erreur (elle réapparaît alors). Aussi le dossier Spam (src/spam.rs).
+    fn supprimer_conversation(&mut self, id: &str) {
+        if !service_de(id).supprimable() {
+            return;
+        }
+        self.commande(json!({"cmd": "delete", "conv": id}));
+        self.retirer_conversation(id);
     }
 
     /// Une conversation supprimée (ici, ailleurs ou dans l'app du service) :
@@ -4703,7 +4737,8 @@ impl Jasette {
         }
         // Une conversation en sourdine (src/sourdine.rs) : ni bulle ni son de
         // notification ; tout le reste (non-lus, liste) suit son cours.
-        if self.en_sourdine(&m.conv) {
+        // Le spam (src/spam.rs) ne notifie jamais, même si sa sourdine a été levée.
+        if !spam::notification_permise(&self.reglages.spam, &self.reglages.sourdine, &m.conv, maintenant_ms()) {
             return;
         }
         let conv = self.conv(&m.conv);
@@ -6743,6 +6778,10 @@ impl Jasette {
         if self.privee(&conv.id) != (self.vue == Vue::Privees) || (self.vue == Vue::Privees && !self.prive.deverrouille) {
             return false;
         }
+        // Le spam seulement dans le dossier Spam (ni boîte, ni Head, ni recherche).
+        if self.vue != Vue::Privees && self.en_spam(&conv.id) != (self.vue == Vue::Spam) {
+            return false;
+        }
         if self.non_lus_seulement && !conv.unread {
             return false;
         }
@@ -6797,6 +6836,7 @@ impl Jasette {
             Vue::Groupes => "Canaux",
             Vue::Archives => "Archives",
             Vue::Privees => "Privées",
+            Vue::Spam => "Spam",
             Vue::Service(s) => s.nom(),
         });
         // La hauteur de l'en-tête flottant : rangée du titre, champs, bannière.
@@ -7207,9 +7247,10 @@ impl Jasette {
         let source = match self.vue {
             Vue::Archives => self.toutes_archives(),
             Vue::Privees => self.liste_privees(),
+            Vue::Spam => self.liste_spam(),
             _ => self.boite(),
         };
-        let badge = matches!(self.vue, Vue::Tout | Vue::Archives | Vue::Privees);
+        let badge = matches!(self.vue, Vue::Tout | Vue::Archives | Vue::Privees | Vue::Spam);
         let mut col =
             div().id("convs").flex().flex_col().size_full().overflow_y_scroll().track_scroll(&self.defil_liste).px(px(8.)).pt(px(haut)).pb(px(18.));
         let mut visibles: Vec<&Conv> = source.iter().copied().filter(|c| self.correspond(c)).collect();
@@ -7259,6 +7300,8 @@ impl Jasette {
                 t("Aucune conversation archivée")
             } else if self.vue == Vue::Privees {
                 t("Aucune conversation privée : « Rendre privée » est dans le menu ⋮ d'une conversation.")
+            } else if self.vue == Vue::Spam {
+                t("Aucune conversation marquée comme spam.")
             } else {
                 t("Chargement des conversations…")
             };
@@ -7497,8 +7540,8 @@ impl Jasette {
             .resultats_msgs
             .iter()
             .filter(|r| match self.vue {
-                Vue::Service(s) => service_de(&r.conv) == s,
-                _ => !self.privee(&r.conv),
+                Vue::Service(s) => service_de(&r.conv) == s && !self.en_spam(&r.conv),
+                _ => !self.privee(&r.conv) && !self.en_spam(&r.conv),
             })
             .take(100)
             .collect();
@@ -8811,6 +8854,7 @@ impl Jasette {
             || self.modale_services
             || self.modale_classer.is_some()
             || self.modale_sourdine.is_some()
+            || self.spam.modale.is_some()
             || self.mood_feuille.is_some()
             || self.apercu.is_some()
     }
@@ -9839,6 +9883,16 @@ impl Jasette {
                     },
                 ))
             }))
+            // « Marquer comme spam » / « Ce n'est pas du spam » (src/spam.rs), juste sous « Classer… ».
+            .child({
+                let (ic, texte) = self.entree_spam(&id);
+                let id_sp = id.clone();
+                item("menu-spam", ic, texte.into(), th().texte_fort, true).on_click(cx.listener(move |this, _, _, cx| {
+                    this.menu_conv = false;
+                    this.basculer_spam(id_sp.clone());
+                    cx.notify();
+                }))
+            })
             .children(self.item_menu_prive(&id, cx))
             .children(self.item_menu_mood(&id, cx))
             .child(item("menu-rechercher", "search", t("Rechercher").into(), th().texte_fort, true).on_click(cx.listener(
@@ -9896,10 +9950,7 @@ impl Jasette {
                     if !this.confirmer_suppression {
                         this.confirmer_suppression = true;
                     } else {
-                        // Retirée tout de suite ; Messenger et Instagram confirment par
-                        // « deleted », ou disent leur erreur (elle réapparaît alors).
-                        this.commande(json!({"cmd": "delete", "conv": id_s}));
-                        this.retirer_conversation(&id_s);
+                        this.supprimer_conversation(&id_s);
                         this.choisie = None;
                         this.menu_conv = false;
                         this.confirmer_suppression = false;
@@ -10400,6 +10451,14 @@ impl Jasette {
                     cx.notify();
                 },
             )))
+            .child(item("s-spam", Section::Spam, t("Spam"), "shield-alert", 0xef4444, None).on_click(cx.listener(
+                |this, _, _, cx| {
+                    this.section = Some(Section::Spam);
+                    this.spam.confirmer = None;
+                    this.spam.vider = false;
+                    cx.notify();
+                },
+            )))
             .child(item("s-langue", Section::Langue, t("Langue"), "languages", 0x0ea5e9, None).on_click(cx.listener(
                 |this, _, _, cx| {
                     this.section = Some(Section::Langue);
@@ -10427,6 +10486,7 @@ impl Jasette {
             Section::Comptes => self.comptes(cx).into_any_element(),
             Section::Serveur => self.serveur_vue(cx),
             Section::Prive => self.reglages_prive(cx),
+            Section::Spam => self.reglages_spam(cx),
             Section::Sons => self.reglages_sons(cx),
             Section::Moi => self.moi_vue(cx),
             Section::QuoiDeNeuf => self.reglages_quoi_de_neuf(cx),
@@ -12804,7 +12864,7 @@ impl Jasette {
                         cx.notify();
                     }
                 } else if k.key == "escape" {
-                    if this.modale_classer.take().is_some() || this.modale_sourdine.take().is_some() {
+                    if this.modale_classer.take().is_some() || this.modale_sourdine.take().is_some() || this.spam.modale.take().is_some() {
                         cx.stop_propagation();
                         cx.notify();
                     } else if this.fiche.as_ref().is_some_and(|f| f.lier) {
@@ -12921,6 +12981,8 @@ impl Jasette {
         .children(self.fiche_vue(cx))
         // « Mettre en sourdine » (src/sourdine.rs), par-dessus la fiche.
         .children(self.modale_sourdine_vue(cx))
+        // « Marquer comme spam » (src/spam.rs).
+        .children(self.modale_spam_vue(cx))
         .when_some(self.apercu.clone(), |d, chemin| {
             d.child(
                 div()
@@ -14104,6 +14166,16 @@ fn t(fr: &'static str) -> &'static str {
         "Ce n'est pas de l'argent" => "Not about money",
         "Classer…" => "Classify…",
         "Mettre en sourdine…" => "Mute…",
+        "Marquer comme spam" => "Mark as spam",
+        "Marquer comme spam et envoyer STOP" => "Mark as spam and send STOP",
+        "Envoie le message STOP à ce numéro pour te désinscrire." => "Sends the message STOP to this number to unsubscribe.",
+        "Ce n'est pas du spam" => "Not spam",
+        "Tout vider" => "Empty all",
+        "Supprimer" => "Delete",
+        "Spam" => "Spam",
+        "Elle quitte la boîte de réception, ne notifie plus et va dans Réglages > Spam." => "It leaves the inbox, stops notifying and moves to Settings > Spam.",
+        "Aucune conversation marquée comme spam." => "No conversation marked as spam.",
+        "Aucune conversation marquée comme spam. « Marquer comme spam » est dans le menu d'une conversation, sous « Classer… »." => "No conversation marked as spam. “Mark as spam” is in a conversation's menu, under “Classify…”.",
         "Mettre en sourdine" => "Mute",
         "Réactiver les notifications" => "Unmute",
         "Pendant 1 heure" => "For 1 hour",

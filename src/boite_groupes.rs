@@ -198,10 +198,10 @@ impl Jasette {
     }
 
     /// Jamais classée, même corrigée à la main : le Head, les favoris, les
-    /// épinglées, les groupes, les grands espaces et les privées.
+    /// épinglées, les groupes, les grands espaces, les privées et le spam.
     pub(crate) fn hors_classement(&self, c: &Conv) -> bool {
         let r = &self.reglages;
-        c.group || c.large || self.privee(&c.id) || r.head.contains(&c.id) || r.etoiles.contains(&c.id) || r.epingles.contains(&c.id)
+        c.group || c.large || self.privee(&c.id) || self.en_spam(&c.id) || r.head.contains(&c.id) || r.etoiles.contains(&c.id) || r.epingles.contains(&c.id)
     }
 
     /// Le groupe d'une conversation, sa case cochée ou non : la correction à
@@ -577,7 +577,19 @@ impl Jasette {
                 cx.notify();
             },
         )));
+        // « Marquer comme spam » / « Ce n'est pas du spam » (src/spam.rs), juste sous « Classer… ».
+        let (ic, texte) = self.entree_spam(&m.id);
+        let id_sp = m.id.clone();
+        let spam = ligne("menu-groupe-spam", icone(ic, 16., th().texte).into_any_element(), texte).on_click(cx.listener(
+            move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.menu_groupe = None;
+                this.basculer_spam(id_sp.clone());
+                cx.notify();
+            },
+        ));
         if self.hors_classement(conv) {
+            menu = menu.child(spam);
             return Some(gpui::deferred(gpui::anchored().position(m.pos).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(1));
         }
         if let Some(g) = actuel {
@@ -601,6 +613,7 @@ impl Jasette {
                 cx.notify();
             }),
         ));
+        menu = menu.child(spam);
         Some(gpui::deferred(gpui::anchored().position(m.pos).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(1))
     }
 

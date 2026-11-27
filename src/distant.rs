@@ -1387,6 +1387,14 @@ pub struct Marques {
     /// La sourdine par conversation (marque `sourdine`, PROTOCOLE.md §5.5) :
     /// id → échéance (ms), 0 = jusqu'à réactivation. Sans entrée échue.
     pub sourdine: BTreeMap<String, i64>,
+    /// Les conversations marquées comme spam (marque `spam`, PROTOCOLE.md
+    /// §5.5) : id → heure (ms) du marquage.
+    pub spam: BTreeMap<String, i64>,
+}
+
+/// Le spam sans entrée vide, démesurée ou négative (comme le serveur).
+pub fn nettoyer_spam(m: &BTreeMap<String, i64>) -> BTreeMap<String, i64> {
+    m.iter().filter(|(k, t)| !k.is_empty() && k.len() <= 512 && **t >= 0).map(|(k, t)| (k.clone(), *t)).collect()
 }
 
 /// La sourdine sans entrée échue, vide, démesurée ou négative (comme le
@@ -1498,6 +1506,7 @@ impl Marques {
             && !self.stories
             && self.stories_ouvertes.is_empty()
             && self.sourdine.is_empty()
+            && self.spam.is_empty()
     }
 
     /// Chaque liste de `dabord`, dans son ordre, puis les ids de `ensuite` qui n'y sont pas.
@@ -1551,6 +1560,8 @@ impl Marques {
                 &ensuite.sourdine.iter().chain(dabord.sourdine.iter()).map(|(k, v)| (k.clone(), *v)).collect(),
                 maintenant_ms_distant(),
             ),
+            // Comme la sourdine : les entrées de `dabord` gagnent.
+            spam: nettoyer_spam(&ensuite.spam.iter().chain(dabord.spam.iter()).map(|(k, v)| (k.clone(), *v)).collect()),
         }
     }
 
@@ -1597,6 +1608,7 @@ impl Marques {
                 .map(|(k, t)| (k.clone(), *t))
                 .collect(),
             sourdine: self.sourdine.iter().filter(|(k, v)| autre.sourdine.get(*k) != Some(*v)).map(|(k, v)| (k.clone(), *v)).collect(),
+            spam: self.spam.iter().filter(|(k, v)| autre.spam.get(*k) != Some(*v)).map(|(k, v)| (k.clone(), *v)).collect(),
         }
     }
 }
@@ -1621,6 +1633,7 @@ pub enum NouvelleMarques {
     /// `avec_ordre` : de même pour un serveur d'avant `ordre_services`.
     /// `avec_stories` : de même pour un serveur d'avant `stories`.
     /// `avec_sourdine` : de même pour un serveur d'avant `sourdine`.
+    /// `avec_spam` : de même pour un serveur d'avant `spam`.
     Recues {
         marques: Marques,
         version: u64,
@@ -1641,6 +1654,7 @@ pub enum NouvelleMarques {
         avec_ordre: bool,
         avec_stories: bool,
         avec_sourdine: bool,
+        avec_spam: bool,
     },
     /// La connexion est tombée : rien n'est plus en vol.
     Coupure,
@@ -1725,6 +1739,12 @@ impl NouvelleMarques {
                         .unwrap_or_default(),
                     maintenant_ms_distant(),
                 ),
+                spam: nettoyer_spam(
+                    &v.get("spam")
+                        .and_then(Value::as_object)
+                        .map(|o| o.iter().filter_map(|(k, t)| Some((k.clone(), t.as_i64()?))).collect())
+                        .unwrap_or_default(),
+                ),
             },
             version: v.get("version")?.as_u64()?,
             id: v.get("id").and_then(Value::as_u64),
@@ -1744,6 +1764,7 @@ impl NouvelleMarques {
             avec_ordre: v.get("ordre_services").is_some_and(Value::is_array),
             avec_stories: v.get("stories").is_some_and(Value::is_boolean),
             avec_sourdine: v.get("sourdine").is_some_and(Value::is_object),
+            avec_spam: v.get("spam").is_some_and(Value::is_object),
         })
     }
 }
@@ -1861,6 +1882,7 @@ impl SuiviMarques {
             "stories": c.listes.stories,
             "stories_ouvertes": c.listes.stories_ouvertes,
             "sourdine": c.listes.sourdine,
+            "spam": c.listes.spam,
             "version": c.version,
             "id": id,
         }}))
@@ -1894,6 +1916,7 @@ impl SuiviMarques {
                 avec_ordre,
                 avec_stories,
                 avec_sourdine,
+                avec_spam,
             } => {
                 // Un serveur d'avant `archives` : nos archives restent les nôtres, jamais vidées.
                 let mut marques = marques;
@@ -1960,6 +1983,10 @@ impl SuiviMarques {
                 // Et pour la sourdine (serveur d'avant elle) : la nôtre reste.
                 if !avec_sourdine {
                     marques.sourdine = c.listes.sourdine.clone();
+                }
+                // Et pour le spam (serveur d'avant lui) : le nôtre reste.
+                if !avec_spam {
+                    marques.spam = c.listes.spam.clone();
                 }
                 (marques, version, id, refus)
             }
@@ -2263,6 +2290,7 @@ mod essais {
             avec_ordre: true,
             avec_stories: true,
             avec_sourdine: true,
+            avec_spam: true,
         }
     }
 
@@ -2732,6 +2760,7 @@ mod essais {
             avec_ordre: true,
             avec_stories: true,
             avec_sourdine: true,
+            avec_spam: true,
         };
         let t = s.recu(r, &mut c).expect("renvoi");
         assert_eq!(t["marques"]["favoris"], json!(["z", "a", "y", "x"]));
@@ -2799,6 +2828,31 @@ mod essais {
         let Some(n) = NouvelleMarques::lire(&json!({"head": [], "favoris": ["a"], "epingles": [], "version": 2})) else { panic!("non lue") };
         s.recu(n, &mut c);
         assert_eq!(c.listes.sourdine.get("k"), Some(&0));
+    }
+
+    /// Le spam : lu, envoyé, retiré (« Ce n'est pas du spam » : la clé part),
+    /// uni ; un serveur d'avant : le nôtre reste.
+    #[test]
+    fn marques_spam() {
+        let v = json!({"head": [], "favoris": [], "epingles": [], "version": 3,
+            "spam": {"15145550000": 1_764_370_800_000_i64, "m:1": 5, "": 1, "w:2": -3}});
+        let Some(NouvelleMarques::Recues { marques, avec_spam: true, .. }) = NouvelleMarques::lire(&v) else { panic!("non lue") };
+        assert_eq!(marques.spam, BTreeMap::from([("15145550000".to_string(), 1_764_370_800_000), ("m:1".to_string(), 5)]));
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { listes: Marques { spam: marques.spam.clone(), ..m(&[], &["a"], &[]) }, version: 3, a_envoyer: false };
+        assert!(s.recu(recues(Marques { spam: marques.spam.clone(), ..m(&[], &["a"], &[]) }, 3, None), &mut c).is_none());
+        c.listes.spam.remove("m:1");
+        let t = s.changement(&mut c).expect("trame");
+        assert_eq!(t["marques"]["spam"], json!({"15145550000": 1_764_370_800_000_i64}));
+        let a = Marques { spam: BTreeMap::from([("k".to_string(), 9)]), ..Default::default() };
+        let b = Marques { spam: BTreeMap::from([("k".to_string(), 1), ("j".to_string(), 2)]), ..Default::default() };
+        assert_eq!(Marques::union(&a, &b).spam, BTreeMap::from([("k".to_string(), 9), ("j".to_string(), 2)]));
+        // Un serveur d'avant le spam : le nôtre reste.
+        let mut s = SuiviMarques::default();
+        let mut c = CopieMarques { listes: Marques { spam: BTreeMap::from([("k".to_string(), 4)]), ..m(&[], &["a"], &[]) }, version: 2, a_envoyer: false };
+        let Some(n) = NouvelleMarques::lire(&json!({"head": [], "favoris": ["a"], "epingles": [], "version": 2})) else { panic!("non lue") };
+        s.recu(n, &mut c);
+        assert_eq!(c.listes.spam.get("k"), Some(&4));
     }
 
     fn ordre(l: &[&str]) -> Vec<String> {
