@@ -3323,6 +3323,7 @@ dependencies = [
  "gpui-pre-platform",
  "image",
  "qrcode",
+ "resvg 0.46.0",
  "ring",
  "rodio",
  "rustls",

@@ -4603,15 +4603,26 @@ impl Jasette {
         // L'avatar de la personne (photo du contact s'il y en a une), en image
         // de la notification : GNOME et KDE l'affichent par l'indice image-path
         // (l'icône -i est souvent remplacée par celle de l'app).
-        let photo = conv
-            .and_then(|c| self.photo_conv(c))
-            .or_else(|| self.avatars.get(&m.conv))
-            .filter(|p| p.is_file())
-            .map(|p| p.to_string_lossy().to_string());
-        let icone = photo.clone().unwrap_or_else(|| "mail-message-new".into());
+        // Un expéditeur automatique (Codes, Promotions, Avis, src/groupes_auto.rs),
+        // regroupement activé ou non : l'icône de son groupe, comme dans la liste.
+        let groupe = conv.and_then(|c| self.groupe_detecte(c)).map(|g| (g, boite_groupes::fond_rvb(g, th().ega)));
+        let photo = if groupe.is_some() {
+            None
+        } else {
+            conv.and_then(|c| self.photo_conv(c))
+                .or_else(|| self.avatars.get(&m.conv))
+                .filter(|p| p.is_file())
+                .map(|p| p.to_string_lossy().to_string())
+        };
         let conv_id = m.conv.clone();
         let boite = self.a_ouvrir.clone();
         std::thread::spawn(move || {
+            // Rendue une fois, puis gardée (hors du fil de l'interface).
+            let photo = match groupe {
+                Some((g, fond)) => boite_groupes::image_groupe(g, fond).map(|p| p.to_string_lossy().to_string()),
+                None => photo,
+            };
+            let icone = photo.clone().unwrap_or_else(|| "mail-message-new".into());
             let sortie = std::process::Command::new("notify-send")
                 .args(["-a", "Jasette", "-i", &icone, "-h", "string:desktop-entry:jasette"])
                 .args(photo.iter().flat_map(|p| ["-h".to_string(), format!("string:image-path:{p}")]))
@@ -7152,7 +7163,7 @@ impl Jasette {
                         cx.notify();
                     }))
                     // Le clic droit : corriger le regroupement automatique.
-                    .when(self.regroupement_actif() && !conv.group && !conv.large, |d| {
+                    .when(!self.hors_classement(conv), |d| {
                         let id = conv.id.clone();
                         d.on_mouse_down(
                             MouseButton::Right,
@@ -7168,7 +7179,7 @@ impl Jasette {
                             .relative()
                             .flex_none()
                             .py(px(10.))
-                            .child(div().relative().child(self.avatar_affiche(conv, 50.)).when(self.en_ligne(conv), |d| {
+                            .child(div().relative().child(self.avatar_liste(conv, 50.)).when(self.en_ligne(conv), |d| {
                                 d.child(presence::point_presence(50., if choisie { th().choisi } else { th().liste }))
                             }))
                             .when(badge, |d| {
@@ -7344,7 +7355,7 @@ impl Jasette {
             let conv = self.conv(&r.conv);
             let nom = conv.map(|c| self.nom_affiche(c)).unwrap_or_else(|| t("Sans nom").to_string());
             let photo = match conv {
-                Some(c) => self.avatar_affiche(c, 40.),
+                Some(c) => self.avatar_liste(c, 40.),
                 None => avatar(&nom, "", false, None, 40.),
             };
             // Qui l'a écrit, devant l'extrait (dans un groupe, ou moi).

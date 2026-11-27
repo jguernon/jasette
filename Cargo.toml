@@ -18,6 +18,8 @@ qrcode = { version = "0.14", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# L'icône des groupes automatiques en image de notification (src/boite_groupes.rs) : déjà dans l'arbre par gpui.
+resvg = { version = "0.46", default-features = false }
 # Client du serveur Jasette (src/distant.rs) : déjà dans l'arbre par gpui.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 ring = "0.17"

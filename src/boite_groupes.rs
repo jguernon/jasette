@@ -57,6 +57,63 @@ pub(crate) fn titre_rangee(g: Groupe, r: &Resume) -> String {
     }
 }
 
+/// La couleur du rond d'un groupe (RVB), comme `avatar_groupe` : en EGA, la
+/// couleur EGA la plus proche.
+pub(crate) fn fond_rvb(g: Groupe, ega: bool) -> u32 {
+    if !ega {
+        return g.fond();
+    }
+    let r = gpui::Rgba::from(ega_fond(c(g.fond())));
+    let o = |x: f32| (x.clamp(0., 1.) * 255.).round() as u32;
+    (o(r.r) << 16) | (o(r.g) << 8) | o(r.b)
+}
+
+/// L'avatar d'un groupe en image PNG, pour les notifications du bureau : le
+/// rond de sa couleur avec son icône Lucide blanche, rendu une fois puis
+/// gardé dans le dossier des données (icones/groupe-<clé>-<couleur>.png).
+pub(crate) fn image_groupe(g: Groupe, fond: u32) -> Option<PathBuf> {
+    image_groupe_dans(&dossier_donnees().join("icones"), g, fond)
+}
+
+fn image_groupe_dans(dossier: &std::path::Path, g: Groupe, fond: u32) -> Option<PathBuf> {
+    use gpui::AssetSource;
+    use resvg::tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Transform};
+    let chemin = dossier.join(format!("groupe-{}-{fond:06x}.png", g.cle()));
+    if chemin.is_file() {
+        return Some(chemin);
+    }
+    const COTE: u32 = 256;
+    let svg = gpui_kit_assets::AllAssets.load(&format!("icons/{}.svg", g.icone())).ok()??;
+    let svg = String::from_utf8_lossy(&svg).replace("currentColor", "#ffffff");
+    let arbre = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default()).ok()?;
+    let mut pix = Pixmap::new(COTE, COTE)?;
+    let mut p = Paint::default();
+    p.set_color_rgba8((fond >> 16) as u8, (fond >> 8) as u8, fond as u8, 255);
+    p.anti_alias = true;
+    let demi = COTE as f32 / 2.;
+    pix.fill_path(&PathBuilder::from_circle(demi, demi, demi)?, &p, FillRule::Winding, Transform::identity(), None);
+    // L'icône fait la moitié du rond, centrée (comme `avatar_groupe`).
+    let icone = COTE as f32 * 0.5;
+    let echelle = icone / arbre.size().width().max(1.);
+    let decalage = (COTE as f32 - icone) / 2.;
+    resvg::render(&arbre, Transform::from_row(echelle, 0., 0., echelle, decalage, decalage), &mut pix.as_mut());
+    let rgba: Vec<u8> = pix
+        .pixels()
+        .iter()
+        .flat_map(|x| {
+            let x = x.demultiply();
+            [x.red(), x.green(), x.blue(), x.alpha()]
+        })
+        .collect();
+    let img = image::RgbaImage::from_raw(COTE, COTE, rgba)?;
+    std::fs::create_dir_all(dossier).ok()?;
+    // Écrite à côté puis renommée : jamais une image à moitié écrite.
+    let provisoire = dossier.join(format!(".groupe-{}-{fond:06x}.png.{}", g.cle(), std::process::id()));
+    img.save_with_format(&provisoire, image::ImageFormat::Png).ok()?;
+    std::fs::rename(&provisoire, &chemin).ok()?;
+    Some(chemin)
+}
+
 impl Jasette {
     pub(crate) fn groupe_actif(&self, g: Groupe) -> bool {
         self.reglages.groupes_actifs.iter().any(|k| k == g.cle())
@@ -119,21 +176,43 @@ impl Jasette {
         g
     }
 
-    /// Le groupe (actif) d'une conversation de la boîte, s'il y en a un. Le
-    /// Head, les favoris, les épinglées, les groupes, les grands espaces et
-    /// les privées n'y vont jamais ; la correction à la main gagne sur la
-    /// détection (qui laisse aussi de côté les contacts).
+    /// Jamais classée, même corrigée à la main : le Head, les favoris, les
+    /// épinglées, les groupes, les grands espaces et les privées.
+    pub(crate) fn hors_classement(&self, c: &Conv) -> bool {
+        let r = &self.reglages;
+        c.group || c.large || self.privee(&c.id) || r.head.contains(&c.id) || r.etoiles.contains(&c.id) || r.epingles.contains(&c.id)
+    }
+
+    /// Le groupe d'une conversation, sa case cochée ou non : la correction à
+    /// la main gagne sur la détection (qui laisse aussi de côté les
+    /// contacts). Sert à l'avatar (`avatar_liste`) et aux notifications ;
+    /// `groupe_de` n'en garde que les groupes actifs.
+    pub(crate) fn groupe_detecte(&self, c: &Conv) -> Option<Groupe> {
+        if self.hors_classement(c) {
+            return None;
+        }
+        let correction = self.reglages.groupes_auto.get(&c.id).map(String::as_str);
+        let detecte = if correction.and_then(ga::lire_correction).is_some() || self.est_contact(c) { None } else { self.detection(c) };
+        ga::groupe_final(correction, detecte)
+    }
+
+    /// Le groupe (actif) d'une conversation de la boîte, s'il y en a un.
     pub(crate) fn groupe_de(&self, c: &Conv) -> Option<Groupe> {
         if !self.regroupement_actif() {
             return None;
         }
-        let r = &self.reglages;
-        if c.group || c.large || self.privee(&c.id) || r.head.contains(&c.id) || r.etoiles.contains(&c.id) || r.epingles.contains(&c.id) {
-            return None;
+        self.groupe_detecte(c).filter(|g| self.groupe_actif(*g))
+    }
+
+    /// L'avatar d'une conversation dans les listes (boîte, groupe ouvert,
+    /// archives, recherche, rétro) : l'icône de son groupe si c'est un
+    /// expéditeur automatique (même regroupement désactivé, même avec une
+    /// photo), sinon le sien.
+    pub(crate) fn avatar_liste(&self, c: &Conv, taille: f32) -> AnyElement {
+        match self.groupe_detecte(c) {
+            Some(g) => Self::avatar_groupe(g, taille).into_any_element(),
+            None => self.avatar_affiche(c, taille),
         }
-        let correction = r.groupes_auto.get(&c.id).map(String::as_str);
-        let detecte = if correction.and_then(ga::lire_correction).is_some() || self.est_contact(c) { None } else { self.detection(c) };
-        ga::groupe_final(correction, detecte).filter(|g| self.groupe_actif(*g))
     }
 
     /// Une promotion (groupe actif) : ni notification, ni non-lu compté.
@@ -421,11 +500,12 @@ impl Jasette {
     }
 
     /// Le menu du clic droit sur une conversation : « Ce n'est pas … » et
-    /// « Mettre dans … » (seulement les groupes actifs).
+    /// « Mettre dans … », regroupement activé ou non (l'avatar montre le
+    /// groupe dans tous les cas).
     pub(crate) fn menu_groupe_vue(&self, cx: &mut Context<Self>) -> Option<gpui::Deferred> {
         let m = self.menu_groupe.clone()?;
         let conv = self.conv(&m.id)?;
-        let actuel = self.groupe_de(conv);
+        let actuel = self.groupe_detecte(conv);
         let mut choix: Vec<(&'static str, &'static str)> = Vec::new();
         match actuel {
             Some(Groupe::Codes) => choix.push(("aucun", t("Ce n'est pas un code"))),
@@ -434,7 +514,7 @@ impl Jasette {
             None => {}
         }
         for g in Groupe::TOUS {
-            if Some(g) != actuel && self.groupe_actif(g) {
+            if Some(g) != actuel {
                 choix.push((
                     g.cle(),
                     match g {
@@ -568,5 +648,40 @@ impl Jasette {
             .child(div().px(px(4.)).text_size(px(12.)).text_color(th().texte_pale).child(t(
                 "Jasette range les expéditeurs automatiques dans une seule rangée, sur cet appareil, sans rien envoyer ailleurs. Les contacts, les favoris, les épinglées, les groupes et les conversations où vous avez écrit ne sont jamais regroupés.",
             )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Les couleurs des ronds en image : celles de `avatar_groupe` (en EGA,
+    /// `ega_fond`, une couleur EGA foncée).
+    #[test]
+    fn fonds_des_images() {
+        assert_eq!(fond_rvb(Groupe::Codes, false), 0x8b5cf6);
+        assert_eq!(fond_rvb(Groupe::Codes, true), 0xaa00aa);
+        assert_eq!(fond_rvb(Groupe::Avis, true), 0xaa5500);
+        assert!([0xaa0000, 0xaa00aa].contains(&fond_rvb(Groupe::Promos, true)));
+    }
+
+    /// L'image des notifications : un rond de la couleur du groupe (coins
+    /// transparents), l'icône blanche au milieu, gardée pour la fois suivante.
+    #[test]
+    fn image_des_notifications() {
+        let dossier = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".cache/essais-icones-groupes");
+        let _ = std::fs::remove_dir_all(&dossier);
+        for g in Groupe::TOUS {
+            let chemin = image_groupe_dans(&dossier, g, g.fond()).expect("image");
+            let img = image::open(&chemin).expect("png").to_rgba8();
+            assert_eq!(img.dimensions(), (256, 256));
+            assert_eq!(img.get_pixel(0, 0)[3], 0, "coin transparent");
+            let f = g.fond();
+            assert_eq!(img.get_pixel(128, 12).0, [(f >> 16) as u8, (f >> 8) as u8, f as u8, 255], "{g:?} : bord du rond");
+            let blancs = img.pixels().filter(|p| p.0 == [255, 255, 255, 255]).count();
+            assert!(blancs > 500, "{g:?} : l'icône blanche ({blancs} px)");
+            assert_eq!(image_groupe_dans(&dossier, g, g.fond()), Some(chemin));
+        }
+        let _ = std::fs::remove_dir_all(&dossier);
     }
 }
