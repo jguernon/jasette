@@ -11137,6 +11137,15 @@ impl Jasette {
     /// « Je suis le serveur Jasette » : installe et démarre jasette-serveur
     /// (service systemd de l'utilisateur), puis jumelle cette interface avec lui.
     fn devenir_serveur(&mut self, cx: &mut Context<Self>) {
+        // Windows : pas de serveur Jasette ; les ponts locaux restent branchés.
+        #[cfg(target_os = "windows")]
+        {
+            if let Err(e) = installer_serveur() {
+                self.erreur = Some(e);
+            }
+            cx.notify();
+            return;
+        }
         // Les ponts locaux s'arrêtent avant que le serveur lance les siens.
         self.reglages.mode_serveur = String::new();
         self.pont = None;
