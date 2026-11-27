@@ -23,7 +23,6 @@ pub(crate) enum Rangee<'a> {
 
 /// Ce qu'un groupe montre dans sa rangée.
 pub(crate) struct Resume {
-    pub membres: usize,
     pub non_lus: usize,
     /// L'heure du message le plus récent du groupe.
     pub time: i64,
@@ -73,13 +72,10 @@ fn pas_un(g: Groupe) -> &'static str {
     }
 }
 
-/// « Codes · 3 nouveaux », « Promotions · 12 », « Avis ».
-pub(crate) fn titre_rangee(g: Groupe, r: &Resume) -> String {
-    match g {
-        Groupe::Promos => format!("{} · {}", titre(g), r.membres),
-        _ if r.non_lus == 0 => titre(g).to_string(),
-        _ => format!("{} · {} {}", titre(g), r.non_lus, if r.non_lus == 1 { t("nouveau") } else { t("nouveaux") }),
-    }
+/// Le nom seul (« Codes », « Promotions ») : les non-lus sont dans la
+/// pastille de l'avatar, comme dans la colonne de gauche.
+pub(crate) fn titre_rangee(g: Groupe, _r: &Resume) -> String {
+    titre(g).to_string()
 }
 
 /// La couleur du rond d'un groupe (RVB), comme `avatar_groupe` : en EGA, la
@@ -268,7 +264,6 @@ impl Jasette {
             None
         };
         Resume {
-            membres: membres.len(),
             non_lus: membres.iter().filter(|c| c.unread).count(),
             time: dernier.map_or(0, |c| c.time),
             dernier_nom: dernier.map(|c| self.nom_affiche(c)).unwrap_or_default(),
@@ -431,7 +426,17 @@ impl Jasette {
                 this.ouvrir_groupe(Some(g));
                 cx.notify();
             }))
-            .child(div().flex_none().py(px(10.)).child(Self::avatar_groupe(g, 50.)))
+            .child(
+                div()
+                    .flex_none()
+                    .py(px(10.))
+                    .child(div().relative().child(Self::avatar_groupe(g, 50.)).when(r.non_lus > 0, |d| {
+                        // La pastille des non-lus, comme celles de la colonne de gauche
+                        // (pâle pour Promotions, qui ne compte pas comme « nouveau »).
+                        let teinte = if g == Groupe::Promos { ton(th().texte_pale, th().accent) } else { th().accent };
+                        d.child(pastille_nombre(r.non_lus, teinte))
+                    })),
+            )
             .child(
                 div()
                     .flex()

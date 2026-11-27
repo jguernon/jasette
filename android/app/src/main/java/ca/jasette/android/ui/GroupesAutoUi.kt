@@ -3,6 +3,7 @@ package ca.jasette.android.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -66,17 +67,9 @@ fun AvatarGroupe(g: GroupeAuto, taille: Dp) {
     }
 }
 
-/** Le titre d'une rangée de groupe : « Codes · 3 nouveaux », « Promotions · 12 ». */
-fun titreGroupe(g: GroupeAuto, membres: List<Conv>): String {
-    val nom = t(g.titre)
-    if (g == GroupeAuto.PROMOS) return "$nom · ${membres.size}"
-    val n = membres.count { it.unread }
-    return when (n) {
-        0 -> nom
-        1 -> "$nom · 1 ${t("nouveau")}"
-        else -> "$nom · $n ${t("nouveaux")}"
-    }
-}
+/** Le titre d'une rangée de groupe : le nom seul ; les non-lus sont dans la pastille de l'avatar. */
+@Suppress("UNUSED_PARAMETER")
+fun titreGroupe(g: GroupeAuto, membres: List<Conv>): String = t(g.titre)
 
 /** L'aperçu d'une rangée de groupe (Codes : « Google : 482913 » ; Promotions : les noms). */
 fun apercuGroupe(g: GroupeAuto, membres: List<Conv>): String {
@@ -98,7 +91,14 @@ fun RangeeGroupe(g: GroupeAuto, membres: List<Conv>, ouvrir: () -> Unit) {
         Modifier.fillMaxWidth().clickable(onClick = ouvrir).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AvatarGroupe(g, 52.dp)
+        val nonLus = membres.count { it.unread }
+        Box {
+            AvatarGroupe(g, 52.dp)
+            // La pastille des non-lus, comme celles de la barre de navigation.
+            if (nonLus > 0) Box(Modifier.align(Alignment.TopEnd).offset(x = 3.dp, y = (-3).dp)) {
+                Pastille(if (nonLus > 99) "99+" else nonLus.toString())
+            }
+        }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

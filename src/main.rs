@@ -13404,7 +13404,7 @@ impl Jasette {
 
 // ---- Petites pièces ----
 
-fn pastille_nombre(n: usize, couleur: Hsla) -> impl IntoElement {
+pub(crate) fn pastille_nombre(n: usize, couleur: Hsla) -> impl IntoElement {
     div()
         .absolute()
         .top(px(-3.))
