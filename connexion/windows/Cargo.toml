@@ -1,0 +1,25 @@
+# Jasette (Windows) — la fenêtre de connexion par page web : WebView2 (Edge),
+# à la place des scripts Python GTK/WebKit de connexion/ sous Linux.
+# Programme à part (son propre Cargo.lock) : rien de ce qui est ici n'entre
+# dans l'app ni dans la version Linux. Compilé par paquets/empaqueter-windows.sh.
+[package]
+name = "jasette-connexion"
+version = "1.0.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[dependencies]
+wry = "0.58"
+tao = "0.38"
+serde_json = "1"
+regex-lite = "0.1"
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+
+# Hors de l'espace de travail de jasette (le Cargo.toml du dossier parent).
+[workspace]
