@@ -43,6 +43,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -147,6 +148,7 @@ fun FichePersonne(ancre: String, fermer: () -> Unit) {
     val etat = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var lierOuvert by remember { mutableStateOf(false) }
     var edition by remember { mutableStateOf(false) }
+    var sourdine by remember { mutableStateOf(false) }
     val g = groupePersonne(ancre)
     val nom = nomPersonne(g)
     fun groupeIds() = groupePersonne(ancre).ids
@@ -182,6 +184,15 @@ fun FichePersonne(ancre: String, fermer: () -> Unit) {
                 }
             }
             Text(nom, color = P.texteFort, fontWeight = FontWeight.Bold, fontSize = 24.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
+            // En sourdine (Sourdine.kt) : la cloche barrée et jusqu'à quand.
+            val fin = if (lierOuvert) null else ca.jasette.android.echeanceSourdine(Marques.sourdine, g.ids)
+            if (fin != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icones.sourdine, null, tint = P.textePale, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(ca.jasette.android.libelleSourdine(fin), color = P.textePale, fontSize = 13.sp)
+                }
+            }
             // « Voir la story » (§5.15) : ouvre la story hors de Jasette ; son cercle s'efface partout.
             val story = if (lierOuvert) null else ca.jasette.android.Stories.premiere(g.ids)
             if (story != null) {
@@ -278,11 +289,24 @@ fun FichePersonne(ancre: String, fermer: () -> Unit) {
                         Spacer(Modifier.width(10.dp))
                         Text(t("Lier une autre conversation…"), color = P.accent, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                     }
+                    // La sourdine de la personne : toutes ses conversations liées (Sourdine.kt).
+                    val enSourdine = g.ids.any { Marques.enSourdine(it) }
+                    Row(
+                        Modifier.fillMaxWidth().clip(forme(14.dp))
+                            .clickable { basculerSourdine(groupeIds()) { sourdine = true } }
+                            .padding(horizontal = 10.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(if (enSourdine) Icons.Filled.Notifications else Icones.sourdine, null, tint = P.accent, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text(texteSourdine(g.ids), color = P.accent, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    }
                 }
             }
         }
     }
     if (edition) EditionPersonne(ancre) { edition = false }
+    if (sourdine) FenetreSourdine(groupeIds(), nom) { sourdine = false }
 }
 
 /** Le crayon : un petit badge rond (carré en EGA et rétro) sur le bas du grand avatar. */
@@ -583,6 +607,7 @@ private fun LigneConv(c: Conv, active: Boolean, detail: String?, toucher: (() ->
                     color = if (c.unread) P.texteFort else P.textePale, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                IconeSourdine(c.id, 13.dp, modifier = Modifier.padding(end = 4.dp))
                 if (c.time > 0) Text(heureListe(c.time), color = P.textePale, fontSize = 12.sp)
             }
             if (detail != null) Text(detail, color = P.textePale, fontSize = 11.sp, maxLines = 1)

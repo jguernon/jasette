@@ -270,10 +270,15 @@ fun Fil(
                         // Le nom et le service, serrés et centrés sur l'avatar : la barre donne
                         // au titre l'interligne de titleLarge (28 sp), qui les poussait vers le haut.
                         Column(verticalArrangement = Arrangement.Center) {
-                            Text(
-                                entete?.let { nomAffiche(it) } ?: "", fontSize = 17.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis, style = androidx.compose.material3.LocalTextStyle.current.merge(TITRE_SERRE),
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    entete?.let { nomAffiche(it) } ?: "", fontSize = 17.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis, style = androidx.compose.material3.LocalTextStyle.current.merge(TITRE_SERRE),
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                                // En sourdine (Sourdine.kt) : la cloche barrée.
+                                IconeSourdine(id, 15.dp, P.sousTitreBarre, Modifier.padding(start = 6.dp))
+                            }
                             // « Actif il y a 12 min » d'abord (Presence.kt).
                             val activite = if (Depot.ecritDe(id) != null) t("écrit…")
                                 else conv?.let { Depot.presenceDe(it) }?.let { texteActivite(it, System.currentTimeMillis()) }

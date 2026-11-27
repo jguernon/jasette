@@ -106,6 +106,12 @@ object Marques {
      */
     val storiesOuvertes: SnapshotStateMap<String, Long> = mutableStateMapOf()
     /**
+     * La sourdine par conversation (Sourdine.kt, marque `sourdine`, §5.5) :
+     * id → échéance (ms), 0 = jusqu'à réactivation. Coupe seulement les
+     * notifications système de la conversation. Une échéance passée ne compte plus.
+     */
+    val sourdine: SnapshotStateMap<String, Long> = mutableStateMapOf()
+    /**
      * Depuis quand (ms, horloge du téléphone) chaque id est dans [archives], ici :
      * seul un message reçu après cette heure la désarchive (pas une réaction
      * ni la mise à jour d'un vieux message). Propre à l'appareil, jamais envoyé.
@@ -425,6 +431,10 @@ object Marques {
         try {
             storiesOuvertes.putAll(lireStoriesOuvertes(JSONObject(p.getString("stories_ouvertes", "{}") ?: "{}")))
         } catch (_: Exception) {}
+        sourdine.clear()
+        try {
+            sourdine.putAll(lireSourdine(JSONObject(p.getString("sourdine", "{}") ?: "{}")))
+        } catch (_: Exception) {}
         notesMusique = p.getString("notes_musique", "") ?: ""
         notesMusiqueFormat = formatMusique(p.getString("notes_musique_format", "artiste"))
         notesServices = try {
@@ -522,6 +532,7 @@ object Marques {
             ?.putBoolean("notes_contacts", notesContacts)
             ?.putBoolean("stories", stories)
             ?.putString("stories_ouvertes", JSONObject(storiesOuvertes.toMap() as Map<*, *>).toString())
+            ?.putString("sourdine", JSONObject(sourdine.toMap() as Map<*, *>).toString())
             ?.putString("notes_musique", notesMusique)
             ?.putString("notes_musique_format", notesMusiqueFormat)
             ?.putString("notes_services", JSONArray(notesServices).toString())
@@ -571,6 +582,33 @@ object Marques {
         if (lireCorrection(valeur) == null || groupesAuto[id] == valeur) return
         groupesAuto[id] = valeur
         changement()
+    }
+
+    /** [id] est-elle en sourdine maintenant ? (Sourdine.kt) */
+    fun enSourdine(id: String, maintenant: Long = System.currentTimeMillis()): Boolean = sourdineActive(sourdine, id, maintenant)
+
+    /**
+     * Pose ([echeance] en ms, 0 = jusqu'à réactivation) ou lève (null) la
+     * sourdine de [ids] ; les échues s'en vont au passage. Gardée et partagée.
+     */
+    fun poserSourdine(ids: Collection<String>, echeance: Long?) {
+        val avant = sourdine.toMap()
+        val n = HashMap(nettoyerSourdine(avant))
+        for (id in ids) if (echeance == null) n.remove(id) else n[id] = echeance
+        val r = nettoyerSourdine(n)
+        if (r == avant) return
+        sourdine.clear()
+        sourdine.putAll(r)
+        changement()
+    }
+
+    /** Les sourdines échues s'en vont d'ici (le serveur les élague de son côté) ; vrai si l'une est partie. */
+    fun elaguerSourdine(maintenant: Long = System.currentTimeMillis()): Boolean {
+        val r = nettoyerSourdine(sourdine.toMap(), maintenant)
+        if (r.size == sourdine.size) return false
+        sourdine.clear()
+        sourdine.putAll(r)
+        return true
     }
 
     /** Rend privée (à la fin de la liste) ou ne l'est plus ; rien si c'est déjà fait. */
@@ -653,8 +691,9 @@ object Marques {
         val f = moods.remove(id) != null
         val g = emojis.remove(id) != null
         val h = groupesAuto.remove(id) != null
+        val i = sourdine.remove(id) != null
         if (d) majDepuis()
-        if (a || b || c || d || e || f || g || h) changement()
+        if (a || b || c || d || e || f || g || h || i) changement()
     }
 
     // ---- La synchronisation avec le serveur Jasette (§5.5) ----
@@ -683,12 +722,13 @@ object Marques {
         val groupesAuto: Map<String, String> = emptyMap(),
         val stories: Boolean = false,
         val storiesOuvertes: Map<String, Long> = emptyMap(),
+        val sourdine: Map<String, Long> = emptyMap(),
     ) {
         fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty() && privees.isEmpty() &&
             moods.isEmpty() && emojis.isEmpty() && !garderArchives && cacherApresJours == 0 && presenceEnLigne &&
             sons == "bulle" && notesContacts && notesMusique.isEmpty() && notesMusiqueFormat == "artiste" && notesServices == listOf("tout") &&
             personnes.isEmpty() && personnesRefus.isEmpty() && contactsPerso.isEmpty() && ordreServices.isEmpty() && groupesAuto.isEmpty() &&
-            !stories && storiesOuvertes.isEmpty()
+            !stories && storiesOuvertes.isEmpty() && sourdine.isEmpty()
 
         /** Chaque liste de this, dans son ordre, puis les ids de [b] qui n'y sont pas. */
         fun union(b: Listes) = Listes(
@@ -724,6 +764,8 @@ object Marques {
             stories,
             // Les stories ouvertes : l'heure la plus récente de chaque côté (comme le serveur).
             unirStoriesOuvertes(storiesOuvertes, b.storiesOuvertes),
+            // La sourdine : comme les moods, les nôtres gagnent ; les échues tombent.
+            nettoyerSourdine(b.sourdine + sourdine),
         )
 
         /** Les ids de this absents de [b], liste par liste. */
@@ -747,6 +789,7 @@ object Marques {
             groupesAuto.filter { (k, v) -> b.groupesAuto[k] != v },
             stories,
             storiesOuvertes.filter { (k, v) -> (b.storiesOuvertes[k] ?: 0L) < v },
+            sourdine.filter { (k, v) -> b.sourdine[k] != v },
         )
     }
 
@@ -756,7 +799,7 @@ object Marques {
             garderArchives, cacherApresJours, presenceEnLigne, sonsConversation,
             notesContacts, notesMusique, notesMusiqueFormat, notesServices,
             personnes, personnesRefus, contactsPerso, ordreServices, groupesAuto.toMap(),
-            stories, storiesOuvertes.toMap(),
+            stories, storiesOuvertes.toMap(), sourdine.toMap(),
         )
 
     private fun poser(l: Listes) {
@@ -788,6 +831,7 @@ object Marques {
             surStories?.invoke(l.stories)
         }
         if (storiesOuvertes.toMap() != l.storiesOuvertes) { storiesOuvertes.clear(); storiesOuvertes.putAll(l.storiesOuvertes) }
+        if (sourdine.toMap() != l.sourdine) { sourdine.clear(); sourdine.putAll(l.sourdine) }
         notesMusique = l.notesMusique
         notesMusiqueFormat = l.notesMusiqueFormat
         notesServices = l.notesServices
@@ -848,6 +892,7 @@ object Marques {
             .put("groupes_auto", JSONObject(l.groupesAuto))
             .put("stories", l.stories)
             .put("stories_ouvertes", JSONObject(l.storiesOuvertes as Map<*, *>))
+            .put("sourdine", JSONObject(l.sourdine as Map<*, *>))
             .put("version", version).put("id", prochain)
         if (!envoi(JSONObject().put("marques", corps))) {
             // La connexion tombe : le rejeu suivant tranchera.
@@ -905,6 +950,8 @@ object Marques {
             // Et pour les stories (serveur d'avant §5.15) : les nôtres restent.
             if (m.opt("stories") is Boolean) m.optBoolean("stories") else stories,
             m.optJSONObject("stories_ouvertes")?.let { lireStoriesOuvertes(it) } ?: storiesOuvertes.toMap(),
+            // Et pour la sourdine (serveur d'avant elle) : la nôtre reste.
+            m.optJSONObject("sourdine")?.let { lireSourdine(it) } ?: nettoyerSourdine(sourdine.toMap()),
         )
         val v = m.optLong("version", -1)
         if (v < 0) return

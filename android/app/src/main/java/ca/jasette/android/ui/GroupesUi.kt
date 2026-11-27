@@ -362,6 +362,8 @@ private fun RangeeEspace(c: Conv, choisie: Boolean, retrait: Boolean, retiree: (
                         fontWeight = if (c.unread) FontWeight.Bold else FontWeight.SemiBold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), fontSize = Taille.liste(15f),
                     )
+                    // En sourdine (Sourdine.kt) : la cloche barrée.
+                    IconeSourdine(c.id, 14.dp, if (blanc) P.surSelection else P.textePale, Modifier.padding(start = 4.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(
                         heureListe(c.time), color = if (blanc) P.surSelection else if (c.unread) P.accent else P.textePale,

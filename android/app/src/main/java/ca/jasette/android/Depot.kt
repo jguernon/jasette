@@ -1174,8 +1174,9 @@ object Depot {
         if (nouveau && !m.fromMe) {
             if (ouverteIci) {
                 commande(JSONObject().put("cmd", "read").put("conv", m.conv).put("msg", m.id))
-            } else if (!Marques.estPrivee(m.conv) && notifierMessage(conv, m) && !RegroupementAuto.promo(conv)) {
+            } else if (!Marques.estPrivee(m.conv) && notifierMessage(conv, m) && !RegroupementAuto.promo(conv) && notificationPermise(m.conv)) {
                 // Liste privée : aucune notification, même neutre (rien ne trahit la conversation).
+                // En sourdine (Sourdine.kt) : aucune notification, ni son, ni vibration, ni voiture.
                 // Une promotion regroupée (RegroupementAuto.kt) : aucune non plus.
                 // Un grand espace hors de la boîte de réception : seulement sur mention ou réponse (§5.13).
                 notifier?.invoke(m, conv)

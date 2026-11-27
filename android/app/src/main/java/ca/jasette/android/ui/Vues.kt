@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -578,6 +579,11 @@ fun Rangee(
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), fontSize = Taille.liste(16f),
                     )
                     if (c.e2ee) Icon(Icons.Filled.Lock, t("Chiffré"), tint = P.textePale, modifier = Modifier.size(14.dp))
+                    // En sourdine (Sourdine.kt) : la cloche barrée.
+                    if (Marques.enSourdine(c.id)) {
+                        Spacer(Modifier.width(4.dp))
+                        IconeSourdine(c.id, 14.dp, if (choisie) P.surSelection else P.textePale)
+                    }
                     if (epinglee && !reorganiser) {
                         Spacer(Modifier.width(4.dp))
                         Icon(Icones.epingle, t("Épinglée"), tint = P.textePale, modifier = Modifier.size(14.dp))
@@ -627,7 +633,7 @@ fun Rangee(
 /**
  * Le menu d'une conversation (`menu_conversation` du bureau), le même dans la
  * liste (appui long) et dans l'en-tête du fil (« … ») : Head, favoris,
- * épingler, médias, archiver et supprimer (selon `peutArchiver` et
+ * épingler, sourdine (SourdineUi.kt), médias, archiver et supprimer (selon `peutArchiver` et
  * `peutSupprimer` ; supprimer demande une confirmation), puis rechercher.
  */
 @Composable
@@ -642,6 +648,7 @@ fun MenuConversation(
     var confirmer by remember { mutableStateOf(false) }
     var feuilleMood by remember { mutableStateOf(false) }
     var classer by remember { mutableStateOf(false) }
+    var sourdine by remember { mutableStateOf(false) }
     // Une conversation absente (affichée depuis le cache des marques) : seules ses
     // marques se changent ; archiver ou supprimer attend que son service la charge.
     val chargee = Depot.conv(c.id) != null
@@ -672,6 +679,11 @@ fun MenuConversation(
         Item(if (dansHead) t("Retirer du Head") else t("Ajouter au Head"), Icones.grille) { Marques.basculerHead(c.id) }
         Item(if (favori) t("Retirer des favoris") else t("Ajouter aux favoris"), Icons.Filled.Star) { Marques.basculerFavori(c.id) }
         Item(if (epinglee) t("Désépingler") else t("Épingler en haut"), Icones.epingle) { Marques.basculerEpingle(c.id) }
+        // La sourdine (Sourdine.kt) : coupe seulement les notifications système.
+        val ids = listOf(c.id)
+        Item(texteSourdine(ids), if (Marques.enSourdine(c.id)) Icons.Filled.Notifications else Icones.sourdine) {
+            basculerSourdine(ids) { sourdine = true }
+        }
         // Liste privée : seulement si elle est activée sur cet appareil.
         if (ca.jasette.android.Prive.actif) {
             val privee = Marques.estPrivee(c.id)
@@ -726,6 +738,7 @@ fun MenuConversation(
 
     if (feuilleMood) FeuilleMood(c.id, nomAffiche(c)) { feuilleMood = false }
     if (classer) FenetreClasser(c) { classer = false }
+    if (sourdine) FenetreSourdine(listOf(c.id), nomAffiche(c)) { sourdine = false }
 
     if (confirmer) {
         AlertDialog(

@@ -99,8 +99,9 @@ object ConvVoiture {
     fun recentes(): List<Conv> =
         Depot.boite.filter { dansBoiteDeReception(it) && !RegroupementAuto.promo(it) }.sortedByDescending { it.time }
 
-    /** La conversation du dernier message reçu (non lue de préférence). */
-    fun dernierRecu(): Conv? = recentes().let { l -> l.firstOrNull { it.unread && !it.fromMe } ?: l.firstOrNull { !it.fromMe } }
+    /** La conversation du dernier message reçu (non lue de préférence), mise en avant ; jamais une conversation en sourdine (Sourdine.kt). */
+    fun dernierRecu(): Conv? = recentes().filter { notificationPermise(it.id) }
+        .let { l -> l.firstOrNull { it.unread && !it.fromMe } ?: l.firstOrNull { !it.fromMe } }
 
     /** Le Head (marque `head`), ou les favoris si le Head est vide. */
     fun visages(): List<Conv> {
