@@ -1,0 +1,34 @@
+// Jasette — les ressources de l'exécutable Windows (compilées par build.rs avec
+// llvm-rc, seulement pour la cible Windows). L'icône 1 est celle que GPUI
+// donne aux fenêtres (gpui_windows : LoadImageW(…, 1, IMAGE_ICON)).
+// JASETTE_V1..V4 et JASETTE_VERSION viennent de build.rs.
+// (sans winver.h : VS_VERSION_INFO = 1, VOS_NT_WINDOWS32 = 0x40004, VFT_APP = 1)
+
+1 ICON "jasette.ico"
+// Le manifeste (DPI par écran, Common-Controls 6) vient de GPUI (gpui.lib).
+
+1 VERSIONINFO
+FILEVERSION JASETTE_V1,JASETTE_V2,JASETTE_V3,JASETTE_V4
+PRODUCTVERSION JASETTE_V1,JASETTE_V2,JASETTE_V3,JASETTE_V4
+FILEOS 0x40004L
+FILETYPE 0x1L
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "0c0c04b0"
+    BEGIN
+      VALUE "CompanyName", "Jonathan Guernon"
+      VALUE "FileDescription", "Jasette"
+      VALUE "FileVersion", JASETTE_VERSION
+      VALUE "InternalName", "jasette"
+      VALUE "LegalCopyright", "AGPL-3.0-or-later"
+      VALUE "OriginalFilename", "jasette.exe"
+      VALUE "ProductName", "Jasette"
+      VALUE "ProductVersion", JASETTE_VERSION
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0c0c, 1200
+  END
+END

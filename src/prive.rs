@@ -184,6 +184,9 @@ fn dossier_applis() -> Option<PathBuf> {
 const ICONE_PRIVEE: &[u8] = include_bytes!("../assets/png/jasette-prive-256.png");
 
 fn poser_lanceur(oui: bool) {
+    // Windows : pas de lanceur .desktop (« jasette --prive » reste possible).
+    #[cfg(target_os = "windows")]
+    return;
     let Some(donnees) = dossier_applis() else { return };
     let lanceur = donnees.join("applications/jasette-prive.desktop");
     let icone = donnees.join("icons/hicolor/256x256/apps/jasette-prive.png");

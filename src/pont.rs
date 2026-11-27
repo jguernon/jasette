@@ -60,6 +60,9 @@ pub(crate) fn chemin(nom: &str, var: &str) -> Option<PathBuf> {
     if let Some(p) = std::env::var_os(var) {
         return Some(PathBuf::from(p));
     }
+    // Windows : jasette-pont.exe, etc.
+    #[cfg(target_os = "windows")]
+    let nom = &format!("{nom}.exe");
     let mut essais = Vec::new();
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
@@ -102,6 +105,12 @@ impl Pont {
     fn lancer_nomme(nom: &str, var: &str, service: Option<&str>) -> Result<Self, String> {
         let chemin = chemin(nom, var).ok_or_else(|| format!("{nom} introuvable"))?;
         let mut cmd = Command::new(&chemin);
+        // Windows : un pont est un programme « console » ; pas de fenêtre noire.
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
         if let Some(s) = service {
             cmd.env("JASETTE_META_SERVICE", s);
         }

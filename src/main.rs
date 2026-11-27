@@ -12,12 +12,18 @@
 //! plat à la Beeper (aplats gris, fil noir), le défaut ; et « Verre », le look
 //! liquid glass du skill stageshow (fond pastel à halos, verre translucide).
 
+// Windows : pas de console pour la version publiée ; le code propre à Linux,
+// court-circuité par les blocs `cfg(target_os = "windows")`, reste inatteignable.
+#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(target_os = "windows", allow(unreachable_code, unused_variables, unused_mut, unused_assignments, dead_code, unused_imports))]
+
 mod apercu;
 mod cache;
 mod pont;
 mod prive;
 mod mood;
 mod nouveau;
+#[cfg_attr(target_os = "windows", path = "maj_windows.rs")]
 mod maj;
 mod retro;
 mod presence;
@@ -33,6 +39,8 @@ mod codes;
 mod groupes_auto;
 mod boite_groupes;
 mod ponts_langue;
+#[cfg(target_os = "windows")]
+mod windows;
 
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -2660,6 +2668,9 @@ fn icone_app_grande() -> Arc<gpui::Image> {
 /// la reprennent. Le lanceur .desktop est retouché pour que GNOME relise.
 fn installer_icone(blanche: bool) -> Result<(), String> {
     ICONE_EST_BLANCHE.store(blanche, Ordering::Relaxed);
+    // Windows : l'icône de la barre des tâches est celle de l'exécutable.
+    #[cfg(target_os = "windows")]
+    return Ok(());
     let donnees = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
@@ -2760,6 +2771,9 @@ fn deprefixer_meta(v: &mut Value) -> Option<Service> {
 /// socket wayland-0 par défaut et ouvrirait la fenêtre sur l'écran physique :
 /// on le force alors sur X11, le même écran que Jasette.
 fn commande_fenetre_connexion() -> std::process::Command {
+    // Windows : jasette-connexion.exe (WebView2), qui reçoit les mêmes arguments.
+    #[cfg(target_os = "windows")]
+    return windows::commande(windows::fenetre_connexion().unwrap_or_else(|| PathBuf::from("jasette-connexion.exe")));
     let mut c = std::process::Command::new("python3");
     let sans_wayland = std::env::var_os("WAYLAND_DISPLAY").map_or(true, |v| v.is_empty());
     if sans_wayland && std::env::var_os("DISPLAY").is_some() && std::env::var_os("GDK_BACKEND").is_none() {
@@ -2769,6 +2783,9 @@ fn commande_fenetre_connexion() -> std::process::Command {
 }
 
 fn script_connexion_nomme(nom: &str) -> Option<PathBuf> {
+    // Windows : le nom du script, premier argument de jasette-connexion.exe.
+    #[cfg(target_os = "windows")]
+    return windows::fenetre_connexion().map(|_| PathBuf::from(nom));
     let mut essais = Vec::new();
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
@@ -2780,6 +2797,8 @@ fn script_connexion_nomme(nom: &str) -> Option<PathBuf> {
 }
 
 fn script_connexion() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    return windows::fenetre_connexion().map(|_| PathBuf::from("jasette-connexion.py"));
     if let Some(p) = std::env::var_os("JASETTE_CONNEXION") {
         return Some(PathBuf::from(p));
     }
@@ -2803,10 +2822,14 @@ fn fichier_demarrage() -> Option<PathBuf> {
 
 /// Jasette s'ouvre-t-elle avec l'ordinateur ? (le fichier sur disque fait foi)
 fn demarrage_auto() -> bool {
+    #[cfg(target_os = "windows")]
+    return windows::demarrage_auto();
     fichier_demarrage().is_some_and(|f| f.is_file())
 }
 
 fn regler_demarrage_auto(actif: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    return windows::regler_demarrage_auto(actif);
     let fichier = fichier_demarrage().ok_or("Dossier de configuration introuvable")?;
     if !actif {
         return match std::fs::remove_file(&fichier) {
@@ -2847,6 +2870,8 @@ fn adresses_serveur() -> Vec<String> {
 }
 
 fn nom_machine() -> String {
+    #[cfg(target_os = "windows")]
+    return windows::nom_machine();
     std::fs::read_to_string("/etc/hostname").map(|s| s.trim().to_string()).ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "Jasette".into())
 }
 
@@ -2875,6 +2900,9 @@ fn commande_serveur(args: &[&str]) -> Result<String, String> {
 /// Installe jasette-serveur comme service systemd de l'utilisateur, le démarre,
 /// puis jumelle cette interface avec lui (code lu sur place, empreinte vérifiée).
 fn installer_serveur() -> Result<pont::ConfigServeur, String> {
+    // Windows : pas de serveur Jasette (ni systemd) ; le mode client marche.
+    #[cfg(target_os = "windows")]
+    return Err(t("Le serveur Jasette n'est pas offert sous Windows : installez-le sur une machine Linux, puis branchez-vous-y.").into());
     let bin = pont::chemin("jasette-serveur", "JASETTE_SERVEUR").ok_or("jasette-serveur introuvable")?;
     let ponts = pont::chemin("jasette-pont", "JASETTE_PONT")
         .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
@@ -2929,6 +2957,8 @@ fn installer_serveur() -> Result<pont::ConfigServeur, String> {
 
 /// Ouvre une adresse (https:, tel:) avec l'application par défaut.
 fn ouvrir_adresse(adresse: &str) {
+    #[cfg(target_os = "windows")]
+    return windows::ouvrir(std::ffi::OsStr::new(adresse));
     let _ = std::process::Command::new("xdg-open")
         .arg(adresse)
         .stdin(std::process::Stdio::null())
@@ -2957,6 +2987,8 @@ fn adresse_appel(conv: &Conv) -> Option<String> {
 
 /// Ouvre un fichier avec l'application par défaut.
 fn ouvrir_fichier(p: &PathBuf) {
+    #[cfg(target_os = "windows")]
+    return windows::ouvrir(p.as_os_str());
     let _ = std::process::Command::new("xdg-open")
         .arg(p)
         .stdin(std::process::Stdio::null())
@@ -4623,6 +4655,9 @@ impl Jasette {
                 None => photo,
             };
             let icone = photo.clone().unwrap_or_else(|| "mail-message-new".into());
+            // Windows : une notification du système (sans action au clic).
+            #[cfg(target_os = "windows")]
+            return windows::notifier(&titre, &corps, photo.as_deref());
             let sortie = std::process::Command::new("notify-send")
                 .args(["-a", "Jasette", "-i", &icone, "-h", "string:desktop-entry:jasette"])
                 .args(photo.iter().flat_map(|p| ["-h".to_string(), format!("string:image-path:{p}")]))
@@ -13533,6 +13568,11 @@ fn anglais() -> bool {
 
 /// La traduction d'un texte de l'interface (écrit en français dans le code).
 fn t(fr: &'static str) -> &'static str {
+    // Windows : quelques textes propres à cette version (src/windows.rs).
+    #[cfg(target_os = "windows")]
+    if let Some(w) = windows::traduire(fr, anglais()) {
+        return w;
+    }
     if !anglais() {
         return fr;
     }
@@ -14116,6 +14156,8 @@ fn statut(s: &str) -> &'static str {
 }
 
 fn main() {
+    #[cfg(target_os = "windows")]
+    windows::preparer();
     // « jasette --version » : la version et son numéro (paquets/empaqueter.sh
     // le lit pour écrire version-linux.json).
     if std::env::args().nth(1).as_deref() == Some("--version") {
