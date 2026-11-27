@@ -1,7 +1,7 @@
 // Les marques : le Head, les favoris, les épinglées, les archives, les
 // privées, les moods, les emojis rapides, les corrections du regroupement
 // automatique (groupes_auto), les personnes et les contacts perso (fiche de la
-// personne, personnes.go), l'ordre des services et les réglages garder_archives et
+// personne, personnes.go), la sourdine par conversation (sourdine.go), l'ordre des services et les réglages garder_archives et
 // cacher_apres_jours de Jasette, partagés entre tous les appareils de l'utilisateur (voir
 // PROTOCOLE.md, §5.5).
 //
@@ -88,6 +88,10 @@ type Marques struct {
 	// récente ouverte depuis Jasette}. Le cercle de ce contact reste caché
 	// jusqu'à une story plus récente. Purgé après 48 h. Absent : vide.
 	StoriesOuvertes map[string]int64 `json:"stories_ouvertes"`
+	// Sourdine : {id de conversation : échéance (ms), 0 = jusqu'à
+	// réactivation} (sourdine.go). Coupe seulement les notifications système
+	// des clients. Élaguée quand l'échéance est passée. Absent : vide.
+	Sourdine map[string]int64 `json:"sourdine"`
 	// NotesMusique : l'appareil qui publie « ce que j'écoute » ("" : personne).
 	NotesMusique string `json:"notes_musique"`
 	// NotesMusiqueFormat : ce que dit la note musicale, "artiste" (défaut),
@@ -144,6 +148,7 @@ func (m *Marques) normaliser() {
 	m.PersonnesRefus = nettoyerRefus(m.PersonnesRefus)
 	m.ContactsPerso = nettoyerContactsPerso(m.ContactsPerso)
 	m.StoriesOuvertes = nettoyerStoriesOuvertes(m.StoriesOuvertes)
+	m.Sourdine = nettoyerSourdine(m.Sourdine)
 	depuis := make(map[string]int64, len(m.Archives))
 	maintenant := time.Now().UnixMilli()
 	for _, id := range m.Archives {
@@ -170,7 +175,8 @@ func (m *Marques) memesListes(n *Marques) bool {
 		egales(m.OrdreServices, n.OrdreServices) &&
 		egalesPersonnes(m.Personnes, n.Personnes) && egalesRefus(m.PersonnesRefus, n.PersonnesRefus) &&
 		egalesContactsPerso(m.ContactsPerso, n.ContactsPerso) &&
-		m.Stories == n.Stories && egalesStoriesOuvertes(m.StoriesOuvertes, n.StoriesOuvertes)
+		m.Stories == n.Stories && egalesStoriesOuvertes(m.StoriesOuvertes, n.StoriesOuvertes) &&
+		egalesSourdine(m.Sourdine, n.Sourdine)
 }
 
 // cacherApresJoursMax : au-delà de dix ans, autant tout afficher.
@@ -416,7 +422,8 @@ func trameMarques(m Marques, id json.RawMessage, refus string) []byte {
 		"notes_musique": m.NotesMusique, "notes_musique_format": formatMusique(m.NotesMusiqueFormat), "notes_services": nettoyerServicesNotes(m.NotesServices),
 		"ordre_services": nettoyerOrdreServices(m.OrdreServices), "personnes": nettoyerPersonnes(m.Personnes), "personnes_refus": nettoyerRefus(m.PersonnesRefus),
 		"contacts_perso": nettoyerContactsPerso(m.ContactsPerso), "stories": m.Stories,
-		"stories_ouvertes": nettoyerStoriesOuvertes(m.StoriesOuvertes), "version": m.Version,
+		"stories_ouvertes": nettoyerStoriesOuvertes(m.StoriesOuvertes), "sourdine": nettoyerSourdine(m.Sourdine),
+		"version": m.Version,
 	}
 	if len(id) > 0 {
 		corps["id"] = id
@@ -462,6 +469,7 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		Perso    json.RawMessage    `json:"contacts_perso"`
 		Stories  *bool              `json:"stories"`
 		StoriesO json.RawMessage    `json:"stories_ouvertes"`
+		Sourdine json.RawMessage    `json:"sourdine"`
 		Version  int64              `json:"version"`
 		ID       json.RawMessage    `json:"id"`
 	}
@@ -561,6 +569,14 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 	if m, ok := lireStoriesOuvertes(d.StoriesO); ok {
 		nouv.StoriesOuvertes = unirStoriesOuvertes(m, cur.StoriesOuvertes)
 	}
+	// La sourdine : absente, null ou mal formée, rien ne change (un client
+	// d'avant la sourdine ne l'efface pas) ; présente, c'est l'objet complet
+	// (une clé absente : « Réactiver les notifications »).
+	sourdineRecue := false
+	if m, ok := lireSourdine(d.Sourdine); ok {
+		nouv.Sourdine = m
+		sourdineRecue = true
+	}
 	repondre := func(m Marques, refus string) {
 		select {
 		case c.evs <- trameMarques(m, d.ID, refus):
@@ -614,6 +630,11 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		nouv.Moods = unirMoods(nouv.Moods, cur.Moods)
 		nouv.Emojis = unirEmojis(nouv.Emojis, cur.Emojis)
 		nouv.GroupesAuto = unirGroupesAuto(nouv.GroupesAuto, cur.GroupesAuto)
+		// La sourdine d'un client en retard s'unit sans refus (les siennes
+		// gagnent) : une sourdine échue a pu disparaître des deux côtés.
+		if sourdineRecue {
+			nouv.Sourdine = unirSourdine(nouv.Sourdine, cur.Sourdine)
+		}
 	}
 	nouv.normaliser()
 	if nouv.memesListes(&cur) {
@@ -628,8 +649,8 @@ func (s *Serveur) recevoirMarques(c *Client, brute json.RawMessage) {
 		return
 	}
 	s.marques = nouv
-	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, groupes_auto %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s, notes_contacts %v, notes_services %v, ordre_services %v, personnes %d, refus %d, contacts perso %d, stories %v (ouvertes %d)",
-		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), len(nouv.GroupesAuto), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation, nouv.NotesContacts, nouv.NotesServices, nouv.OrdreServices, len(nouv.Personnes), len(nouv.PersonnesRefus), len(nouv.ContactsPerso), nouv.Stories, len(nouv.StoriesOuvertes))
+	logf("marques version %d (de %q) : head %d, favoris %d, épinglées %d, archives %d, privées %d, moods %d, emojis %d, groupes_auto %d, garder_archives %v, cacher_apres_jours %d, presence_en_ligne %v, sons_conversation %s, notes_contacts %v, notes_services %v, ordre_services %v, personnes %d, refus %d, contacts perso %d, stories %v (ouvertes %d), sourdine %d",
+		nouv.Version, c.nom, len(nouv.Head), len(nouv.Favoris), len(nouv.Epingles), len(nouv.Archives), len(nouv.Privees), len(nouv.Moods), len(nouv.Emojis), len(nouv.GroupesAuto), nouv.GarderArchives, nouv.CacherApresJours, nouv.PresenceEnLigne, nouv.SonsConversation, nouv.NotesContacts, nouv.NotesServices, nouv.OrdreServices, len(nouv.Personnes), len(nouv.PersonnesRefus), len(nouv.ContactsPerso), nouv.Stories, len(nouv.StoriesOuvertes), len(nouv.Sourdine))
 	if nouv.PresenceEnLigne != cur.PresenceEnLigne {
 		s.presenceChangee(nouv.PresenceEnLigne)
 	}

@@ -597,7 +597,7 @@ linkedingo, la bibliothèque de mautrix-linkedin ; pur Go, sans CGO) :
   `send_media`, `react` et `read` ne partent pas (`error` / ignoré). Pas
   de Sales Navigator, pas d'InMail envoyé, pas de pages d'entreprise.
 
-### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, personnes, contacts perso, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*, ordre_services, groupes_auto, stories, stories_ouvertes)
+### 5.5 Marques (Head, favoris, épinglées, archives, privées, moods, emojis rapides, personnes, contacts perso, garder_archives, cacher_apres_jours, presence_en_ligne, sons_conversation, notes_*, ordre_services, groupes_auto, stories, stories_ouvertes, sourdine)
 
 Les marques de l'utilisateur sont gardées par le serveur et partagées entre
 tous ses appareils. Ce sont cinq listes **ordonnées** d'ids de
@@ -700,6 +700,20 @@ Et des réglages (facultatifs) :
   plus `stories`.
 - `stories_ouvertes` (objet, **`{}`** par défaut) : `{id de conversation :
   heure (ms) de la story la plus récente ouverte depuis Jasette}` (§5.15).
+- `sourdine` (objet, **`{}`** par défaut) : la **sourdine** par
+  conversation, `{id de conversation : échéance}`, l'échéance en ms depuis
+  l'epoch (UTC), **`0` = « Jusqu'à ce que je la réactive »**. Posée par
+  « Mettre en sourdine » (menu « … » de la conversation, clic droit ou appui
+  long dans la liste, fiche de la personne : alors pour toutes ses
+  conversations liées), pour 1 h, 8 h, 24 h, 1 semaine ou sans fin ;
+  « Réactiver les notifications » retire la clé. Une conversation en
+  sourdine ne fait **aucune notification système** sur aucun client (pas de
+  bulle, pas de son de notification, pas de vibration, rien sur Android
+  Auto) ; dans l'app, tout reste pareil (messages, non-lus, ordre de la
+  liste, sons du fil ouvert), sauf une cloche barrée à côté de l'heure, dans
+  l'en-tête du fil et sur la fiche. Une échéance passée n'est plus en
+  sourdine : chaque client cesse de l'appliquer de lui-même, sans attendre
+  le serveur. Le serveur, lui, n'envoie aucune notification.
 
 C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 
@@ -707,7 +721,7 @@ C'est une trame à part, comme `ping` : elle ne passe pas par les ponts.
 changement, à **tous** les clients) :
 
 ```json
-{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"groupes_auto":{"72345":"codes","t:93372553":"aucun"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"ordre_services":["google","signal","messenger"],"personnes":[{"id":"p1764160000000a3f","convs":["123","m:99"],"principal":"123"}],"personnes_refus":[["i:42","m:99"]],"contacts_perso":{"123":{"nom":"Maman","photo":"/srv/jasette/media/contacts/9f3c0a.jpg"}},"version":7}}
+{"marques":{"head":["i:42"],"favoris":["123","m:99"],"epingles":[],"archives":["m:77","s:+15145551234"],"privees":["w:5551"],"moods":{"m:99":"amour"},"emojis":{"m:99":"👍"},"groupes_auto":{"72345":"codes","t:93372553":"aucun"},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"ordre_services":["google","signal","messenger"],"personnes":[{"id":"p1764160000000a3f","convs":["123","m:99"],"principal":"123"}],"personnes_refus":[["i:42","m:99"]],"contacts_perso":{"123":{"nom":"Maman","photo":"/srv/jasette/media/contacts/9f3c0a.jpg"}},"sourdine":{"m:99":0,"w:5551":1764370800000},"version":7}}
 ```
 
 `version` : incrémentée à chaque changement accepté. **0** = le serveur n'a
@@ -716,7 +730,7 @@ encore rien reçu (listes vides).
 **Client → serveur** :
 
 ```json
-{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"groupes_auto":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"ordre_services":[…],"personnes":[…],"personnes_refus":[…],"contacts_perso":{…},"version":7,"id":12}}
+{"marques":{"head":[…],"favoris":[…],"epingles":[…],"archives":[…],"privees":[…],"moods":{…},"emojis":{…},"groupes_auto":{…},"garder_archives":false,"cacher_apres_jours":0,"presence_en_ligne":true,"sons_conversation":"bulle","notes_contacts":true,"notes_musique":"","notes_musique_format":"artiste","notes_services":["tout"],"ordre_services":[…],"personnes":[…],"personnes_refus":[…],"contacts_perso":{…},"sourdine":{…},"version":7,"id":12}}
 ```
 
 - `version` : la dernière version reçue du serveur (0 si aucune).
@@ -761,6 +775,15 @@ encore rien reçu (listes vides).
   plus de 48 h (une story dure 24 h) à chaque écriture et au chargement, et
   en garde 2000 au plus (les plus récentes). Toujours envoyé (objet, jamais
   `null`).
+- `sourdine` : absent, `null` ou mal formé, rien ne change (un client d'avant
+  la sourdine ne l'efface jamais) ; présent, c'est l'objet complet (une clé
+  absente = notifications réactivées). Entrées à id vide ou démesuré (512
+  octets), à échéance négative ou **passée** retirées : le serveur **élague**
+  les échéances passées à chaque écriture, au chargement et à chaque envoi ;
+  au plus 5000 entrées (les « jusqu'à réactivation », puis les plus
+  lointaines). D'un client en retard (autre `version`), pas de refus :
+  union, ses entrées gagnent et celles du serveur qu'il n'a pas restent.
+  Toujours envoyé (objet, jamais `null`) ; absent de `marques.json` : `{}`.
 - `notes_musique` : absent ou `null`, rien ne change ; une chaîne est prise
   telle quelle (tronquée à 128 octets). Toujours envoyé ; absent de
   `marques.json` : `""`.
@@ -862,7 +885,10 @@ règle du serveur (personnes par id, celles de la copie qui passe d'abord
 gagnent ; union des refus) ; un serveur d'avant ces champs ne les envoie
 pas, et le client garde les siens pour lui. De même pour `contacts_perso`
 (union par id, celle de la copie qui passe d'abord gagne ; un serveur d'avant
-ce champ : le client garde les siens pour lui).
+ce champ : le client garde les siens pour lui). Pour `sourdine` : union par
+id, l'entrée de la copie qui passe d'abord gagne, les échéances passées
+tombent ; un serveur d'avant ce champ ne l'envoie pas, et le client garde sa
+sourdine pour lui (en mode autonome, elle reste aussi sur l'appareil).
 
 **Règle des personnes** (fiche de la personne).
 
@@ -2025,8 +2051,8 @@ contiennent jamais de jeton, de code ni de cookie.
 | S→C | `{"svc":…,"ev":{"ev":"messages",…,"cache":true}}` | copie du cache, avant la réponse du pont (§5.8) |
 | C→S | `{"rejouer":"<svc>"}` | redemander l'état d'un service |
 | ↔ | `{"ping":n}` / `{"pong":n}` | signes de vie |
-| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","groupes_auto","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","stories","stories_ouvertes","version"[,"id","refus"]}}` | rejeu, changement |
-| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","groupes_auto","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","stories","stories_ouvertes","version"[,"id"]}}` | changement local |
+| S→C | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","groupes_auto","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","stories","stories_ouvertes","sourdine","version"[,"id","refus"]}}` | rejeu, changement |
+| C→S | `{"marques":{"head","favoris","epingles","archives","privees","moods","emojis","groupes_auto","garder_archives","cacher_apres_jours","presence_en_ligne","sons_conversation","notes_contacts","notes_musique","notes_musique_format","notes_services","stories","stories_ouvertes","sourdine","version"[,"id"]}}` | changement local |
 | S→C | `{"svc":…,"ev":{"ev":"presence","item":{"conv","user","online","last_active"}}}` | présence (§5.10), aussi au rejeu |
 | S→C | `{"svc":…,"ev":{"ev":"typing","conv","on"[,"name","audio"]}}` | « en train d'écrire » (§5.11) |
 | C→S | `{"svc":…,"cmd":{"cmd":"note_set","text","audience","source"[,"req"]}}` | publier ma note (§5.12) |
