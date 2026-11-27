@@ -3698,7 +3698,7 @@ impl Jasette {
         };
         // Le cache local montre déjà une liste : la première conversation s'ouvre
         // tout de suite (ses messages en cache ; la réponse du pont s'y fusionnera).
-        if let Some(id) = jasette.boite().first().map(|c| c.id.clone()) {
+        if let Some(id) = jasette.premiere_de_boite() {
             jasette.choisir(id);
         }
         jasette.demarrer_prive();
@@ -4499,6 +4499,17 @@ impl Jasette {
         l
     }
 
+    /// La conversation à ouvrir au démarrage : la plus récente de la boîte de
+    /// réception, pas un grand espace (onglet Groupes) ni un expéditeur rangé
+    /// dans un groupe automatique (Codes, Promotions…).
+    fn premiere_de_boite(&self) -> Option<String> {
+        self.boite()
+            .into_iter()
+            .filter(|c| !hors_boite(c) && self.groupe_de(c).is_none())
+            .max_by_key(|c| c.time)
+            .map(|c| c.id.clone())
+    }
+
     /// La vue Archives : celles des services et celles de Jasette, ensemble, les plus récentes d'abord.
     fn toutes_archives(&self) -> Vec<&Conv> {
         let mut vues = HashSet::new();
@@ -4896,9 +4907,8 @@ impl Jasette {
                     } else {
                         fusion(&mut self.convs, items);
                         if self.choisie.is_none()
-                            && let Some(first) = self.boite().first()
+                            && let Some(id) = self.premiere_de_boite()
                         {
-                            let id = first.id.clone();
                             self.choisir(id);
                         }
                     }
