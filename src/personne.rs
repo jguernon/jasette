@@ -1175,6 +1175,9 @@ impl Jasette {
         Some(
             div()
                 .id("fiche-voile")
+                // Bloque la souris (et la molette) pour ce qui est derrière :
+                // seule la fiche défile.
+                .occlude()
                 .absolute()
                 .top_0()
                 .left_0()

@@ -813,6 +813,7 @@ impl Jasette {
         Some(
             div()
                 .id("mood-voile")
+                .occlude()
                 .absolute()
                 .top_0()
                 .left_0()

@@ -12987,6 +12987,7 @@ impl Jasette {
             d.child(
                 div()
                     .id("apercu")
+                    .occlude()
                     .absolute()
                     .top_0()
                     .left_0()
