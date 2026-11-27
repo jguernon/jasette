@@ -51,6 +51,9 @@ final class Depot {
     /// La sourdine (marque `sourdine`) : id → échéance (ms), 0 = sans fin.
     /// iOS n'a pas de notifications : seule la cloche barrée se montre.
     private(set) var sourdine: [String: Int64] = [:]
+    /// Le spam (marque `spam`) : ces conversations n'apparaissent pas dans la
+    /// liste (le dossier Spam est sur le bureau et Android).
+    private(set) var spam: Set<String> = []
     private(set) var marquesRecues = false
 
     /// La conversation ouverte et l'app au premier plan.
@@ -94,6 +97,7 @@ final class Depot {
         archivesJasette = []
         privees = []
         sourdine = [:]
+        spam = []
         marquesRecues = false
         ouverte = nil
     }
@@ -158,6 +162,7 @@ final class Depot {
             if let n = v as? NSNumber { s[id] = n.int64Value }
         }
         sourdine = s
+        spam = Set((m.objet("spam") ?? [:]).keys)
         marquesRecues = true
     }
 
@@ -320,7 +325,7 @@ final class Depot {
     func liste(_ f: Filtre) -> [Conv] {
         let offerts = Set(services)
         var l = convs.filter { offerts.contains($0.key.cle) }.values.flatMap { $0 }
-            .filter { !privees.contains($0.id) && !$0.archived && !archivesJasette.contains($0.id) }
+            .filter { !privees.contains($0.id) && !spam.contains($0.id) && !$0.archived && !archivesJasette.contains($0.id) }
         switch f {
         case .tout:
             l = l.filter { !$0.large }
