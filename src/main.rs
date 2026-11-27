@@ -2338,6 +2338,8 @@ struct Jasette {
     /// X : les cookies de x.com (fenêtre de connexion), en attente du code
     /// X Chat, et le champ de ce code.
     cookies_x: Option<Value>,
+    /// Messenger : la prochaine fenêtre de connexion ouvre facebook.com (« Avec Facebook »).
+    messenger_par_facebook: bool,
     code_x: Entity<InputState>,
     /// Telegram : l'étape de la connexion (« code », « password »), l'indice
     /// du mot de passe, l'application réglée (api_id, api_hash : `ev api`)
@@ -3449,6 +3451,7 @@ impl Jasette {
             ajout_service: None,
             telephone_wa,
             cookies_x: None,
+            messenger_par_facebook: false,
             code_x,
             etape_tg: None,
             indice_tg: None,
@@ -4001,6 +4004,7 @@ impl Jasette {
             Service::X => ("jasette-connexion-x.py", "--sans-code"),
             Service::Reddit => ("jasette-connexion-reddit.py", "--reddit"),
             Service::LinkedIn => ("jasette-connexion-linkedin.py", "--linkedin"),
+            _ if std::mem::take(&mut self.messenger_par_facebook) => ("jasette-connexion-meta.py", "--facebook"),
             _ => ("jasette-connexion-meta.py", "--messenger"),
         };
         let Some(script) = script_connexion_nomme(nom) else {
@@ -11784,6 +11788,29 @@ impl Jasette {
                                     cx.notify();
                                 }))
                                 .into_any_element()
+                        } else if svc == Service::Messenger {
+                            // Messenger : par messenger.com, ou par facebook.com (nécessaire
+                            // pour les stories Facebook).
+                            div()
+                                .flex()
+                                .flex_row()
+                                .gap(px(6.))
+                                .child(bouton_texte("co-messenger", t("Avec Messenger"), ACCENT).on_click(cx.listener(
+                                    |this, _, _, cx| {
+                                        this.connecter_meta(Service::Messenger);
+                                        cx.notify();
+                                    },
+                                )))
+                                .child(bouton_texte("co-messenger-fb", t("Avec Facebook"), ACCENT).on_click(cx.listener(
+                                    |this, _, _, cx| {
+                                        if !this.meta(Service::Messenger).connexion_ouverte {
+                                            this.messenger_par_facebook = true;
+                                        }
+                                        this.connecter_meta(Service::Messenger);
+                                        cx.notify();
+                                    },
+                                )))
+                                .into_any_element()
                         } else {
                             bouton_texte(SharedString::from(format!("co-{}", svc.cle())), t("Connecter"), ACCENT)
                                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -13678,6 +13705,8 @@ fn t(fr: &'static str) -> &'static str {
         "Comptes" => "Accounts",
         "Connecté" => "Connected",
         "Connecter" => "Connect",
+        "Avec Messenger" => "With Messenger",
+        "Avec Facebook" => "With Facebook",
         "Connectez-vous dans la fenêtre Google…" => "Sign in in the Google window…",
         "Connexion…" => "Connecting…",
         "Connexion annulée" => "Sign-in cancelled",
