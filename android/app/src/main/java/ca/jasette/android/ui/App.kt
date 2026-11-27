@@ -337,6 +337,8 @@ private fun Liste(
 ) {
     var reorganiser by remember { mutableStateOf(false) }
     var filtre by remember { mutableStateOf("") }
+    // Le groupe automatique ouvert (Codes, Promotions, Avis), dans la boîte de réception.
+    var groupeOuvert by remember { mutableStateOf<ca.jasette.android.GroupeAuto?>(null) }
     // La recherche, cachée au repos : on tire la liste vers le bas (depuis le haut) pour
     // la faire glisser en place, ou on touche la loupe. Voir [tirerPourChercher].
     var rechercheOuverte by remember { mutableStateOf(false) }
@@ -375,8 +377,11 @@ private fun Liste(
             if (r == androidx.compose.material3.SnackbarResult.ActionPerformed) annuler?.invoke()
         }
     }
+    // Le retour arrière referme d'abord le groupe ouvert.
+    BackHandler(enabled = groupeOuvert != null) { groupeOuvert = null }
     LaunchedEffect(vue) {
         reorganiser = false
+        groupeOuvert = null
         fermerRecherche()
         if (vue == Vue.Archives) Depot.chargerArchives()
     }
@@ -488,8 +493,22 @@ private fun Liste(
             recentes.sortedBy(rang)
         }
         val nbEpingles = if (vue == Vue.Favoris) 0 else visibles.count { rang(it) != Int.MAX_VALUE }
+        // Le regroupement automatique (RegroupementAuto.kt) : seulement la boîte de
+        // réception, sans recherche, et si au moins un groupe est coché (Réglages).
+        val regrouper = vue == Vue.Tout && f.isEmpty() && ca.jasette.android.RegroupementAuto.unActif
+        val ouvert = groupeOuvert.takeIf { regrouper }
+        val lignes: List<ca.jasette.android.LigneBoite> = when {
+            ouvert != null -> visibles.drop(nbEpingles)
+                .filter { ca.jasette.android.RegroupementAuto.groupeActif(it) == ouvert }
+                .map { ca.jasette.android.LigneBoite.Conversation(it) }
+            regrouper -> ca.jasette.android.repartir(visibles, nbEpingles, System.currentTimeMillis()) {
+                ca.jasette.android.RegroupementAuto.groupeActif(it)
+            }
+            else -> visibles.map { ca.jasette.android.LigneBoite.Conversation(it) }
+        }
+        val nbTete = if (ouvert != null) 0 else nbEpingles
         // Le Head : la grille en haut de la boîte de réception, tous ses ids (chargés ou du cache).
-        val head = if (vue == Vue.Tout && f.isEmpty()) {
+        val head = if (vue == Vue.Tout && f.isEmpty() && ouvert == null) {
             Marques.head.filter { !Marques.estPrivee(it) && !ServicesCaches.cache(Service.de(it)) }.map { convMarquee(it) }
         } else {
             emptyList()
@@ -538,7 +557,7 @@ private fun Liste(
             // restait affichée. Favoris y échappait : sa liste, plus courte que l'écran,
             // est recalée sur l'élément 0.
             if (bannieresVisibles()) item(key = "bannieres") { Bannieres { reglages(SectionReglages.COMPTES) } }
-            if (vue == Vue.Tout && accueilVisible()) item { Accueil(serveur, connecter) }
+            if (vue == Vue.Tout && ouvert == null && accueilVisible()) item { Accueil(serveur, connecter) }
             // Les puces des services (Tout, puis chacun) : la vue par service sur écran étroit
             // (sur grand écran, le rail a une tuile par service). Cachées au repos : elles
             // apparaissent avec la recherche (tirer la liste vers le bas, ou la loupe), et
@@ -548,7 +567,16 @@ private fun Liste(
             ) {
                 item(key = "puces") { PucesInbox(vue, choisirVue) }
             }
+            if (ouvert != null) {
+                item(key = "entete-groupe") {
+                    EnteteGroupe(ouvert, lignes.mapNotNull { (it as? ca.jasette.android.LigneBoite.Conversation)?.conv }) {
+                        groupeOuvert = null
+                    }
+                }
+            }
             val vide = when {
+                ouvert != null && lignes.isEmpty() -> t("Aucune conversation dans ce groupe")
+                ouvert != null -> null
                 visibles.isNotEmpty() || cachees > 0 -> null
                 f.isNotEmpty() -> t("Aucun résultat")
                 vue == Vue.Archives && Depot.archivesEnAttente -> t("Chargement des archives…")
@@ -567,12 +595,23 @@ private fun Liste(
                 item { Text(vide, color = P.textePale, modifier = Modifier.fillMaxWidth().padding(32.dp)) }
             }
             if (head.isNotEmpty()) item(key = "head") { Head(head, choisie, ouvrir, retiree) }
-            itemsIndexed(visibles, key = { _, c -> c.id }) { i, c ->
+            itemsIndexed(lignes, key = { _, l ->
+                when (l) {
+                    is ca.jasette.android.LigneBoite.Conversation -> l.conv.id
+                    is ca.jasette.android.LigneBoite.Rangee -> "groupe-auto-" + l.groupe.cle
+                }
+            }) { i, l ->
                 Column {
                     // Un peu d'air sous les épinglées.
-                    if (nbEpingles > 0 && i == nbEpingles) {
+                    if (nbTete > 0 && i == nbTete) {
                         HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), color = P.traitFin)
                     }
+                    // La rangée d'un groupe automatique : la toucher l'ouvre.
+                    if (l is ca.jasette.android.LigneBoite.Rangee) {
+                        RangeeGroupe(l.groupe, l.membres) { groupeOuvert = l.groupe }
+                        return@Column
+                    }
+                    val c = (l as ca.jasette.android.LigneBoite.Conversation).conv
                     // Glisser à droite ou à gauche (Réglages → Gestes) ; pas en mode Réorganiser.
                     RangeeGlissable(
                         c,
@@ -586,7 +625,7 @@ private fun Liste(
                         Rangee(
                             c,
                             choisie = c.id == choisie,
-                            epinglee = i < nbEpingles,
+                            epinglee = i < nbTete,
                             badge = vue !is Vue.DuService,
                             reorganiser = reorg,
                             retiree = retiree,

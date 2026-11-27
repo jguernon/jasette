@@ -30,8 +30,8 @@ object NotifAuto {
     /** Peut-on répondre depuis la notification ? Pas en lecture seule, ni dans un grand espace (§5.13). */
     fun peutRepondre(c: Conv?): Boolean = c == null || (!c.readOnly && !c.announce && !c.large)
 
-    /** Les actions de la voiture ont-elles leur place ? Jamais pour un grand espace (Canaux, §5.13). */
-    fun pourVoiture(c: Conv?): Boolean = c?.large != true
+    /** Les actions de la voiture ont-elles leur place ? Jamais pour un grand espace (Canaux, §5.13) ni une promotion regroupée. */
+    fun pourVoiture(c: Conv?): Boolean = c?.large != true && !RegroupementAuto.promo(c)
 
     private fun intention(ctx: Context, action: String, conv: String): Intent =
         Intent(ctx, AutoRecepteur::class.java)

@@ -91,8 +91,9 @@ object ConvVoiture {
 
     fun icone(ctx: Context, c: Conv): CarIcon? = image(ctx, c)?.let { CarIcon.Builder(IconCompat.createWithBitmap(it)).build() }
 
-    /** Les conversations qu'on montre dans la voiture : la boîte de réception, sans grands espaces ni privées. */
-    fun recentes(): List<Conv> = Depot.boite.filter { dansBoiteDeReception(it) }.sortedByDescending { it.time }
+    /** Les conversations qu'on montre dans la voiture : la boîte de réception, sans grands espaces, privées ni promotions regroupées. */
+    fun recentes(): List<Conv> =
+        Depot.boite.filter { dansBoiteDeReception(it) && !RegroupementAuto.promo(it) }.sortedByDescending { it.time }
 
     /** La conversation du dernier message reçu (non lue de préférence). */
     fun dernierRecu(): Conv? = recentes().let { l -> l.firstOrNull { it.unread && !it.fromMe } ?: l.firstOrNull { !it.fromMe } }

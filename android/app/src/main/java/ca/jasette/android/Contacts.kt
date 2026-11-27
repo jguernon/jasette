@@ -270,6 +270,9 @@ object Contacts {
     /** La clé d'un numéro écrit n'importe comment ; vide s'il n'y a pas assez de chiffres. */
     fun cleDe(numero: String): String = chiffres(numero).let { if (it.length < 7) "" else cle(it) }
 
+    /** [numero] est-il dans les contacts du téléphone (par ses 10 derniers chiffres) ? */
+    fun connu(numero: String): Boolean = cleDe(numero).let { it.isNotEmpty() && parCle.containsKey(it) }
+
     /**
      * La photo de contact à montrer pour [conv], ou null (on garde l'avatar habituel).
      * Google à deux : par le numéro (10 derniers chiffres). Messenger et Instagram :

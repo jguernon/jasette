@@ -109,7 +109,8 @@ fun MenuDeListe(c: Conv, ouvert: Boolean, fermer: () -> Unit, retiree: (String) 
 fun nonLus(v: Vue): Int = when (v) {
     // Les services cachés (Réglages > Comptes) ne comptent pas, sauf sur leur propre icône.
     // L'Inbox ne compte que ce qu'elle montre (pas les grands espaces gardés dans Groupes).
-    Vue.Tout -> Depot.inbox.count { it.unread && !ServicesCaches.cache(it.service) }
+    // Les promotions regroupées (RegroupementAuto.kt) ne comptent pas.
+    Vue.Tout -> Depot.inbox.count { it.unread && !ServicesCaches.cache(it.service) && !ca.jasette.android.RegroupementAuto.promo(it) }
     Vue.Favoris -> Marques.favoris.count { id ->
         !Marques.estPrivee(id) && !ServicesCaches.cache(Service.de(id)) && Depot.conv(id)?.unread == true
     }
@@ -684,6 +685,40 @@ fun MenuConversation(
                 refus, color = P.textePale, fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp).width(220.dp),
             )
+        }
+        // Le regroupement automatique (RegroupementAuto.kt), corrigé à la main : la
+        // correction gagne toujours et est partagée (marque `groupes_auto`).
+        if (ca.jasette.android.RegroupementAuto.unActif && !c.group && !c.large) {
+            val actuel = ca.jasette.android.RegroupementAuto.groupeActif(c)
+            @Composable
+            fun ItemGroupe(texte: String, emoji: String, valeur: String) {
+                DropdownMenuItem(
+                    text = { Text(texte, color = P.texteFort) },
+                    leadingIcon = { Text(emoji, fontSize = 18.sp) },
+                    onClick = {
+                        fermer()
+                        Marques.corrigerGroupe(c.id, valeur)
+                    },
+                )
+            }
+            HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = P.traitFin)
+            if (actuel != null) {
+                val pas = when (actuel) {
+                    ca.jasette.android.GroupeAuto.CODES -> t("Ce n'est pas un code")
+                    ca.jasette.android.GroupeAuto.PROMOS -> t("Ce n'est pas une promo")
+                    ca.jasette.android.GroupeAuto.AVIS -> t("Ce n'est pas un avis")
+                }
+                ItemGroupe(pas, "✋", "aucun")
+            }
+            for (g in ca.jasette.android.GroupeAuto.entries) {
+                if (g == actuel) continue
+                val texte = when (g) {
+                    ca.jasette.android.GroupeAuto.CODES -> t("Mettre dans Codes")
+                    ca.jasette.android.GroupeAuto.PROMOS -> t("Mettre dans Promotions")
+                    ca.jasette.android.GroupeAuto.AVIS -> t("Mettre dans Avis")
+                }
+                ItemGroupe(texte, g.emoji, g.cle)
+            }
         }
         HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = P.traitFin)
         Item(t("Supprimer"), Icons.Filled.Delete, couleur = P.danger, actif = supprimable) { confirmer = true }

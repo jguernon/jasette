@@ -377,6 +377,7 @@ private fun SectionComptes(connecter: (Service, String) -> Unit) {
     }
     Depot.erreur?.let { Text(it, color = P.danger, fontSize = 14.sp) }
     ServicesDansLaBoite()
+    RegrouperAutomatiquement()
 }
 
 /**
@@ -428,6 +429,45 @@ private fun ServicesDansLaBoite() {
     }
     Text(
         t("Les services décochés sont cachés de la boîte de réception, des Head et des favoris. Rien n'est oublié : recochez-les pour les retrouver."),
+        color = P.textePale, fontSize = 12.sp,
+    )
+}
+
+/**
+ * Réglages → Comptes → « Regrouper automatiquement » : trois cases (Codes,
+ * Promotions, Avis), décochées par défaut, propres à l'appareil
+ * ([ca.jasette.android.RegroupementAuto]).
+ */
+@Composable
+private fun RegrouperAutomatiquement() {
+    val ctx = LocalContext.current
+    Spacer(Modifier.height(4.dp))
+    Titre(t("Regrouper automatiquement"))
+    Groupe {
+        for ((g, texte) in listOf(
+            ca.jasette.android.GroupeAuto.CODES to t("🔐 Codes de vérification"),
+            ca.jasette.android.GroupeAuto.PROMOS to t("🏷️ Promotions"),
+            ca.jasette.android.GroupeAuto.AVIS to t("📦 Avis (livraisons, rendez-vous, banque, factures)"),
+        )) {
+            val coche = ca.jasette.android.RegroupementAuto.actif(g)
+            Row(
+                Modifier.fillMaxWidth().clickable { ca.jasette.android.RegroupementAuto.choisir(ctx, g, !coche) }
+                    .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(texte, color = P.texteFort, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                androidx.compose.material3.Checkbox(
+                    checked = coche,
+                    onCheckedChange = { ca.jasette.android.RegroupementAuto.choisir(ctx, g, it) },
+                    colors = androidx.compose.material3.CheckboxDefaults.colors(
+                        checkedColor = P.accent, uncheckedColor = P.textePale, checkmarkColor = P.surAccent,
+                    ),
+                )
+            }
+        }
+    }
+    Text(
+        t("Jasette range les expéditeurs automatiques dans une seule rangée, sur cet appareil, sans rien envoyer ailleurs. Les contacts, les favoris, les épinglées, les groupes et les conversations où vous avez écrit ne sont jamais regroupés."),
         color = P.textePale, fontSize = 12.sp,
     )
 }

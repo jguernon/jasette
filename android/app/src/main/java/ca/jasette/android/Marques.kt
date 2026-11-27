@@ -16,6 +16,9 @@ import org.json.JSONObject
 /** Un emoji rapide fait au plus 32 octets (un graphème, PROTOCOLE.md §5.5). */
 const val EMOJI_RAPIDE_MAX = 32
 
+/** Une valeur de `groupes_auto` ("codes", "promos", "avis", "aucun") : 16 octets au plus. */
+const val GROUPE_AUTO_MAX = 16
+
 /**
  * Les crans du curseur « Cacher les conversations plus anciennes de la boîte de
  * réception », en jours : tout afficher, 7, 15, 30, 60, 90 jours, 6 mois, 1 an
@@ -89,6 +92,12 @@ object Marques {
      * comme les moods (champ `emojis` des marques, §5.5), en EGA aussi.
      */
     val emojis: SnapshotStateMap<String, String> = mutableStateMapOf()
+    /**
+     * Le regroupement automatique corrigé à la main (GroupesAuto.kt) : id
+     * préfixé → "codes", "promos", "avis" ou "aucun". Gagne toujours sur la
+     * détection ; partagé comme les emojis rapides (champ `groupes_auto`, §5.5).
+     */
+    val groupesAuto: SnapshotStateMap<String, String> = mutableStateMapOf()
     /**
      * Depuis quand (ms, horloge du téléphone) chaque id est dans [archives], ici :
      * seul un message reçu après cette heure la désarchive (pas une réaction
@@ -368,6 +377,8 @@ object Marques {
         moods.putAll(lireMoods(p.getString("moods", "{}") ?: "{}"))
         emojis.clear()
         emojis.putAll(lireObjet("emojis", p.getString("emojis", "{}") ?: "{}", EMOJI_RAPIDE_MAX))
+        groupesAuto.clear()
+        groupesAuto.putAll(lireObjet("groupes_auto", p.getString("groupes_auto", "{}") ?: "{}", GROUPE_AUTO_MAX))
         garderArchives = p.getBoolean("garder_archives", false)
         cacherApresJours = bornerJours(p.getInt("cacher_apres_jours", 0))
         presenceEnLigne = p.getBoolean("presence_en_ligne", true)
@@ -462,6 +473,7 @@ object Marques {
             ?.putString("privees", JSONArray(privees.toList()).toString())
             ?.putString("moods", JSONObject(moods.toMap()).toString())
             ?.putString("emojis", JSONObject(emojis.toMap()).toString())
+            ?.putString("groupes_auto", JSONObject(groupesAuto.toMap()).toString())
             ?.putBoolean("garder_archives", garderArchives)
             ?.putInt("cacher_apres_jours", cacherApresJours)
             ?.putBoolean("presence_en_ligne", presenceEnLigne)
@@ -505,6 +517,16 @@ object Marques {
         val e = emoji?.takeIf { it.isNotEmpty() && it.toByteArray().size <= EMOJI_RAPIDE_MAX }
         if (emojis[id] == e) return
         if (e == null) emojis.remove(id) else emojis[id] = e
+        changement()
+    }
+
+    /** La correction à la main du regroupement automatique de [id] ("codes", "promos", "avis", "aucun"), ou null. */
+    fun groupeAuto(id: String): String? = groupesAuto[id]
+
+    /** Corrige à la main le groupe de [id] : « Mettre dans … » ou "aucun" (« Ce n'est pas … »). */
+    fun corrigerGroupe(id: String, valeur: String) {
+        if (lireCorrection(valeur) == null || groupesAuto[id] == valeur) return
+        groupesAuto[id] = valeur
         changement()
     }
 
@@ -587,8 +609,9 @@ object Marques {
         val e = privees.remove(id)
         val f = moods.remove(id) != null
         val g = emojis.remove(id) != null
+        val h = groupesAuto.remove(id) != null
         if (d) majDepuis()
-        if (a || b || c || d || e || f || g) changement()
+        if (a || b || c || d || e || f || g || h) changement()
     }
 
     // ---- La synchronisation avec le serveur Jasette (§5.5) ----
@@ -614,11 +637,12 @@ object Marques {
         val personnesRefus: List<Refus> = emptyList(),
         val contactsPerso: Map<String, ContactPerso> = emptyMap(),
         val ordreServices: List<String> = emptyList(),
+        val groupesAuto: Map<String, String> = emptyMap(),
     ) {
         fun vide() = head.isEmpty() && favoris.isEmpty() && epingles.isEmpty() && archives.isEmpty() && privees.isEmpty() &&
             moods.isEmpty() && emojis.isEmpty() && !garderArchives && cacherApresJours == 0 && presenceEnLigne &&
             sons == "bulle" && notesContacts && notesMusique.isEmpty() && notesMusiqueFormat == "artiste" && notesServices == listOf("tout") &&
-            personnes.isEmpty() && personnesRefus.isEmpty() && contactsPerso.isEmpty() && ordreServices.isEmpty()
+            personnes.isEmpty() && personnesRefus.isEmpty() && contactsPerso.isEmpty() && ordreServices.isEmpty() && groupesAuto.isEmpty()
 
         /** Chaque liste de this, dans son ordre, puis les ids de [b] qui n'y sont pas. */
         fun union(b: Listes) = Listes(
@@ -648,6 +672,8 @@ object Marques {
             ContactsPerso.nettoyer(b.contactsPerso + contactsPerso),
             // L'ordre des services : celui de this ; vide (jamais choisi), celui de [b].
             ordreServices.ifEmpty { b.ordreServices },
+            // Les corrections du regroupement : comme les emojis, les nôtres gagnent.
+            b.groupesAuto + groupesAuto,
         )
 
         /** Les ids de this absents de [b], liste par liste. */
@@ -668,6 +694,7 @@ object Marques {
             personnesRefus.filter { it !in b.personnesRefus },
             contactsPerso.filter { (k, v) -> b.contactsPerso[k] != v },
             ordreServices,
+            groupesAuto.filter { (k, v) -> b.groupesAuto[k] != v },
         )
     }
 
@@ -676,7 +703,7 @@ object Marques {
             head.toList(), favoris.toList(), epingles.toList(), archives.toList(), privees.toList(), moods.toMap(), emojis.toMap(),
             garderArchives, cacherApresJours, presenceEnLigne, sonsConversation,
             notesContacts, notesMusique, notesMusiqueFormat, notesServices,
-            personnes, personnesRefus, contactsPerso, ordreServices,
+            personnes, personnesRefus, contactsPerso, ordreServices, groupesAuto.toMap(),
         )
 
     private fun poser(l: Listes) {
@@ -691,6 +718,7 @@ object Marques {
         }
         if (moods.toMap() != l.moods) { moods.clear(); moods.putAll(l.moods) }
         if (emojis.toMap() != l.emojis) { emojis.clear(); emojis.putAll(l.emojis) }
+        if (groupesAuto.toMap() != l.groupesAuto) { groupesAuto.clear(); groupesAuto.putAll(l.groupesAuto) }
         garderArchives = l.garderArchives
         cacherApresJours = l.cacherApresJours
         if (presenceEnLigne != l.presenceEnLigne) {
@@ -759,6 +787,7 @@ object Marques {
             .put("personnes_refus", Personnes.jsonRefus(l.personnesRefus))
             .put("contacts_perso", ContactsPerso.json(l.contactsPerso))
             .put("ordre_services", JSONArray(l.ordreServices))
+            .put("groupes_auto", JSONObject(l.groupesAuto))
             .put("version", version).put("id", prochain)
         if (!envoi(JSONObject().put("marques", corps))) {
             // La connexion tombe : le rejeu suivant tranchera.
@@ -811,6 +840,8 @@ object Marques {
             m.optJSONObject("contacts_perso")?.let { ContactsPerso.lire(it) } ?: contactsPerso,
             // Et pour l'ordre des services (serveur d'avant `ordre_services`) : le nôtre reste.
             m.optJSONArray("ordre_services")?.let { nettoyerOrdreServices(it.chaines()) } ?: ordreServices,
+            // Et pour le regroupement automatique (serveur d'avant `groupes_auto`) : les nôtres restent.
+            m.optJSONObject("groupes_auto")?.let { objetMoods(it, GROUPE_AUTO_MAX) } ?: groupesAuto.toMap(),
         )
         val v = m.optLong("version", -1)
         if (v < 0) return

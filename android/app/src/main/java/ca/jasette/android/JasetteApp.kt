@@ -9,6 +9,7 @@ class JasetteApp : Application() {
         Langue.charger(this)
         Raccourcis.initialiser(this)
         Marques.charger(this)
+        RegroupementAuto.charger(this)
         Notes.charger(this)
         Musique.charger(this)
         Prive.charger(this)

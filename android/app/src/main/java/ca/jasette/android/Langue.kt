@@ -729,6 +729,25 @@ private val ANGLAIS: Map<String, String> = mapOf(
     "Envoi aux groupes : pas encore en mode SMS" to "Sending to groups: not yet in SMS mode",
     "SMS non envoyé" to "SMS not sent",
     "Impossible d'ouvrir cette conversation SMS" to "Couldn't open this SMS conversation",
+    // Le regroupement automatique (RegroupementAuto.kt, ui/GroupesAutoUi.kt).
+    "Regrouper automatiquement" to "Group automatically",
+    "Jasette range les expéditeurs automatiques dans une seule rangée, sur cet appareil, sans rien envoyer ailleurs. Les contacts, les favoris, les épinglées, les groupes et les conversations où vous avez écrit ne sont jamais regroupés." to
+        "Jasette puts automated senders into a single row, on this device, without sending anything anywhere. Contacts, favorites, pinned conversations, groups and conversations you wrote in are never grouped.",
+    "🔐 Codes de vérification" to "🔐 Verification codes",
+    "🏷️ Promotions" to "🏷️ Promotions",
+    "📦 Avis (livraisons, rendez-vous, banque, factures)" to "📦 Notices (deliveries, appointments, bank, bills)",
+    "Codes" to "Codes",
+    "Promotions" to "Promotions",
+    "Avis" to "Notices",
+    "nouveau" to "new",
+    "nouveaux" to "new",
+    "Aucune conversation dans ce groupe" to "No conversations in this group",
+    "Ce n'est pas un code" to "Not a code",
+    "Ce n'est pas une promo" to "Not a promotion",
+    "Ce n'est pas un avis" to "Not a notice",
+    "Mettre dans Codes" to "Move to Codes",
+    "Mettre dans Promotions" to "Move to Promotions",
+    "Mettre dans Avis" to "Move to Notices",
 )
 
 
