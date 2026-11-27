@@ -89,6 +89,11 @@ func isXErr(err error, names ...string) bool {
 }
 
 // rawCall : un appel XRPC sans gestion de session. body nil = GET.
+// sansCorps : un POST sans corps du tout (refreshSession, deleteSession). Le
+// PDS refuse « {} » sur ces procédures : « A request body was provided when
+// none was expected » (400 InvalidRequest).
+type sansCorps struct{}
+
 func rawCall(ctx context.Context, host, nsid string, params url.Values, body any, token, proxy string, out any) error {
 	u := strings.TrimRight(host, "/") + "/xrpc/" + nsid
 	if len(params) > 0 {
@@ -96,7 +101,10 @@ func rawCall(ctx context.Context, host, nsid string, params url.Values, body any
 	}
 	method := http.MethodGet
 	var rd io.Reader
-	if body != nil {
+	_, vide := body.(sansCorps)
+	if vide {
+		method = http.MethodPost
+	} else if body != nil {
 		method = http.MethodPost
 		b, err := json.Marshal(body)
 		if err != nil {
@@ -109,7 +117,7 @@ func rawCall(ctx context.Context, host, nsid string, params url.Values, body any
 		return err
 	}
 	req.Header.Set("User-Agent", "Jasette")
-	if body != nil {
+	if body != nil && !vide {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if token != "" {
@@ -180,7 +188,7 @@ func (a *auth) refresh(ctx context.Context) error {
 		Handle  string `json:"handle"`
 		DID     string `json:"did"`
 	}
-	err := rawCall(ctx, a.sess.PDS, "com.atproto.server.refreshSession", nil, struct{}{}, a.sess.Refresh, "", &r)
+	err := rawCall(ctx, a.sess.PDS, "com.atproto.server.refreshSession", nil, sansCorps{}, a.sess.Refresh, "", &r)
 	if err != nil {
 		var x *xrpcErr
 		if errors.As(err, &x) && (x.Status == 400 || x.Status == 401) {

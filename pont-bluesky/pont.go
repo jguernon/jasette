@@ -252,7 +252,7 @@ func (p *Pont) login(ident, password string) {
 	if err := rawCall(ctx, s.PDS, "chat.bsky.convo.listConvos", url.Values{"limit": {"1"}}, nil, s.Access, chatProxy, &probe); err != nil {
 		if isScopeErr(err) || isXErr(err, "InvalidToken", "AuthMissing") {
 			err = errScope
-			_ = rawCall(ctx, s.PDS, "com.atproto.server.deleteSession", nil, struct{}{}, s.Refresh, "", nil)
+			_ = rawCall(ctx, s.PDS, "com.atproto.server.deleteSession", nil, sansCorps{}, s.Refresh, "", nil)
 		}
 		emitErr("login", err)
 		if p.a.get() == nil {
@@ -281,7 +281,7 @@ func (p *Pont) login(ident, password string) {
 func (p *Pont) unpair() {
 	if s := p.a.get(); s != nil {
 		ctx, annule := context.WithTimeout(p.ctx, 15*time.Second)
-		_ = rawCall(ctx, s.PDS, "com.atproto.server.deleteSession", nil, struct{}{}, s.Refresh, "", nil)
+		_ = rawCall(ctx, s.PDS, "com.atproto.server.deleteSession", nil, sansCorps{}, s.Refresh, "", nil)
 		annule()
 	}
 	p.a.set(nil)
