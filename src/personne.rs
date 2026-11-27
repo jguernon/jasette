@@ -52,6 +52,17 @@ pub(crate) fn e164(s: &str) -> Option<String> {
     })
 }
 
+/// Un numéro E.164 à lire : `+14185551234` → `+1 418-555-1234` (Amérique
+/// du Nord) ; les autres pays restent tels quels.
+pub(crate) fn numero_lisible(e164: &str) -> String {
+    let c: String = e164.chars().filter(char::is_ascii_digit).collect();
+    if c.len() == 11 && c.starts_with('1') {
+        format!("+1 {}-{}-{}", &c[1..4], &c[4..7], &c[7..])
+    } else {
+        e164.to_string()
+    }
+}
+
 /// La clé de comparaison d'un numéro : son E.164.
 pub(crate) fn cle_tel(s: &str) -> Option<String> {
     e164(s)
@@ -1106,6 +1117,42 @@ impl Jasette {
             );
         }
 
+        // Les numéros de téléphone (très utile) : « +1 418-555-1234 sur Google
+        // Messages, WhatsApp », un par numéro distinct.
+        let mut numeros: Vec<(String, Vec<Service>)> = Vec::new();
+        for (id, _) in &groupe.membres {
+            let Some(c) = self.conv(id) else { continue };
+            if c.group {
+                continue;
+            }
+            let Some(n) = numero_de(&c.id, &c.number, c.members.first().map(String::as_str), &c.name) else { continue };
+            let svc = service_de(id);
+            match numeros.iter_mut().find(|(x, _)| *x == n) {
+                Some((_, l)) => {
+                    if !l.contains(&svc) {
+                        l.push(svc);
+                    }
+                }
+                None => numeros.push((n, vec![svc])),
+            }
+        }
+        for (n, svcs) in numeros {
+            let noms = svcs.iter().map(|s| s.nom()).collect::<Vec<_>>().join(", ");
+            let joli = numero_lisible(&n);
+            haut = haut.child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(6.))
+                    .text_size(px(13.))
+                    .text_color(th().texte_pale)
+                    .child(icone("phone", 14., th().texte_pale))
+                    .child(div().text_color(th().texte).font_weight(FontWeight::SEMIBOLD).child(joli))
+                    .child(if anglais() { format!("on {noms}") } else { format!("sur {noms}") }),
+            );
+        }
+
         let corps = if f.lier { self.fiche_choix_lier(&groupe, cx) } else { self.fiche_lignes(&groupe, &nom, cx) };
 
         let feuille = verre(0.97, 26.)
@@ -1550,6 +1597,8 @@ mod essais {
         }
         assert_eq!(e164("+33 6 12 34 56 78").as_deref(), Some("+33612345678"));
         assert_eq!(e164("555-12"), None);
+        assert_eq!(numero_lisible("+14185551234"), "+1 418-555-1234");
+        assert_eq!(numero_lisible("+33612345678"), "+33612345678");
         assert_eq!(e164("Mon Amour"), None);
         assert_eq!(e164("32665"), None);
     }
