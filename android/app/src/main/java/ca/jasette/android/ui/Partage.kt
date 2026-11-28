@@ -405,6 +405,8 @@ private fun Champ(
             if (texte.isEmpty()) Text(indice, color = P.textePale, fontSize = 15.sp, maxLines = 1)
             BasicTextField(
                 texte, changer, singleLine = lignes == 1, maxLines = lignes,
+                // Une majuscule au début des phrases, comme les autres messageries.
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences),
                 textStyle = TextStyle(color = P.texteFort, fontSize = 15.sp, fontFamily = P.police),
                 cursorBrush = SolidColor(P.accent),
                 modifier = Modifier.fillMaxWidth(),

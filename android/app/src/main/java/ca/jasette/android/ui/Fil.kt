@@ -1207,6 +1207,8 @@ private fun Saisie(conv: String, actif: Boolean) {
                     }
                     BasicTextField(
                         texte, { texte = it },
+                        // Une majuscule au début des phrases, comme les autres messageries.
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences),
                         enabled = actif,
                         textStyle = TextStyle(color = P.texteFort, fontSize = 16.sp, fontFamily = P.police),
                         cursorBrush = SolidColor(P.accent),
